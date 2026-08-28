@@ -23,6 +23,7 @@ apps/worker     Hono service and webhook boundary on Cloudflare Workers
 packages/config Typed bootstrap configuration
 packages/domain Domain contracts, capabilities, and policy
 packages/db     PostgreSQL/Drizzle provider boundary
+packages/email  Provider-neutral transactional email boundary
 packages/ui     Shared shadcn configuration and UI source
 ```
 
@@ -30,9 +31,17 @@ packages/ui     Shared shadcn configuration and UI source
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm migration:check
 pnpm typecheck
 pnpm test
 pnpm build
 ```
 
 Copy `.env.example` to a local, ignored environment file only when exercising provider-backed features. Never commit credentials.
+
+With a disposable PostgreSQL database configured, validate the executable migration path with:
+
+```bash
+pnpm db:migrate
+pnpm migration:verify
+```

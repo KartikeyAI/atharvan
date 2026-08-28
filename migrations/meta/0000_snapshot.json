@@ -1,0 +1,957 @@
+{
+  "id": "e8969ebe-95f8-4a8d-affe-6ec0b8dd6082",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.allowed_email_domains": {
+      "name": "allowed_email_domains",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "include_subdomains": {
+          "name": "include_subdomains",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_public_domain_exception": {
+          "name": "is_public_domain_exception",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_operator_id": {
+          "name": "created_by_operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "disabled_by_operator_id": {
+          "name": "disabled_by_operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "disabled_at": {
+          "name": "disabled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "allowed_email_domains_domain_unique": {
+          "name": "allowed_email_domains_domain_unique",
+          "columns": [
+            {
+              "expression": "domain",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "allowed_email_domains_created_by_idx": {
+          "name": "allowed_email_domains_created_by_idx",
+          "columns": [
+            {
+              "expression": "created_by_operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "allowed_email_domains_disabled_by_idx": {
+          "name": "allowed_email_domains_disabled_by_idx",
+          "columns": [
+            {
+              "expression": "disabled_by_operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"allowed_email_domains\".\"disabled_by_operator_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "allowed_email_domains_created_by_operator_id_operators_id_fk": {
+          "name": "allowed_email_domains_created_by_operator_id_operators_id_fk",
+          "tableFrom": "allowed_email_domains",
+          "tableTo": "operators",
+          "columnsFrom": ["created_by_operator_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "allowed_email_domains_disabled_by_operator_id_operators_id_fk": {
+          "name": "allowed_email_domains_disabled_by_operator_id_operators_id_fk",
+          "tableFrom": "allowed_email_domains",
+          "tableTo": "operators",
+          "columnsFrom": ["disabled_by_operator_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "allowed_email_domains_normalized": {
+          "name": "allowed_email_domains_normalized",
+          "value": "\"allowed_email_domains\".\"domain\" = lower(\"allowed_email_domains\".\"domain\")"
+        },
+        "allowed_email_domains_disable_metadata": {
+          "name": "allowed_email_domains_disable_metadata",
+          "value": "(\"allowed_email_domains\".\"is_active\" AND \"allowed_email_domains\".\"disabled_at\" IS NULL AND \"allowed_email_domains\".\"disabled_by_operator_id\" IS NULL) OR (NOT \"allowed_email_domains\".\"is_active\" AND \"allowed_email_domains\".\"disabled_at\" IS NOT NULL AND \"allowed_email_domains\".\"disabled_by_operator_id\" IS NOT NULL)"
+        },
+        "allowed_email_domains_shape": {
+          "name": "allowed_email_domains_shape",
+          "value": "position('.' in \"allowed_email_domains\".\"domain\") > 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.audit_events": {
+      "name": "audit_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "audit_events_actor_idx": {
+          "name": "audit_events_actor_idx",
+          "columns": [
+            {
+              "expression": "actor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"audit_events\".\"actor_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_events_target_idx": {
+          "name": "audit_events_target_idx",
+          "columns": [
+            {
+              "expression": "target_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "target_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_events_correlation_idx": {
+          "name": "audit_events_correlation_idx",
+          "columns": [
+            {
+              "expression": "correlation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_events_occurred_at_idx": {
+          "name": "audit_events_occurred_at_idx",
+          "columns": [
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "audit_events_actor_id_operators_id_fk": {
+          "name": "audit_events_actor_id_operators_id_fk",
+          "tableFrom": "audit_events",
+          "tableTo": "operators",
+          "columnsFrom": ["actor_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.operator_invitations": {
+      "name": "operator_invitations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_domain": {
+          "name": "email_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intended_capabilities": {
+          "name": "intended_capabilities",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "ARRAY[]::text[]"
+        },
+        "invited_by_operator_id": {
+          "name": "invited_by_operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "operator_invitation_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "token_fingerprint": {
+          "name": "token_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approval_reference": {
+          "name": "approval_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "operator_invitations_token_fingerprint_unique": {
+          "name": "operator_invitations_token_fingerprint_unique",
+          "columns": [
+            {
+              "expression": "token_fingerprint",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_invitations_operator_idx": {
+          "name": "operator_invitations_operator_idx",
+          "columns": [
+            {
+              "expression": "operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_invitations_inviter_idx": {
+          "name": "operator_invitations_inviter_idx",
+          "columns": [
+            {
+              "expression": "invited_by_operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_invitations_correlation_idx": {
+          "name": "operator_invitations_correlation_idx",
+          "columns": [
+            {
+              "expression": "correlation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_invitations_pending_email_idx": {
+          "name": "operator_invitations_pending_email_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"operator_invitations\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_invitations_one_pending_per_operator": {
+          "name": "operator_invitations_one_pending_per_operator",
+          "columns": [
+            {
+              "expression": "operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"operator_invitations\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "operator_invitations_operator_id_operators_id_fk": {
+          "name": "operator_invitations_operator_id_operators_id_fk",
+          "tableFrom": "operator_invitations",
+          "tableTo": "operators",
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "operator_invitations_invited_by_operator_id_operators_id_fk": {
+          "name": "operator_invitations_invited_by_operator_id_operators_id_fk",
+          "tableFrom": "operator_invitations",
+          "tableTo": "operators",
+          "columnsFrom": ["invited_by_operator_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "operator_invitations_email_normalized": {
+          "name": "operator_invitations_email_normalized",
+          "value": "\"operator_invitations\".\"email\" = lower(\"operator_invitations\".\"email\")"
+        },
+        "operator_invitations_email_shape": {
+          "name": "operator_invitations_email_shape",
+          "value": "\"operator_invitations\".\"email\" ~ '^[^@]+@[^@]+$'"
+        },
+        "operator_invitations_email_domain_matches": {
+          "name": "operator_invitations_email_domain_matches",
+          "value": "\"operator_invitations\".\"email_domain\" = split_part(\"operator_invitations\".\"email\", '@', 2)"
+        },
+        "operator_invitations_expiry_after_creation": {
+          "name": "operator_invitations_expiry_after_creation",
+          "value": "\"operator_invitations\".\"expires_at\" > \"operator_invitations\".\"created_at\""
+        },
+        "operator_invitations_terminal_metadata": {
+          "name": "operator_invitations_terminal_metadata",
+          "value": "(\"operator_invitations\".\"status\" <> 'accepted' OR \"operator_invitations\".\"accepted_at\" IS NOT NULL) AND (\"operator_invitations\".\"status\" <> 'revoked' OR \"operator_invitations\".\"revoked_at\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.operator_verification_challenges": {
+      "name": "operator_verification_challenges",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invitation_id": {
+          "name": "invitation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "verification_challenge_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "code_digest": {
+          "name": "code_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "maximum_attempts": {
+          "name": "maximum_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 5
+        },
+        "resend_sequence": {
+          "name": "resend_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "delivery_provider_message_id": {
+          "name": "delivery_provider_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "operator_verification_challenges_operator_idx": {
+          "name": "operator_verification_challenges_operator_idx",
+          "columns": [
+            {
+              "expression": "operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_verification_challenges_invitation_idx": {
+          "name": "operator_verification_challenges_invitation_idx",
+          "columns": [
+            {
+              "expression": "invitation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_verification_challenges_pending_expiry_idx": {
+          "name": "operator_verification_challenges_pending_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"operator_verification_challenges\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operator_verification_challenges_one_pending_per_operator": {
+          "name": "operator_verification_challenges_one_pending_per_operator",
+          "columns": [
+            {
+              "expression": "operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"operator_verification_challenges\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "operator_verification_challenges_operator_id_operators_id_fk": {
+          "name": "operator_verification_challenges_operator_id_operators_id_fk",
+          "tableFrom": "operator_verification_challenges",
+          "tableTo": "operators",
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "operator_verification_challenges_invitation_id_operator_invitations_id_fk": {
+          "name": "operator_verification_challenges_invitation_id_operator_invitations_id_fk",
+          "tableFrom": "operator_verification_challenges",
+          "tableTo": "operator_invitations",
+          "columnsFrom": ["invitation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "operator_verification_challenges_attempt_bounds": {
+          "name": "operator_verification_challenges_attempt_bounds",
+          "value": "\"operator_verification_challenges\".\"attempt_count\" >= 0 AND \"operator_verification_challenges\".\"maximum_attempts\" BETWEEN 1 AND 10 AND \"operator_verification_challenges\".\"attempt_count\" <= \"operator_verification_challenges\".\"maximum_attempts\""
+        },
+        "operator_verification_challenges_resend_nonnegative": {
+          "name": "operator_verification_challenges_resend_nonnegative",
+          "value": "\"operator_verification_challenges\".\"resend_sequence\" >= 0"
+        },
+        "operator_verification_challenges_expiry_after_creation": {
+          "name": "operator_verification_challenges_expiry_after_creation",
+          "value": "\"operator_verification_challenges\".\"expires_at\" > \"operator_verification_challenges\".\"created_at\""
+        },
+        "operator_verification_challenges_consumed_metadata": {
+          "name": "operator_verification_challenges_consumed_metadata",
+          "value": "\"operator_verification_challenges\".\"status\" <> 'consumed' OR \"operator_verification_challenges\".\"consumed_at\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.operators": {
+      "name": "operators",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_domain": {
+          "name": "email_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "operator_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'invited'"
+        },
+        "is_super_administrator": {
+          "name": "is_super_administrator",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "invited_at": {
+          "name": "invited_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "activated_at": {
+          "name": "activated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_at": {
+          "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deactivated_at": {
+          "name": "deactivated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "operators_email_unique": {
+          "name": "operators_email_unique",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operators_email_domain_idx": {
+          "name": "operators_email_domain_idx",
+          "columns": [
+            {
+              "expression": "email_domain",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operators_single_super_administrator": {
+          "name": "operators_single_super_administrator",
+          "columns": [
+            {
+              "expression": "is_super_administrator",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"operators\".\"is_super_administrator\" = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "operators_email_normalized": {
+          "name": "operators_email_normalized",
+          "value": "\"operators\".\"email\" = lower(\"operators\".\"email\")"
+        },
+        "operators_email_shape": {
+          "name": "operators_email_shape",
+          "value": "\"operators\".\"email\" ~ '^[^@]+@[^@]+$'"
+        },
+        "operators_email_domain_normalized": {
+          "name": "operators_email_domain_normalized",
+          "value": "\"operators\".\"email_domain\" = lower(\"operators\".\"email_domain\")"
+        },
+        "operators_email_domain_matches": {
+          "name": "operators_email_domain_matches",
+          "value": "\"operators\".\"email_domain\" = split_part(\"operators\".\"email\", '@', 2)"
+        },
+        "operators_active_has_activation_time": {
+          "name": "operators_active_has_activation_time",
+          "value": "\"operators\".\"status\" <> 'active' OR \"operators\".\"activated_at\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.operator_invitation_status": {
+      "name": "operator_invitation_status",
+      "schema": "public",
+      "values": ["pending", "accepted", "expired", "revoked"]
+    },
+    "public.operator_status": {
+      "name": "operator_status",
+      "schema": "public",
+      "values": [
+        "invited",
+        "verification_pending",
+        "active",
+        "suspended",
+        "deactivated"
+      ]
+    },
+    "public.verification_challenge_status": {
+      "name": "verification_challenge_status",
+      "schema": "public",
+      "values": ["pending", "consumed", "expired", "locked", "superseded"]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

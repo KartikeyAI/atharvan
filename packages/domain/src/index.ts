@@ -27,3 +27,5 @@ export function platformWildcardMatches(capability: string): boolean {
     !isCustomerPrivateCapability(capability)
   );
 }
+
+export * from "./operator-onboarding";

@@ -9,14 +9,22 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "migration:check": "drizzle-kit check --config drizzle.config.ts",
+    "migration:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "migration:verify": "tsx src/verify-migration.ts",
+    "migrate": "tsx src/migrate.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@neondatabase/serverless": "1.1.0",
-    "drizzle-orm": "0.45.2"
+    "drizzle-orm": "0.45.2",
+    "pg": "8.23.0"
   },
   "devDependencies": {
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.10",
+    "tsx": "4.23.12",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

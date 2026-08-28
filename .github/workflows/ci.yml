@@ -16,6 +16,20 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: atharvan_ci
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d atharvan_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +48,19 @@ jobs:
 
       - name: Check formatting
         run: pnpm format:check
+
+      - name: Check migration history
+        run: pnpm migration:check
+
+      - name: Migrate a clean PostgreSQL database
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/atharvan_ci
+
+      - name: Verify migrated contracts
+        run: pnpm migration:verify
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/atharvan_ci
 
       - name: Type-check
         run: pnpm typecheck
