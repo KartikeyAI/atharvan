@@ -22,6 +22,7 @@ apps/console    TanStack Start operator console
 apps/worker     Hono service and webhook boundary on Cloudflare Workers
 packages/config Typed bootstrap configuration
 packages/domain Domain contracts, capabilities, and policy
+packages/auth   Operator onboarding application commands and persistence ports
 packages/db     PostgreSQL/Drizzle provider boundary
 packages/email  Provider-neutral transactional email boundary
 packages/ui     Shared shadcn configuration and UI source

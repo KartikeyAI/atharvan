@@ -79,6 +79,10 @@ export const operators = pgTable(
       "operators_active_has_activation_time",
       sql`${table.status} <> 'active' OR ${table.activatedAt} IS NOT NULL`,
     ),
+    check(
+      "operators_super_administrator_must_be_active",
+      sql`NOT ${table.isSuperAdministrator} OR ${table.status} = 'active'`,
+    ),
   ],
 );
 
@@ -208,6 +212,7 @@ export const operatorVerificationChallenges = pgTable(
     attemptCount: integer("attempt_count").notNull().default(0),
     maximumAttempts: integer("maximum_attempts").notNull().default(5),
     resendSequence: integer("resend_sequence").notNull().default(0),
+    correlationId: uuid("correlation_id").notNull(),
     deliveryProviderMessageId: text("delivery_provider_message_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
@@ -220,6 +225,9 @@ export const operatorVerificationChallenges = pgTable(
     index("operator_verification_challenges_operator_idx").on(table.operatorId),
     index("operator_verification_challenges_invitation_idx").on(
       table.invitationId,
+    ),
+    index("operator_verification_challenges_correlation_idx").on(
+      table.correlationId,
     ),
     index("operator_verification_challenges_pending_expiry_idx")
       .on(table.expiresAt)

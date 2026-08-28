@@ -18,7 +18,7 @@ An item may be marked complete only when its implementation, tests, operational 
 
 - GitHub Actions currently fails the `validate` job before assigning a runner or executing any steps. Repository/organisation Actions availability or billing must be restored before remote CI and deployment can run.
 - After Actions can allocate a runner, the GitHub `development` environment must expose `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; the workflow has not reached the deployment steps yet, so those credentials remain unverified.
-- The provider-backed onboarding path still requires `DATABASE_URL`, `BETTER_AUTH_SECRET`, `ATHARVAN_VERIFICATION_HMAC_SECRET`, `ATHARVAN_SUPER_ADMIN_EMAIL`, and the first transactional-email provider adapter/configuration.
+- Executing the provider-backed onboarding path still requires `DATABASE_URL`, `BETTER_AUTH_SECRET`, `ATHARVAN_VERIFICATION_HMAC_SECRET`, `ATHARVAN_SUPER_ADMIN_EMAIL`, and the first transactional-email provider adapter/configuration. The application commands and PostgreSQL adapter are implemented but have not been exercised against the live Neon database.
 - Rendered browser sign-off is pending: the hosted browser cannot open the local loopback preview, and the fallback Chromium download timed out. Source validation and production builds are unaffected.
 
 ## Phase 0 — Product and repository foundation
@@ -51,12 +51,12 @@ An item may be marked complete only when its implementation, tests, operational 
 - [~] Implement the singleton Super Administrator invariant and `platform:*` authority.
 - [~] Enforce hard customer-private data denies outside the platform wildcard namespace.
 - [ ] Implement capability-based permissions and default role bundles.
-- [ ] Enforce server-side authorisation on every operator command.
+- [~] Enforce server-side authorisation on every operator command.
 - [~] Implement organisation email-domain allowlist administration.
 - [~] Reject invitations and activation when the email domain is not allowed.
 - [~] Implement invited-to-active first-login email verification code flow.
 - [ ] Add mandatory strong MFA/passkey policy.
-- [ ] Add step-up authentication for sensitive actions.
+- [~] Add step-up authentication for sensitive actions.
 - [ ] Add break-glass grant lifecycle with expiry and review.
 
 ### Configuration and secrets
@@ -70,8 +70,8 @@ An item may be marked complete only when its implementation, tests, operational 
 ### Audit and command foundation
 
 - [ ] Implement named/versioned command envelope.
-- [ ] Implement immutable operator audit events.
-- [ ] Add reason, correlation, approval, and evidence fields.
+- [~] Implement immutable operator audit events.
+- [~] Add reason, correlation, approval, and evidence fields.
 - [ ] Add audit search and export.
 - [ ] Verify audit coverage for all Phase 1 mutations.
 
@@ -217,10 +217,11 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ## Work log
 
-| Date       | Work completed                                                                                                                   | Verification                                                                                 | Commit/PR                                  |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| 2026-08-28 | Drafted, approved, and committed the initial source-of-truth.                                                                    | User approval and GitHub commit                                                              | `522ff93953bd3461c40bc982312a5f018e998c11` |
-| 2026-08-28 | Defined and committed the technical stack and privileged-access boundaries.                                                      | GitHub commit                                                                                | `3ebf7d3cf4f3326de98d711571437a3425b09e8b` |
-| 2026-08-28 | Built the initial monorepo, operator shell, platform worker, database boundary, CI, and branch-driven deployment workflow.       | Formatting, type-check, 9 tests, and production builds                                       | `6364d34f3c3ecd2fb609d241627c0d661152d87c` |
-| 2026-08-28 | Published the first development slice and removed duplicate/reusable workflow coordination as failure variables.                 | Exactly `dev` and `main`; GitHub run `33204688336` failed before runner allocation           | `4425a46daa51951facbf3fa7849865539445b9a2` |
-| 2026-08-28 | Added operator allowlist, invitation, verification-code, email-adapter, transactional Neon, and immutable migration foundations. | Formatting, migration history check, 28 tests, 7-workspace type-check, and production builds | Current `dev` slice                        |
+| Date       | Work completed                                                                                                                                                                                                | Verification                                                                                 | Commit/PR                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| 2026-08-28 | Drafted, approved, and committed the initial source-of-truth.                                                                                                                                                 | User approval and GitHub commit                                                              | `522ff93953bd3461c40bc982312a5f018e998c11` |
+| 2026-08-28 | Defined and committed the technical stack and privileged-access boundaries.                                                                                                                                   | GitHub commit                                                                                | `3ebf7d3cf4f3326de98d711571437a3425b09e8b` |
+| 2026-08-28 | Built the initial monorepo, operator shell, platform worker, database boundary, CI, and branch-driven deployment workflow.                                                                                    | Formatting, type-check, 9 tests, and production builds                                       | `6364d34f3c3ecd2fb609d241627c0d661152d87c` |
+| 2026-08-28 | Published the first development slice and removed duplicate/reusable workflow coordination as failure variables.                                                                                              | Exactly `dev` and `main`; GitHub run `33204688336` failed before runner allocation           | `4425a46daa51951facbf3fa7849865539445b9a2` |
+| 2026-08-28 | Added operator allowlist, invitation, verification-code, email-adapter, transactional Neon, and immutable migration foundations.                                                                              | Formatting, migration history check, 28 tests, 7-workspace type-check, and production builds | `f1e85ebc793382dc57dda4cc86137fc90379428f` |
+| 2026-08-28 | Implemented onboarding application commands and the PostgreSQL transactional adapter for bootstrap, domain changes, invitation, challenge issuance/delivery tracking, attempt locking, and atomic activation. | Formatting, migration history check, 39 local tests, 8-workspace type-check, production builds, and one PostgreSQL concurrency test wired for CI | Current `dev` slice                        |

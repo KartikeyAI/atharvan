@@ -18,6 +18,11 @@ const expectedIndexes = [
   "operators_single_super_administrator",
   "operator_invitations_one_pending_per_operator",
   "operator_verification_challenges_one_pending_per_operator",
+  "operator_verification_challenges_correlation_idx",
+] as const;
+
+const expectedConstraints = [
+  "operators_super_administrator_must_be_active",
 ] as const;
 
 const pool = new Pool({
@@ -35,8 +40,14 @@ try {
   const indexResult = await pool.query<{ indexname: string }>(
     "select indexname from pg_indexes where schemaname = 'public'",
   );
+  const constraintResult = await pool.query<{ constraint_name: string }>(
+    "select constraint_name from information_schema.table_constraints where constraint_schema = 'public'",
+  );
   const tableNames = new Set(tableResult.rows.map((row) => row.table_name));
   const indexNames = new Set(indexResult.rows.map((row) => row.indexname));
+  const constraintNames = new Set(
+    constraintResult.rows.map((row) => row.constraint_name),
+  );
 
   for (const tableName of expectedTables) {
     if (!tableNames.has(tableName)) {
@@ -47,6 +58,12 @@ try {
   for (const indexName of expectedIndexes) {
     if (!indexNames.has(indexName)) {
       throw new Error(`Missing migrated index: ${indexName}`);
+    }
+  }
+
+  for (const constraintName of expectedConstraints) {
+    if (!constraintNames.has(constraintName)) {
+      throw new Error(`Missing migrated constraint: ${constraintName}`);
     }
   }
 } finally {

@@ -3,6 +3,8 @@ import { drizzle } from "drizzle-orm/neon-serverless";
 
 import * as schema from "./schema";
 
+export { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
+
 export type AtharvanDatabase = ReturnType<
   typeof createNeonDatabase
 >["database"];

@@ -17,6 +17,7 @@ describe("operator onboarding schema", () => {
       expect.arrayContaining([
         "operators_email_normalized",
         "operators_email_domain_matches",
+        "operators_super_administrator_must_be_active",
       ]),
     );
     expect(operatorConfig.indexes.map((entry) => entry.config.name)).toContain(
@@ -36,6 +37,9 @@ describe("operator onboarding schema", () => {
     );
     expect(challengeConfig.columns.map((column) => column.name)).not.toContain(
       "code",
+    );
+    expect(challengeConfig.columns.map((column) => column.name)).toContain(
+      "correlation_id",
     );
     expect(challengeConfig.indexes.map((entry) => entry.config.name)).toContain(
       "operator_verification_challenges_one_pending_per_operator",

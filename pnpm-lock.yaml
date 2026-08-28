@@ -130,6 +130,22 @@ importers:
         specifier: 4.127.1
         version: 4.127.1(@cloudflare/workers-types@5.20260828.1)
 
+  packages/auth:
+    dependencies:
+      "@atharvan/domain":
+        specifier: workspace:*
+        version: link:../domain
+      "@atharvan/email":
+        specifier: workspace:*
+        version: link:../email
+    devDependencies:
+      typescript:
+        specifier: "catalog:"
+        version: 7.0.2
+      vitest:
+        specifier: "catalog:"
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12))
+
   packages/config:
     dependencies:
       zod:
@@ -145,6 +161,12 @@ importers:
 
   packages/db:
     dependencies:
+      "@atharvan/auth":
+        specifier: workspace:*
+        version: link:../auth
+      "@atharvan/domain":
+        specifier: workspace:*
+        version: link:../domain
       "@neondatabase/serverless":
         specifier: 1.1.0
         version: 1.1.0

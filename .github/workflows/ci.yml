@@ -67,6 +67,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          ATHARVAN_RUN_DB_INTEGRATION_TESTS: "1"
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/atharvan_ci
 
       - name: Build
         run: pnpm build
