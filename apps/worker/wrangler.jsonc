@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "atharvan-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "env": {
+    "dev": {
+      "name": "atharvan-control-plane-dev",
+      "vars": {
+        "ATHARVAN_ENVIRONMENT": "development",
+        "ATHARVAN_PUBLIC_ORIGIN": "https://dev.atharvan.invalid",
+      },
+    },
+    "production": {
+      "name": "atharvan-control-plane-production",
+      "vars": {
+        "ATHARVAN_ENVIRONMENT": "production",
+        "ATHARVAN_PUBLIC_ORIGIN": "https://atharvan.invalid",
+      },
+    },
+  },
+}

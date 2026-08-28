@@ -1,0 +1,26 @@
+{
+  "name": "@atharvan/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --env dev --outdir dist",
+    "deploy:dev": "wrangler deploy --env dev",
+    "deploy:production": "wrangler deploy --env production",
+    "dev": "wrangler dev --env dev",
+    "test": "vitest run",
+    "typecheck": "wrangler types && tsc --noEmit"
+  },
+  "dependencies": {
+    "@atharvan/config": "workspace:*",
+    "@atharvan/domain": "workspace:*",
+    "hono": "4.13.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260828.1",
+    "@types/node": "^24.10.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "4.127.1"
+  }
+}

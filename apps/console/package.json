@@ -1,0 +1,38 @@
+{
+  "name": "@atharvan/console",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "cf-typegen": "wrangler types",
+    "deploy:dev": "pnpm build && wrangler deploy --env dev",
+    "deploy:production": "pnpm build && wrangler deploy --env production",
+    "dev": "vite dev --port 3000",
+    "preview": "vite preview",
+    "test": "vitest run --config vitest.config.ts --passWithNoTests",
+    "typecheck": "wrangler types && tsc --noEmit"
+  },
+  "dependencies": {
+    "@atharvan/domain": "workspace:*",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/react-query": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "@tanstack/react-start": "catalog:",
+    "@vitejs/plugin-react": "6.1.1",
+    "lucide-react": "^0.544.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwindcss": "4.3.3",
+    "vite": "8.2.2"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.54.2",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "4.127.1"
+  }
+}

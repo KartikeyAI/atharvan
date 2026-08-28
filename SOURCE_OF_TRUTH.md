@@ -23,11 +23,11 @@ Arth is an AI-native, Git-native software engineering and delivery control plane
 
 The boundaries are:
 
-| Surface | Users | Responsibility |
-| --- | --- | --- |
-| Atharvan | Authorised Arth operators | Platform-wide configuration, operations, support, security, billing, governance, and incident response |
-| Arth workspace administration | Customer workspace owners/admins | Members, workspace policies, budgets, integrations, models, runners, billing, and approvals within their workspace |
-| Arth project administration | Customer project admins/developers | Repositories, environments, secrets, deployments, adapters, checks, observability, and project autonomy |
+| Surface                       | Users                              | Responsibility                                                                                                     |
+| ----------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Atharvan                      | Authorised Arth operators          | Platform-wide configuration, operations, support, security, billing, governance, and incident response             |
+| Arth workspace administration | Customer workspace owners/admins   | Members, workspace policies, budgets, integrations, models, runners, billing, and approvals within their workspace |
+| Arth project administration   | Customer project admins/developers | Repositories, environments, secrets, deployments, adapters, checks, observability, and project autonomy            |
 
 Atharvan may inspect or affect customer resources only through explicit, permission-checked operator workflows. It must never bypass Arth's tenant isolation or authorisation model.
 
@@ -65,20 +65,20 @@ Atharvan will not:
 
 ## 6. Primary operator roles
 
-| Role | Intended authority |
-| --- | --- |
-| Super Administrator | Singleton platform-owner account with `platform:*`; hard-denied from customer-private data and customer-side resources |
-| Platform Viewer | Read non-sensitive operational state |
-| Support Agent | Account and billing support without customer code or secret access |
-| Support Engineer | Time-limited, scoped diagnostic access |
-| Billing Operator | Plans, subscriptions, invoices, credits, and billing reconciliation |
-| Integration Operator | OAuth applications, webhooks, adapters, and provider connection health |
-| Model Operator | Model catalogue, provider health, routing, pricing, and availability |
-| Runtime Operator | Runner fleets, queues, previews, execution capacity, and cleanup |
-| Security Operator | Abuse controls, restrictions, investigations, and security incidents |
-| Release Manager | Platform releases, feature rollouts, maintenance, and rollback |
-| Auditor | Read audit events, policy results, and compliance evidence |
-| Break-glass Operator | Time-bound emergency authority requiring strong authentication and post-event review |
+| Role                 | Intended authority                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Super Administrator  | Singleton platform-owner account with `platform:*`; hard-denied from customer-private data and customer-side resources |
+| Platform Viewer      | Read non-sensitive operational state                                                                                   |
+| Support Agent        | Account and billing support without customer code or secret access                                                     |
+| Support Engineer     | Time-limited, scoped diagnostic access                                                                                 |
+| Billing Operator     | Plans, subscriptions, invoices, credits, and billing reconciliation                                                    |
+| Integration Operator | OAuth applications, webhooks, adapters, and provider connection health                                                 |
+| Model Operator       | Model catalogue, provider health, routing, pricing, and availability                                                   |
+| Runtime Operator     | Runner fleets, queues, previews, execution capacity, and cleanup                                                       |
+| Security Operator    | Abuse controls, restrictions, investigations, and security incidents                                                   |
+| Release Manager      | Platform releases, feature rollouts, maintenance, and rollback                                                         |
+| Auditor              | Read audit events, policy results, and compliance evidence                                                             |
+| Break-glass Operator | Time-bound emergency authority requiring strong authentication and post-event review                                   |
 
 Permissions are capability based. Role names are default bundles, not hard-coded authorisation shortcuts. The Super Administrator is the only exception to ordinary role bundling: exactly one active account may hold it, enforced by the database and command layer. Its wildcard covers Atharvan and Arth platform administration only. Customer-private capabilities are a separate namespace and are never matched by `platform:*`.
 

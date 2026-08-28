@@ -16,33 +16,33 @@ Changes to this contract require an explicit decision-log entry. Convenience alo
 
 ## 2. Stack summary
 
-| Area | Selected technology | Contract |
-| --- | --- | --- |
-| Language | TypeScript | Strict mode; no untyped domain boundaries |
-| Package manager | pnpm | Workspace lockfile is committed and CI uses frozen installs |
-| Repository | pnpm workspace + Turborepo | Modular monorepo with explicit application/package boundaries |
-| Full-stack framework | TanStack Start (React) | Routing, layouts, server functions, server routes, and middleware |
-| Deployment runtime | Cloudflare Workers | Primary production runtime for web and control-plane edges |
-| Platform API | Hono | Explicit service/API boundary for Arth and operator commands |
-| UI system | shadcn/ui | Components and blocks are stored as application source |
-| Styling | Tailwind CSS with semantic design tokens | No raw one-off colours for product state |
-| Forms | TanStack Form + Zod | Typed form state plus server-side schema validation |
-| Server state | TanStack Query | Query caching, invalidation, loading, partial, and error states |
-| Tables | TanStack Table | Large operational datasets, sorting, filtering, and pagination |
-| Charts | shadcn Chart/Recharts | Operational charts use accessible, reusable chart configuration |
-| Database provider | Neon | A dedicated Atharvan Neon project/database, separate from Arth |
-| Database engine | PostgreSQL | Atharvan depends on PostgreSQL capabilities, not Neon-only product APIs |
-| Database layer | `@atharvan/db` with Drizzle ORM | Provider-neutral PostgreSQL schema, queries, transactions, and migrations |
-| Neon runtime driver | `@neondatabase/serverless` | Hidden behind the database package connection adapter |
-| Portable driver contract | `pg`/node-postgres compatible adapter | Allows another PostgreSQL provider without domain-layer rewrites |
-| Authentication | Better Auth | App-owned sessions and identity data in Atharvan PostgreSQL |
-| First-login verification | Better Auth email OTP flow plus Atharvan invitation policy | Single-use code activates an invited operator |
-| Privileged authentication | Passkeys/WebAuthn plus step-up policy | Required for privileged operator access after activation |
-| Validation | Zod | Inputs, configuration, environment bootstrap, events, and API contracts |
-| Unit/integration tests | Vitest | Domain, policy, database, and server tests |
-| Browser/E2E tests | Playwright | Authentication and critical operator workflows |
-| Observability | OpenTelemetry | Traces, metrics, structured logs, and correlation IDs |
-| Code quality | ESLint + Prettier | Deterministic CI enforcement |
+| Area                      | Selected technology                                        | Contract                                                                  |
+| ------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Language                  | TypeScript                                                 | Strict mode; no untyped domain boundaries                                 |
+| Package manager           | pnpm                                                       | Workspace lockfile is committed and CI uses frozen installs               |
+| Repository                | pnpm workspace + Turborepo                                 | Modular monorepo with explicit application/package boundaries             |
+| Full-stack framework      | TanStack Start (React)                                     | Routing, layouts, server functions, server routes, and middleware         |
+| Deployment runtime        | Cloudflare Workers                                         | Primary production runtime for web and control-plane edges                |
+| Platform API              | Hono                                                       | Explicit service/API boundary for Arth and operator commands              |
+| UI system                 | shadcn/ui                                                  | Components and blocks are stored as application source                    |
+| Styling                   | Tailwind CSS with semantic design tokens                   | No raw one-off colours for product state                                  |
+| Forms                     | TanStack Form + Zod                                        | Typed form state plus server-side schema validation                       |
+| Server state              | TanStack Query                                             | Query caching, invalidation, loading, partial, and error states           |
+| Tables                    | TanStack Table                                             | Large operational datasets, sorting, filtering, and pagination            |
+| Charts                    | shadcn Chart/Recharts                                      | Operational charts use accessible, reusable chart configuration           |
+| Database provider         | Neon                                                       | A dedicated Atharvan Neon project/database, separate from Arth            |
+| Database engine           | PostgreSQL                                                 | Atharvan depends on PostgreSQL capabilities, not Neon-only product APIs   |
+| Database layer            | `@atharvan/db` with Drizzle ORM                            | Provider-neutral PostgreSQL schema, queries, transactions, and migrations |
+| Neon runtime driver       | `@neondatabase/serverless`                                 | Hidden behind the database package connection adapter                     |
+| Portable driver contract  | `pg`/node-postgres compatible adapter                      | Allows another PostgreSQL provider without domain-layer rewrites          |
+| Authentication            | Better Auth                                                | App-owned sessions and identity data in Atharvan PostgreSQL               |
+| First-login verification  | Better Auth email OTP flow plus Atharvan invitation policy | Single-use code activates an invited operator                             |
+| Privileged authentication | Passkeys/WebAuthn plus step-up policy                      | Required for privileged operator access after activation                  |
+| Validation                | Zod                                                        | Inputs, configuration, environment bootstrap, events, and API contracts   |
+| Unit/integration tests    | Vitest                                                     | Domain, policy, database, and server tests                                |
+| Browser/E2E tests         | Playwright                                                 | Authentication and critical operator workflows                            |
+| Observability             | OpenTelemetry                                              | Traces, metrics, structured logs, and correlation IDs                     |
+| Code quality              | ESLint + Prettier                                          | Deterministic CI enforcement                                              |
 
 Versions are pinned in the lockfile when implementation begins. This document intentionally records technology choices rather than fast-aging version numbers.
 
@@ -455,4 +455,3 @@ If a required boundary is violated, record and approve an ADR before implementat
 ## 16. Canonical closing statement
 
 Atharvan is built as a TypeScript, TanStack Start, shadcn/ui, Cloudflare Workers control plane with its own Neon-hosted PostgreSQL database behind a provider-neutral database package. Its singleton Super Administrator owns the platform plane, never the customer's private software-development plane, and every other operator enters through organisation-domain allowlisting, invitation, first-login email verification, and strong privileged authentication.
-
