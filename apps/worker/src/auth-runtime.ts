@@ -21,10 +21,12 @@ import {
   createPostgresPlatformAdapterRegistryStore,
   createPostgresPlatformConfigurationStore,
   createPostgresPlatformIntegrationRegistryStore,
+  createPostgresPlatformFeatureFlagStore,
   createPostgresPlatformSecretStore,
   createPostgresModelCatalogueStore,
   createPostgresModelRoutingStore,
 } from "@atharvan/db";
+import { createPlatformFeatureFlagService } from "@atharvan/flags";
 import {
   createResendTransactionalEmailSender,
   unconfiguredTransactionalEmailSender,
@@ -135,6 +137,10 @@ async function createProductionAuthenticationRuntime(input: {
     store: createPostgresPlatformAdapterRegistryStore(databaseHandle.database),
     environment: config.ATHARVAN_ENVIRONMENT,
   });
+  const featureFlagService = createPlatformFeatureFlagService({
+    store: createPostgresPlatformFeatureFlagStore(databaseHandle.database),
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -210,6 +216,7 @@ async function createProductionAuthenticationRuntime(input: {
     listModelRoutingOperations: () => modelRoutingService.listOperations(),
     listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
     listPlatformAdapters: () => adapterRegistryService.listRegistry(),
+    listPlatformFeatureFlags: () => featureFlagService.listFlags(),
     async createOperatorInvitation(actor, command) {
       const registry = await configurationStore.listConfiguration(
         config.ATHARVAN_ENVIRONMENT,
@@ -310,5 +317,9 @@ async function createProductionAuthenticationRuntime(input: {
       }),
     setPlatformAdapterRelease: (actor, command) =>
       adapterRegistryService.setRelease({ actor, ...command }),
+    setPlatformFeatureFlag: (actor, command) =>
+      featureFlagService.setFlag({ actor, ...command }),
+    evaluatePlatformFeatureFlag: (key, command) =>
+      featureFlagService.evaluate(key, command),
   };
 }

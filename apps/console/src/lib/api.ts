@@ -9,6 +9,7 @@ import type {
   PlatformConfigurationRegistry,
   PlatformIntegrationRegistry,
   PlatformAdapterRegistry,
+  PlatformFeatureFlagRegistry,
   PlatformSecretReferenceRegistry,
 } from "@atharvan/domain";
 
@@ -105,6 +106,8 @@ export type ModelRoutingOperationsResponse = ModelRoutingOperations;
 export type PlatformIntegrationRegistryResponse = PlatformIntegrationRegistry;
 
 export type PlatformAdapterRegistryResponse = PlatformAdapterRegistry;
+
+export type PlatformFeatureFlagRegistryResponse = PlatformFeatureFlagRegistry;
 
 function isApiErrorBody(
   value: unknown,

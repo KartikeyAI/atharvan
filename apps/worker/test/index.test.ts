@@ -65,6 +65,10 @@ function createRuntime(input?: {
       environment: "development" as const,
       items: [],
     })),
+    listPlatformFeatureFlags: vi.fn(async () => ({
+      environment: "development" as const,
+      items: [],
+    })),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -143,6 +147,21 @@ function createRuntime(input?: {
       outcome: "created" as const,
       id: "00000000-0000-4000-8000-000000000901",
       revisionNumber: 1,
+    })),
+    setPlatformFeatureFlag: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000902",
+      revisionNumber: 1,
+    })),
+    evaluatePlatformFeatureFlag: vi.fn(async (key) => ({
+      key,
+      environment: "development" as const,
+      enabled: false,
+      reason: "flag_not_found" as const,
+      revisionNumber: null,
+      matchedRuleId: null,
+      rolloutBucket: null,
+      evaluatedAt: "2026-08-30T16:00:00.000Z",
     })),
   };
 }
@@ -916,6 +935,94 @@ describe("Atharvan control-plane worker", () => {
     expect(response.status).toBe(200);
     expect(runtime.previewModelRoute).toHaveBeenCalledWith(
       expect.objectContaining({ stableRoutingKey: "preview-request-1" }),
+    );
+  });
+
+  it("returns the feature flag registry only with its read capability", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/feature-flags",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    expect(runtime.listPlatformFeatureFlags).toHaveBeenCalledOnce();
+
+    const denied = await createTestApp(
+      createRuntime({
+        operator: {
+          operatorId: "operator-2",
+          isSuperAdministrator: false,
+          effectiveCapabilities: ["platform:overview:read"],
+        },
+      }),
+    ).request("/v1/platform/feature-flags", undefined, bindings);
+    expect(denied.status).toBe(403);
+  });
+
+  it("accepts typed flag revisions and previews deterministic evaluation", async () => {
+    const runtime = createRuntime();
+    const body = {
+      displayName: "New dashboard",
+      purpose: "Stage the new Arth dashboard safely.",
+      ownerOperatorId: "00000000-0000-4000-8000-000000000101",
+      lifecycle: "active",
+      defaultEnabled: false,
+      emergencyDisabled: false,
+      rules: [
+        {
+          id: "beta_rollout",
+          description: "Enable the beta cohort.",
+          enabled: true,
+          planKeys: [],
+          workspaceIds: [],
+          userIds: [],
+          regions: [],
+          cohorts: ["beta"],
+          internalStaff: null,
+          minimumAccountAgeDays: null,
+          maximumAccountAgeDays: null,
+          rolloutBasisPoints: 2500,
+        },
+      ],
+      reviewAt: "2026-09-15T00:00:00.000Z",
+      expiresAt: "2026-10-01T00:00:00.000Z",
+      reason: "Start the reviewed beta rollout.",
+    };
+    const update = await createTestApp(runtime).request(
+      "/v1/platform/feature-flags/dashboard.new_navigation",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      bindings,
+    );
+    expect(update.status).toBe(201);
+    expect(runtime.setPlatformFeatureFlag).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        key: "dashboard.new_navigation",
+        rules: [expect.objectContaining({ id: "beta_rollout" })],
+      }),
+    );
+
+    const evaluation = await createTestApp(runtime).request(
+      "/v1/platform/feature-flags/dashboard.new_navigation/evaluate",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          stableRoutingKey: "workspace-42",
+          cohorts: ["beta"],
+        }),
+      },
+      bindings,
+    );
+    expect(evaluation.status).toBe(200);
+    expect(runtime.evaluatePlatformFeatureFlag).toHaveBeenCalledWith(
+      "dashboard.new_navigation",
+      expect.objectContaining({ stableRoutingKey: "workspace-42" }),
     );
   });
 

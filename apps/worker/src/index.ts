@@ -38,6 +38,11 @@ import {
   type OperatorRoleDefinitionEntry,
   type PlatformConfigurationRegistry,
   type PlatformConfigurationScope,
+  type PlatformFeatureFlagEvaluation,
+  type PlatformFeatureFlagEvaluationContext,
+  type PlatformFeatureFlagLifecycle,
+  type PlatformFeatureFlagRegistry,
+  type PlatformFeatureFlagRule,
   type PlatformIntegrationCapability,
   type PlatformIntegrationConnectionMode,
   type PlatformIntegrationLifecycle,
@@ -47,6 +52,7 @@ import {
   type PlatformIntegrationReportedHealth,
   type PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
+import { PlatformFeatureFlagCommandRejectedError } from "@atharvan/flags";
 import { PlatformIntegrationCommandRejectedError } from "@atharvan/integrations";
 import {
   ModelCatalogueCommandRejectedError,
@@ -97,6 +103,7 @@ export interface AuthenticationRuntime {
   listModelRoutingOperations(): Promise<ModelRoutingOperations>;
   listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
   listPlatformAdapters(): Promise<PlatformAdapterRegistry>;
+  listPlatformFeatureFlags(): Promise<PlatformFeatureFlagRegistry>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -204,6 +211,33 @@ export interface AuthenticationRuntime {
     readonly id: string;
     readonly revisionNumber: number;
   }>;
+  setPlatformFeatureFlag(
+    actor: AuthenticatedOperator,
+    input: SetPlatformFeatureFlagCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  evaluatePlatformFeatureFlag(
+    key: string,
+    input: PlatformFeatureFlagEvaluationContext,
+  ): Promise<PlatformFeatureFlagEvaluation>;
+}
+
+export interface SetPlatformFeatureFlagCommand {
+  readonly key: string;
+  readonly displayName: string;
+  readonly purpose: string;
+  readonly ownerOperatorId: string;
+  readonly lifecycle: PlatformFeatureFlagLifecycle;
+  readonly defaultEnabled: boolean;
+  readonly emergencyDisabled: boolean;
+  readonly rules: ReadonlyArray<PlatformFeatureFlagRule>;
+  readonly reviewAt: string;
+  readonly expiresAt: string | null;
+  readonly reason: string;
+  readonly correlationId: string;
 }
 
 export interface SetPlatformAdapterReleaseCommand {
@@ -741,6 +775,46 @@ export function createApp(
     }
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
     return context.json(await runtime.listPlatformAdapters());
+  });
+
+  app.get("/v1/platform/feature-flags", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:flags:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listPlatformFeatureFlags());
+  });
+
+  app.put("/v1/platform/feature-flags/:key", async (context) => {
+    const input = await readJson(context, parseSetPlatformFeatureFlag);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.setPlatformFeatureFlag(context.get("operator"), {
+        ...input,
+        key: context.req.param("key"),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.post("/v1/platform/feature-flags/:key/evaluate", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:flags:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const input = await readJson(context, parseFeatureFlagEvaluationContext);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(
+      await runtime.evaluatePlatformFeatureFlag(
+        context.req.param("key"),
+        input,
+      ),
+    );
   });
 
   app.put("/v1/platform/adapters/:key/releases/:version", async (context) => {
@@ -1316,6 +1390,142 @@ function parseSetPlatformAdapterRelease(
         deprecatedAt,
         sunsetAt,
         reason,
+      }
+    : null;
+}
+
+function parseSetPlatformFeatureFlag(
+  value: unknown,
+): Omit<SetPlatformFeatureFlagCommand, "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const purpose = readTrimmedString(value.purpose, 500);
+  const ownerOperatorId = readTrimmedString(value.ownerOperatorId, 36);
+  const reviewAt = readTrimmedString(value.reviewAt, 40);
+  const expiresAt = readNullableString(value.expiresAt, 40);
+  const reason = readReason(value.reason);
+  const rules = parseFeatureFlagRules(value.rules);
+  return displayName !== null &&
+    purpose !== null &&
+    purpose.length >= 8 &&
+    ownerOperatorId !== null &&
+    reviewAt !== null &&
+    expiresAt !== undefined &&
+    reason !== null &&
+    rules !== null &&
+    (value.lifecycle === "draft" ||
+      value.lifecycle === "active" ||
+      value.lifecycle === "archived") &&
+    typeof value.defaultEnabled === "boolean" &&
+    typeof value.emergencyDisabled === "boolean"
+    ? {
+        displayName,
+        purpose,
+        ownerOperatorId,
+        lifecycle: value.lifecycle,
+        defaultEnabled: value.defaultEnabled,
+        emergencyDisabled: value.emergencyDisabled,
+        rules,
+        reviewAt,
+        expiresAt,
+        reason,
+      }
+    : null;
+}
+
+function parseFeatureFlagRules(
+  value: unknown,
+): ReadonlyArray<PlatformFeatureFlagRule> | null {
+  if (!Array.isArray(value) || value.length > 50) return null;
+  const parsed = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const id = readTrimmedString(item.id, 64);
+    const description = readTrimmedString(item.description, 240);
+    const planKeys = readPossiblyEmptyStringArray(item.planKeys, 100, 128);
+    const workspaceIds = readPossiblyEmptyStringArray(
+      item.workspaceIds,
+      100,
+      128,
+    );
+    const userIds = readPossiblyEmptyStringArray(item.userIds, 100, 128);
+    const regions = readPossiblyEmptyStringArray(item.regions, 100, 128);
+    const cohorts = readPossiblyEmptyStringArray(item.cohorts, 100, 128);
+    const internalStaff = item.internalStaff;
+    const minimumAccountAgeDays = item.minimumAccountAgeDays;
+    const maximumAccountAgeDays = item.maximumAccountAgeDays;
+    return id !== null &&
+      description !== null &&
+      planKeys !== null &&
+      workspaceIds !== null &&
+      userIds !== null &&
+      regions !== null &&
+      cohorts !== null &&
+      (internalStaff === null || typeof internalStaff === "boolean") &&
+      (minimumAccountAgeDays === null ||
+        typeof minimumAccountAgeDays === "number") &&
+      (maximumAccountAgeDays === null ||
+        typeof maximumAccountAgeDays === "number") &&
+      typeof item.enabled === "boolean" &&
+      typeof item.rolloutBasisPoints === "number"
+      ? {
+          id,
+          description,
+          enabled: item.enabled,
+          planKeys,
+          workspaceIds,
+          userIds,
+          regions,
+          cohorts,
+          internalStaff,
+          minimumAccountAgeDays,
+          maximumAccountAgeDays,
+          rolloutBasisPoints: item.rolloutBasisPoints,
+        }
+      : null;
+  });
+  return parsed.some((item) => item === null)
+    ? null
+    : (parsed as ReadonlyArray<PlatformFeatureFlagRule>);
+}
+
+function parseFeatureFlagEvaluationContext(
+  value: unknown,
+): PlatformFeatureFlagEvaluationContext | null {
+  if (!isRecord(value)) return null;
+  const stableRoutingKey = readTrimmedString(value.stableRoutingKey, 200);
+  const readOptional = (key: string) =>
+    value[key] === undefined ? undefined : readTrimmedString(value[key], 128);
+  const planKey = readOptional("planKey");
+  const workspaceId = readOptional("workspaceId");
+  const userId = readOptional("userId");
+  const region = readOptional("region");
+  const cohorts =
+    value.cohorts === undefined
+      ? undefined
+      : readPossiblyEmptyStringArray(value.cohorts, 100, 128);
+  return stableRoutingKey !== null &&
+    planKey !== null &&
+    workspaceId !== null &&
+    userId !== null &&
+    region !== null &&
+    cohorts !== null &&
+    (value.internalStaff === undefined ||
+      typeof value.internalStaff === "boolean") &&
+    (value.accountAgeDays === undefined ||
+      typeof value.accountAgeDays === "number")
+    ? {
+        stableRoutingKey,
+        ...(planKey === undefined ? {} : { planKey }),
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        ...(userId === undefined ? {} : { userId }),
+        ...(region === undefined ? {} : { region }),
+        ...(cohorts === undefined ? {} : { cohorts }),
+        ...(value.internalStaff === undefined
+          ? {}
+          : { internalStaff: value.internalStaff }),
+        ...(value.accountAgeDays === undefined
+          ? {}
+          : { accountAgeDays: value.accountAgeDays }),
       }
     : null;
 }
@@ -1991,6 +2201,18 @@ async function executeCommand(
           code: "adapter_change_rejected",
           reason: error.reason,
           message: "The requested adapter release change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (error instanceof PlatformFeatureFlagCommandRejectedError) {
+      return context.json(
+        {
+          code: "feature_flag_change_rejected",
+          reason: error.reason,
+          message: "The requested feature flag change was not accepted.",
           requestId: context.get("requestId"),
         },
         409,

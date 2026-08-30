@@ -21,6 +21,7 @@
     "@atharvan/auth": "workspace:*",
     "@atharvan/config": "workspace:*",
     "@atharvan/domain": "workspace:*",
+    "@atharvan/flags": "workspace:*",
     "@atharvan/integrations": "workspace:*",
     "@atharvan/models": "workspace:*",
     "@atharvan/secrets": "workspace:*",

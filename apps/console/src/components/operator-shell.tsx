@@ -7,6 +7,7 @@ import {
   CircleHelpIcon,
   CloudCogIcon,
   FileClockIcon,
+  FlagIcon,
   GaugeIcon,
   GitPullRequestArrowIcon,
   MenuIcon,
@@ -50,6 +51,12 @@ const navigation: ReadonlyArray<{
     available: true,
   },
   { label: "Adapters", href: "/adapters", icon: PuzzleIcon, available: true },
+  {
+    label: "Feature flags",
+    href: "/feature-flags",
+    icon: FlagIcon,
+    available: true,
+  },
   { label: "Runners", href: "/runners", icon: BoxIcon, available: false },
   {
     label: "Workflows",

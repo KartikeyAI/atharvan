@@ -2,6 +2,7 @@ import { createOperatorOnboardingService } from "@atharvan/auth";
 import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import type { AuthenticatedOperator } from "@atharvan/domain";
+import { createPlatformFeatureFlagService } from "@atharvan/flags";
 import { createPlatformIntegrationRegistryService } from "@atharvan/integrations";
 import {
   createModelCatalogueService,
@@ -19,6 +20,7 @@ import { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 import { createPostgresModelRoutingStore } from "./model-routing-store";
 import { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 import { createPostgresPlatformIntegrationRegistryStore } from "./platform-integration-store";
+import { createPostgresPlatformFeatureFlagStore } from "./platform-feature-flag-store";
 import { createPostgresPlatformAdapterRegistryStore } from "./platform-adapter-store";
 import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
@@ -478,6 +480,92 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
               { name: "detect", maturity: "stable" },
               { name: "migrate", maturity: "alpha" },
             ]),
+          }),
+        ],
+      });
+      let featureFlagIdSequence = 800;
+      const featureFlagService = createPlatformFeatureFlagService({
+        store: createPostgresPlatformFeatureFlagStore(database),
+        environment: "development",
+        now: () => commandTime,
+        randomId: () =>
+          `00000000-0000-4000-8000-${String(++featureFlagIdSequence).padStart(12, "0")}`,
+      });
+      const featureFlagCommand = {
+        actor,
+        key: "dashboard.new_navigation",
+        displayName: "New dashboard navigation",
+        purpose: "Stage the reviewed dashboard navigation rollout.",
+        ownerOperatorId: actor.operatorId,
+        lifecycle: "active" as const,
+        defaultEnabled: false,
+        emergencyDisabled: false,
+        rules: [
+          {
+            id: "beta_rollout",
+            description: "Enable beta workspaces in the global region.",
+            enabled: true,
+            planKeys: [],
+            workspaceIds: [],
+            userIds: [],
+            regions: ["global"],
+            cohorts: ["beta"],
+            internalStaff: null,
+            minimumAccountAgeDays: null,
+            maximumAccountAgeDays: null,
+            rolloutBasisPoints: 10_000,
+          },
+        ],
+        reviewAt: "2026-09-15T00:00:00.000Z",
+        expiresAt: "2026-10-01T00:00:00.000Z",
+        reason: "Exercise deterministic feature flag targeting.",
+      };
+      await featureFlagService.setFlag({
+        ...featureFlagCommand,
+        correlationId: "00000000-0000-4000-8000-000000000124",
+      });
+      await expect(
+        featureFlagService.evaluate("dashboard.new_navigation", {
+          stableRoutingKey: "integration-workspace",
+          region: "global",
+          cohorts: ["beta"],
+        }),
+      ).resolves.toMatchObject({
+        enabled: true,
+        reason: "targeting_rule",
+        matchedRuleId: "beta_rollout",
+      });
+      await featureFlagService.setFlag({
+        ...featureFlagCommand,
+        emergencyDisabled: true,
+        reason: "Exercise immediate feature flag containment.",
+        correlationId: "00000000-0000-4000-8000-000000000125",
+      });
+      await expect(
+        featureFlagService.evaluate("dashboard.new_navigation", {
+          stableRoutingKey: "integration-workspace",
+          region: "global",
+          cohorts: ["beta"],
+        }),
+      ).resolves.toMatchObject({
+        enabled: false,
+        reason: "emergency_disabled",
+        matchedRuleId: null,
+      });
+      await expect(featureFlagService.listFlags()).resolves.toMatchObject({
+        environment: "development",
+        items: [
+          expect.objectContaining({
+            key: "dashboard.new_navigation",
+            freshness: "current",
+            current: expect.objectContaining({
+              revisionNumber: 2,
+              emergencyDisabled: true,
+            }),
+            recentRevisions: [
+              expect.objectContaining({ revisionNumber: 2 }),
+              expect.objectContaining({ revisionNumber: 1 }),
+            ],
           }),
         ],
       });

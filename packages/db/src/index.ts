@@ -9,6 +9,7 @@ export { createPostgresPlatformAdministrationReader } from "./platform-administr
 export { createPostgresPlatformAdapterRegistryStore } from "./platform-adapter-store";
 export { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 export { createPostgresPlatformIntegrationRegistryStore } from "./platform-integration-store";
+export { createPostgresPlatformFeatureFlagStore } from "./platform-feature-flag-store";
 export { createPostgresPlatformSecretStore } from "./platform-secret-store";
 export { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 export { createPostgresModelRoutingStore } from "./model-routing-store";

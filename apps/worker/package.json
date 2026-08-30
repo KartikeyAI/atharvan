@@ -18,6 +18,7 @@
     "@atharvan/db": "workspace:*",
     "@atharvan/domain": "workspace:*",
     "@atharvan/email": "workspace:*",
+    "@atharvan/flags": "workspace:*",
     "@atharvan/integrations": "workspace:*",
     "@atharvan/models": "workspace:*",
     "@atharvan/secrets": "workspace:*",

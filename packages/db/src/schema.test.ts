@@ -22,6 +22,8 @@ import {
   platformConfigurationBindings,
   platformConfigurationDefinitions,
   platformConfigurationRevisions,
+  platformFeatureFlagRevisions,
+  platformFeatureFlags,
   platformAdapterReleaseRevisions,
   platformAdapterReleases,
   platformIntegrationHealthObservations,
@@ -128,6 +130,28 @@ describe("operator onboarding schema", () => {
         "platform_configuration_bindings_platform_unique",
         "platform_configuration_bindings_environment_unique",
         "platform_configuration_bindings_revision_unique",
+      ]),
+    );
+  });
+
+  it("versions feature flags with ownership, review, and bounded rule metadata", () => {
+    const flagConfig = getTableConfig(platformFeatureFlags);
+    const revisionConfig = getTableConfig(platformFeatureFlagRevisions);
+
+    expect(flagConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "platform_feature_flags_key_environment_unique",
+    );
+    expect(revisionConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_feature_flag_revisions_number_unique",
+        "platform_feature_flag_revisions_review_idx",
+        "platform_feature_flag_revisions_owner_idx",
+      ]),
+    );
+    expect(revisionConfig.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "platform_feature_flag_revisions_rules_array",
+        "platform_feature_flag_revisions_expiry_after_review",
       ]),
     );
   });

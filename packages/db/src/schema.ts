@@ -22,6 +22,7 @@ import type {
   PlatformAdapterHealthCheckDeclaration,
   PlatformConfigurationValidation,
   PlatformConfigurationValue,
+  PlatformFeatureFlagRule,
 } from "@atharvan/domain";
 
 export const authSchema = pgSchema("auth");
@@ -304,6 +305,11 @@ export const platformAdapterLifecycle = pgEnum("platform_adapter_lifecycle", [
   "deprecated",
   "blocked",
 ]);
+
+export const platformFeatureFlagLifecycle = pgEnum(
+  "platform_feature_flag_lifecycle",
+  ["draft", "active", "archived"],
+);
 
 export const operators = pgTable(
   "operators",
@@ -1686,6 +1692,114 @@ export const modelOperationalControlRevisions = pgTable(
     check(
       "model_operational_control_revisions_maintenance_metadata",
       sql`(${table.state} = 'maintenance' AND ${table.maintenanceExpiresAt} IS NOT NULL AND ${table.maintenanceExpiresAt} > ${table.createdAt}) OR (${table.state} <> 'maintenance' AND ${table.maintenanceExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+export const platformFeatureFlags = pgTable(
+  "platform_feature_flags",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_feature_flags_key_environment_unique").on(
+      table.key,
+      table.environment,
+    ),
+    index("platform_feature_flags_environment_updated_idx").on(
+      table.environment,
+      table.updatedAt,
+    ),
+    check(
+      "platform_feature_flags_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_.-]{2,95}$'`,
+    ),
+    check(
+      "platform_feature_flags_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const platformFeatureFlagRevisions = pgTable(
+  "platform_feature_flag_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => platformFeatureFlags.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    displayName: text("display_name").notNull(),
+    purpose: text("purpose").notNull(),
+    ownerOperatorId: uuid("owner_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    lifecycle: platformFeatureFlagLifecycle("lifecycle").notNull(),
+    defaultEnabled: boolean("default_enabled").notNull(),
+    emergencyDisabled: boolean("emergency_disabled").notNull(),
+    rules: jsonb("rules")
+      .$type<ReadonlyArray<PlatformFeatureFlagRule>>()
+      .notNull(),
+    reviewAt: timestamp("review_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_feature_flag_revisions_number_unique").on(
+      table.flagId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("platform_feature_flag_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("platform_feature_flag_revisions_flag_created_idx").on(
+      table.flagId,
+      table.createdAt,
+    ),
+    index("platform_feature_flag_revisions_review_idx").on(
+      table.lifecycle,
+      table.reviewAt,
+      table.expiresAt,
+    ),
+    index("platform_feature_flag_revisions_owner_idx").on(
+      table.ownerOperatorId,
+      table.lifecycle,
+    ),
+    check(
+      "platform_feature_flag_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "platform_feature_flag_revisions_name_nonempty",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120`,
+    ),
+    check(
+      "platform_feature_flag_revisions_purpose_nonempty",
+      sql`length(btrim(${table.purpose})) BETWEEN 8 AND 500`,
+    ),
+    check(
+      "platform_feature_flag_revisions_rules_array",
+      sql`jsonb_typeof(${table.rules}) = 'array' AND jsonb_array_length(${table.rules}) <= 50`,
+    ),
+    check(
+      "platform_feature_flag_revisions_expiry_after_review",
+      sql`${table.expiresAt} IS NULL OR ${table.expiresAt} > ${table.reviewAt}`,
     ),
   ],
 );

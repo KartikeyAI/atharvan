@@ -92,7 +92,7 @@ An item may be marked complete only when its implementation, tests, operational 
 - [~] Implement model routing, fallback, maintenance, and kill switches.
 - [~] Implement platform integration and OAuth application registry.
 - [~] Implement adapter lifecycle and capability registry.
-- [ ] Implement feature flags with targeting, ownership, expiry, and history.
+- [~] Implement feature flags with targeting, ownership, expiry, and history.
 
 ### Platform overview
 
@@ -224,6 +224,7 @@ An item may be marked complete only when its implementation, tests, operational 
 | 2026-08-30 | Model routing uses immutable ordered policy revisions, deterministic basis-point rollout, explicit enablement, expiring maintenance, persistent kill switches, and observable fallback evidence.                                                             | Accepted | `docs/adr/0006-deterministic-model-routing-and-operational-controls.md` |
 | 2026-08-30 | Platform integrations use environment-scoped immutable revisions, secret-reference bindings, exact OAuth callbacks/scopes, explicit controls, and expiring health evidence; customer installations and tokens are excluded.                                  | Accepted | `docs/adr/0007-platform-integration-and-oauth-registry.md`              |
 | 2026-08-30 | Platform adapter releases use immutable package identity, an exact eight-capability maturity matrix, declarative contracts, evidence-gated activation, and explicit block/deprecation controls; executable packages and customer installations are excluded. | Accepted | `docs/adr/0008-versioned-platform-adapter-releases.md`                  |
+| 2026-08-30 | Platform feature flags use owned append-only revisions, ordered typed targeting, deterministic basis-point buckets, mandatory review/expiry surfacing, and a fail-closed emergency kill switch; flags are not durable configuration.                         | Accepted | `docs/adr/0009-versioned-platform-feature-flags.md`                     |
 
 ## Work log
 

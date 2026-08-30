@@ -128,6 +128,7 @@ export * from "./operator-onboarding";
 export * from "./platform-administration";
 export * from "./platform-adapters";
 export * from "./platform-configuration";
+export * from "./platform-feature-flags";
 export * from "./platform-integrations";
 export * from "./platform-model-routing";
 export * from "./platform-models";
