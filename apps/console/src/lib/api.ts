@@ -10,6 +10,9 @@ import type {
   PlatformIntegrationRegistry,
   PlatformAdapterRegistry,
   PlatformAuditEventPage,
+  CustomerDirectoryInspection,
+  CustomerDirectorySearchResult,
+  CustomerDirectoryStatus,
   PlatformFeatureFlagRegistry,
   PlatformSecretReferenceRegistry,
 } from "@atharvan/domain";
@@ -118,6 +121,12 @@ export type PlatformAdapterRegistryResponse = PlatformAdapterRegistry;
 export type PlatformFeatureFlagRegistryResponse = PlatformFeatureFlagRegistry;
 
 export type PlatformAuditEventPageResponse = PlatformAuditEventPage;
+
+export type CustomerDirectoryStatusResponse = CustomerDirectoryStatus;
+
+export type CustomerDirectorySearchResponse = CustomerDirectorySearchResult;
+
+export type CustomerDirectoryInspectionResponse = CustomerDirectoryInspection;
 
 function isApiErrorBody(
   value: unknown,

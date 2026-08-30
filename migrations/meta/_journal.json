@@ -85,6 +85,13 @@
       "when": 1788110452889,
       "tag": "0011_platform_command_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788113496946,
+      "tag": "0012_customer_directory_projection",
+      "breakpoints": true
     }
   ]
 }

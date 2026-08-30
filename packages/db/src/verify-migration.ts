@@ -9,6 +9,10 @@ if (databaseUrl === undefined || databaseUrl.length === 0) {
 const expectedTables = [
   "allowed_email_domains",
   "audit_events",
+  "customer_directory_sources",
+  "customer_user_projections",
+  "customer_workspace_membership_projections",
+  "customer_workspace_projections",
   "model_provider_health_observations",
   "model_provider_revisions",
   "model_providers",
@@ -39,6 +43,11 @@ const expectedTables = [
 ] as const;
 
 const expectedIndexes = [
+  "customer_directory_sources_environment_source_unique",
+  "customer_memberships_environment_pair_unique",
+  "customer_memberships_environment_source_unique",
+  "customer_users_environment_source_unique",
+  "customer_workspaces_environment_source_unique",
   "operators_auth_user_id_unique",
   "operators_single_super_administrator",
   "operator_invitations_one_pending_per_operator",

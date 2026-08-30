@@ -14,9 +14,20 @@ import {
   PlatformConfigurationRejectedError,
 } from "@atharvan/config";
 import {
+  CustomerDirectoryRejectedError,
+  type CustomerDirectoryEntityType,
+  type CustomerDirectorySearchScope,
+  type CustomerDirectorySnapshotMembership,
+  type CustomerDirectorySnapshotUser,
+  type CustomerDirectorySnapshotWorkspace,
+} from "@atharvan/customers";
+import {
   operatorHasCapability,
   unknownPlatformOverview,
   type AuthenticatedOperator,
+  type CustomerDirectoryInspection,
+  type CustomerDirectorySearchResult,
+  type CustomerDirectoryStatus,
   type MembershipDomainEntry,
   type PlatformAdapterCapabilityDeclaration,
   type PlatformAdapterCategory,
@@ -113,6 +124,27 @@ export interface AuthenticationRuntime {
   listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
   listPlatformAdapters(): Promise<PlatformAdapterRegistry>;
   listPlatformFeatureFlags(): Promise<PlatformFeatureFlagRegistry>;
+  getCustomerDirectoryStatus(
+    actor: AuthenticatedOperator,
+  ): Promise<CustomerDirectoryStatus>;
+  searchCustomerDirectory(
+    actor: AuthenticatedOperator,
+    input: SearchCustomerDirectoryCommand,
+  ): Promise<CustomerDirectorySearchResult>;
+  inspectCustomerDirectory(
+    actor: AuthenticatedOperator,
+    input: InspectCustomerDirectoryCommand,
+  ): Promise<CustomerDirectoryInspection | null>;
+  reconcileCustomerDirectorySnapshot(
+    actor: AuthenticatedOperator,
+    input: ReconcileCustomerDirectorySnapshotCommand,
+  ): Promise<{
+    readonly outcome: "updated" | "unchanged";
+    readonly sourceRevision: string;
+    readonly users?: number;
+    readonly workspaces?: number;
+    readonly memberships?: number;
+  }>;
   beginPlatformCommand(
     input: BeginPlatformCommand,
   ): Promise<PlatformCommandBeginResult>;
@@ -267,6 +299,31 @@ export interface SetPlatformFeatureFlagCommand {
   readonly rules: ReadonlyArray<PlatformFeatureFlagRule>;
   readonly reviewAt: string;
   readonly expiresAt: string | null;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface SearchCustomerDirectoryCommand {
+  readonly query: string;
+  readonly scope: CustomerDirectorySearchScope;
+  readonly limit: number;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface InspectCustomerDirectoryCommand {
+  readonly entityType: CustomerDirectoryEntityType;
+  readonly entityId: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface ReconcileCustomerDirectorySnapshotCommand {
+  readonly sourceRevision: string;
+  readonly observedAt: string;
+  readonly users: ReadonlyArray<CustomerDirectorySnapshotUser>;
+  readonly workspaces: ReadonlyArray<CustomerDirectorySnapshotWorkspace>;
+  readonly memberships: ReadonlyArray<CustomerDirectorySnapshotMembership>;
   readonly reason: string;
   readonly correlationId: string;
 }
@@ -594,6 +651,91 @@ export function createApp(
     }
 
     return context.json(unknownPlatformOverview);
+  });
+
+  app.get("/v1/platform/customer-directory/status", async (context) => {
+    const operator = context.get("operator");
+    if (!customerDirectoryReadAllowed(operator))
+      return capabilityRequired(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.getCustomerDirectoryStatus(operator));
+  });
+
+  app.post("/v1/platform/customer-directory/search", async (context) => {
+    const input = await readJson(context, parseSearchCustomerDirectory);
+    if (input === null) return invalidRequest(context);
+    const operator = context.get("operator");
+    if (!customerDirectoryScopeAllowed(operator, input.scope))
+      return capabilityRequired(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    try {
+      return context.json(
+        await runtime.searchCustomerDirectory(operator, {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
+      );
+    } catch (error) {
+      return customerDirectoryReadError(context, error);
+    }
+  });
+
+  app.post("/v1/platform/customer-directory/inspect", async (context) => {
+    const input = await readJson(context, parseInspectCustomerDirectory);
+    if (input === null) return invalidRequest(context);
+    const operator = context.get("operator");
+    const capability =
+      input.entityType === "user"
+        ? "platform:users:read"
+        : "platform:workspaces:read";
+    if (!operatorHasCapability(operator, capability))
+      return capabilityRequired(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    try {
+      const result = await runtime.inspectCustomerDirectory(operator, {
+        ...input,
+        correlationId: context.get("requestId"),
+      });
+      return result === null
+        ? context.json(
+            {
+              code: "customer_entity_not_found",
+              message: "The projected customer entity was not found.",
+              requestId: context.get("requestId"),
+            },
+            404,
+          )
+        : context.json(result);
+    } catch (error) {
+      return customerDirectoryReadError(context, error);
+    }
+  });
+
+  app.put("/v1/platform/customer-directory/snapshot", async (context) => {
+    const input = await readJson(
+      context,
+      parseReconcileCustomerDirectorySnapshot,
+    );
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:customer-directory:sync",
+        name: "customer-directory.snapshot.reconcile",
+        version: 1,
+        targetType: "customer_directory",
+        targetId: input.sourceRevision,
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.reconcileCustomerDirectorySnapshot(context.get("operator"), {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
+    );
   });
 
   app.get("/v1/platform/audit-events", async (context) => {
@@ -1340,6 +1482,179 @@ async function readJson<Result>(
   } catch {
     return null;
   }
+}
+
+function parseSearchCustomerDirectory(
+  value: unknown,
+): Omit<SearchCustomerDirectoryCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const query = readTrimmedString(value.query, 200);
+  const reason = readReason(value.reason);
+  const scope = value.scope;
+  const limit = value.limit ?? 20;
+  return query !== null &&
+    query.length >= 2 &&
+    reason !== null &&
+    (scope === "users" || scope === "workspaces" || scope === "all") &&
+    typeof limit === "number" &&
+    Number.isSafeInteger(limit) &&
+    limit >= 1 &&
+    limit <= 50
+    ? { query, scope, limit, reason }
+    : null;
+}
+
+function parseInspectCustomerDirectory(
+  value: unknown,
+): Omit<InspectCustomerDirectoryCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const entityId = readTrimmedString(value.entityId, 200);
+  const reason = readReason(value.reason);
+  return entityId !== null &&
+    reason !== null &&
+    (value.entityType === "user" || value.entityType === "workspace")
+    ? { entityType: value.entityType, entityId, reason }
+    : null;
+}
+
+function parseReconcileCustomerDirectorySnapshot(
+  value: unknown,
+): Omit<ReconcileCustomerDirectorySnapshotCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const sourceRevision = readTrimmedString(value.sourceRevision, 19);
+  const observedAt = readTrimmedString(value.observedAt, 40);
+  const reason = readReason(value.reason);
+  const users = parseCustomerSnapshotUsers(value.users);
+  const workspaces = parseCustomerSnapshotWorkspaces(value.workspaces);
+  const memberships = parseCustomerSnapshotMemberships(value.memberships);
+  return sourceRevision !== null &&
+    observedAt !== null &&
+    reason !== null &&
+    users !== null &&
+    workspaces !== null &&
+    memberships !== null
+    ? { sourceRevision, observedAt, users, workspaces, memberships, reason }
+    : null;
+}
+
+function parseCustomerSnapshotUsers(
+  value: unknown,
+): ReadonlyArray<CustomerDirectorySnapshotUser> | null {
+  if (!Array.isArray(value) || value.length > 500) return null;
+  const items = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const id = readTrimmedString(item.id, 200);
+    const email = readTrimmedString(item.email, 320);
+    const displayName = readTrimmedString(item.displayName, 160);
+    const createdAt = readTrimmedString(item.createdAt, 40);
+    return id !== null &&
+      email !== null &&
+      displayName !== null &&
+      createdAt !== null &&
+      (item.lifecycle === "active" ||
+        item.lifecycle === "restricted" ||
+        item.lifecycle === "suspended" ||
+        item.lifecycle === "deactivated") &&
+      (item.verificationStatus === "unverified" ||
+        item.verificationStatus === "pending" ||
+        item.verificationStatus === "verified")
+      ? {
+          id,
+          email,
+          displayName,
+          lifecycle: item.lifecycle,
+          verificationStatus: item.verificationStatus,
+          createdAt,
+        }
+      : null;
+  });
+  return items.some((item) => item === null)
+    ? null
+    : (items as ReadonlyArray<CustomerDirectorySnapshotUser>);
+}
+
+function parseCustomerSnapshotWorkspaces(
+  value: unknown,
+): ReadonlyArray<CustomerDirectorySnapshotWorkspace> | null {
+  if (!Array.isArray(value) || value.length > 500) return null;
+  const items = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const id = readTrimmedString(item.id, 200);
+    const organizationId = readTrimmedString(item.organizationId, 200);
+    const name = readTrimmedString(item.name, 160);
+    const createdAt = readTrimmedString(item.createdAt, 40);
+    const slug =
+      item.slug === null || item.slug === undefined
+        ? null
+        : readTrimmedString(item.slug, 160);
+    return id !== null &&
+      organizationId !== null &&
+      name !== null &&
+      createdAt !== null &&
+      (slug !== null || item.slug === null || item.slug === undefined) &&
+      (item.lifecycle === "active" ||
+        item.lifecycle === "restricted" ||
+        item.lifecycle === "suspended" ||
+        item.lifecycle === "archived")
+      ? { id, organizationId, name, slug, lifecycle: item.lifecycle, createdAt }
+      : null;
+  });
+  return items.some((item) => item === null)
+    ? null
+    : (items as ReadonlyArray<CustomerDirectorySnapshotWorkspace>);
+}
+
+function parseCustomerSnapshotMemberships(
+  value: unknown,
+): ReadonlyArray<CustomerDirectorySnapshotMembership> | null {
+  if (!Array.isArray(value) || value.length > 5_000) return null;
+  const items = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const id = readTrimmedString(item.id, 200);
+    const userId = readTrimmedString(item.userId, 200);
+    const workspaceId = readTrimmedString(item.workspaceId, 200);
+    const role = readTrimmedString(item.role, 80);
+    const grantedPermissions = readPossiblyEmptyStringArray(
+      item.grantedPermissions,
+      200,
+      128,
+    );
+    const deniedPermissions = readPossiblyEmptyStringArray(
+      item.deniedPermissions,
+      200,
+      128,
+    );
+    const effectivePermissions = readPossiblyEmptyStringArray(
+      item.effectivePermissions,
+      200,
+      128,
+    );
+    return id !== null &&
+      userId !== null &&
+      workspaceId !== null &&
+      role !== null &&
+      grantedPermissions !== null &&
+      deniedPermissions !== null &&
+      effectivePermissions !== null &&
+      (item.lifecycle === "invited" ||
+        item.lifecycle === "active" ||
+        item.lifecycle === "suspended" ||
+        item.lifecycle === "removed")
+      ? {
+          id,
+          userId,
+          workspaceId,
+          role,
+          lifecycle: item.lifecycle,
+          grantedPermissions,
+          deniedPermissions,
+          effectivePermissions,
+        }
+      : null;
+  });
+  return items.some((item) => item === null)
+    ? null
+    : (items as ReadonlyArray<CustomerDirectorySnapshotMembership>);
 }
 
 function parseOperatorInvitation(
@@ -2447,6 +2762,45 @@ function capabilityRequired(context: Context<AppEnvironment>) {
   );
 }
 
+function customerDirectoryReadAllowed(actor: AuthenticatedOperator) {
+  return (
+    operatorHasCapability(actor, "platform:users:read") ||
+    operatorHasCapability(actor, "platform:workspaces:read")
+  );
+}
+
+function customerDirectoryScopeAllowed(
+  actor: AuthenticatedOperator,
+  scope: CustomerDirectorySearchScope,
+) {
+  return (
+    (scope === "workspaces" ||
+      operatorHasCapability(actor, "platform:users:read")) &&
+    (scope === "users" ||
+      operatorHasCapability(actor, "platform:workspaces:read"))
+  );
+}
+
+function customerDirectoryReadError(
+  context: Context<AppEnvironment>,
+  error: unknown,
+) {
+  if (error instanceof CustomerDirectoryRejectedError) {
+    return context.json(
+      {
+        code: "customer_directory_request_rejected",
+        reason: error.reason,
+        message: "The customer directory request was not accepted.",
+        requestId: context.get("requestId"),
+      },
+      400,
+    );
+  }
+  if (error instanceof Error && error.message === "operator_command_forbidden")
+    return capabilityRequired(context);
+  throw error;
+}
+
 interface PlatformCommandRequest {
   readonly requiredCapability: string;
   readonly name: string;
@@ -2681,6 +3035,15 @@ function mapCommandError(error: unknown, reason: string, requestId: string) {
       "rejected",
       "feature_flag_change_rejected",
       "The requested feature flag change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof CustomerDirectoryRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "customer_directory_change_rejected",
+      "The customer directory snapshot was not accepted.",
       requestId,
       error.reason,
     );

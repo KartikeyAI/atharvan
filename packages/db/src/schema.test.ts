@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   account,
   allowedEmailDomains,
+  customerDirectorySources,
+  customerUserProjections,
+  customerWorkspaceMembershipProjections,
+  customerWorkspaceProjections,
   operatorInvitations,
   operatorRoleAssignments,
   operatorRoleDefinitions,
@@ -192,6 +196,55 @@ describe("operator onboarding schema", () => {
     );
     expect(auditConfig.indexes.map((entry) => entry.config.name)).toContain(
       "audit_events_command_idx",
+    );
+  });
+
+  it("keeps customer directory state explicitly disposable and source-versioned", () => {
+    const sourceConfig = getTableConfig(customerDirectorySources);
+    const userConfig = getTableConfig(customerUserProjections);
+    const workspaceConfig = getTableConfig(customerWorkspaceProjections);
+    const membershipConfig = getTableConfig(
+      customerWorkspaceMembershipProjections,
+    );
+
+    expect(sourceConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "customer_directory_sources_environment_source_unique",
+    );
+    expect(userConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "customer_users_environment_source_unique",
+    );
+    expect(workspaceConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "customer_workspaces_environment_source_unique",
+    );
+    expect(membershipConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "customer_memberships_environment_source_unique",
+        "customer_memberships_environment_pair_unique",
+      ]),
+    );
+    expect(membershipConfig.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "granted_permissions",
+        "denied_permissions",
+        "effective_permissions",
+        "source_revision",
+        "observed_at",
+      ]),
+    );
+    expect(
+      [
+        ...userConfig.columns,
+        ...workspaceConfig.columns,
+        ...membershipConfig.columns,
+      ].map((column) => column.name),
+    ).not.toEqual(
+      expect.arrayContaining([
+        "chat",
+        "code",
+        "repository_contents",
+        "secret_value",
+        "access_token",
+      ]),
     );
   });
 

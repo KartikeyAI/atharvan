@@ -16,6 +16,7 @@
     "@atharvan/adapters": "workspace:*",
     "@atharvan/auth": "workspace:*",
     "@atharvan/config": "workspace:*",
+    "@atharvan/customers": "workspace:*",
     "@atharvan/db": "workspace:*",
     "@atharvan/domain": "workspace:*",
     "@atharvan/email": "workspace:*",

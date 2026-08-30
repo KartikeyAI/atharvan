@@ -116,6 +116,9 @@ importers:
       "@atharvan/config":
         specifier: workspace:*
         version: link:../../packages/config
+      "@atharvan/customers":
+        specifier: workspace:*
+        version: link:../../packages/customers
       "@atharvan/db":
         specifier: workspace:*
         version: link:../../packages/db
@@ -221,6 +224,19 @@ importers:
         specifier: "catalog:"
         version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12))
 
+  packages/customers:
+    dependencies:
+      "@atharvan/domain":
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: "catalog:"
+        version: 7.0.2
+      vitest:
+        specifier: "catalog:"
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12))
+
   packages/db:
     dependencies:
       "@atharvan/adapters":
@@ -235,6 +251,9 @@ importers:
       "@atharvan/config":
         specifier: workspace:*
         version: link:../config
+      "@atharvan/customers":
+        specifier: workspace:*
+        version: link:../customers
       "@atharvan/domain":
         specifier: workspace:*
         version: link:../domain

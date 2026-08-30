@@ -17,6 +17,7 @@ import {
   SettingsIcon,
   ShieldCheckIcon,
   SirenIcon,
+  UserRoundSearchIcon,
   UsersIcon,
   WalletCardsIcon,
 } from "lucide-react";
@@ -35,6 +36,12 @@ const navigation: ReadonlyArray<{
     label: "Email domains",
     href: "/membership-domains",
     icon: ShieldCheckIcon,
+    available: true,
+  },
+  {
+    label: "Customers",
+    href: "/customers",
+    icon: UserRoundSearchIcon,
     available: true,
   },
   { label: "Models", href: "/models", icon: BotIcon, available: true },

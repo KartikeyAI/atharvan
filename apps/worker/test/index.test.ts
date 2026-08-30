@@ -69,6 +69,36 @@ function createRuntime(input?: {
       environment: "development" as const,
       items: [],
     })),
+    getCustomerDirectoryStatus: vi.fn(async () => ({
+      environment: "development" as const,
+      source: "arth" as const,
+      freshness: "unknown" as const,
+      sourceRevision: null,
+      observedAt: null,
+      synchronizedAt: null,
+    })),
+    searchCustomerDirectory: vi.fn(async () => ({
+      status: {
+        environment: "development" as const,
+        source: "arth" as const,
+        freshness: "unknown" as const,
+        sourceRevision: null,
+        observedAt: null,
+        synchronizedAt: null,
+      },
+      queryFingerprint:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      users: [],
+      workspaces: [],
+    })),
+    inspectCustomerDirectory: vi.fn(async () => null),
+    reconcileCustomerDirectorySnapshot: vi.fn(async (actor, input) => ({
+      outcome: "updated" as const,
+      sourceRevision: input.sourceRevision,
+      users: input.users.length,
+      workspaces: input.workspaces.length,
+      memberships: input.memberships.length,
+    })),
     beginPlatformCommand: vi.fn(async () => ({
       state: "started" as const,
       commandId: "00000000-0000-4000-8000-000000000990",
@@ -272,6 +302,131 @@ describe("Atharvan control-plane worker", () => {
       observedAt: null,
       evidence: [],
     });
+  });
+
+  it("searches the customer directory through a purpose-bound audited read", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.searchCustomerDirectory).mockResolvedValue({
+      status: {
+        environment: "development",
+        source: "arth",
+        freshness: "current",
+        sourceRevision: "12",
+        observedAt: "2026-08-30T17:59:00.000Z",
+        synchronizedAt: "2026-08-30T18:00:00.000Z",
+      },
+      queryFingerprint:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      users: [
+        {
+          id: "usr_1",
+          email: "person@example.com",
+          displayName: "Person",
+          lifecycle: "active",
+          verificationStatus: "verified",
+          createdAt: "2026-08-01T00:00:00.000Z",
+          observedAt: "2026-08-30T17:59:00.000Z",
+          sourceRevision: "12",
+        },
+      ],
+      workspaces: [],
+    });
+
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/customer-directory/search",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: "person@example.com",
+          scope: "all",
+          limit: 20,
+          reason: "Investigate an account access request.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      users: [{ id: "usr_1" }],
+    });
+    expect(runtime.searchCustomerDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorId: "operator-1" }),
+      expect.objectContaining({
+        query: "person@example.com",
+        scope: "all",
+        reason: "Investigate an account access request.",
+        correlationId: expect.any(String),
+      }),
+    );
+  });
+
+  it("does not broaden a user-only role into workspace inspection", async () => {
+    const response = await createTestApp(
+      createRuntime({
+        operator: {
+          operatorId: "operator-2",
+          isSuperAdministrator: false,
+          effectiveCapabilities: ["platform:users:read"],
+        },
+      }),
+    ).request(
+      "/v1/platform/customer-directory/search",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: "example",
+          scope: "all",
+          limit: 20,
+          reason: "Investigate an account access request.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "operator_capability_required",
+    });
+  });
+
+  it("wraps customer-directory reconciliation in the shared command envelope", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/customer-directory/snapshot",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "directory-revision-12",
+        },
+        body: JSON.stringify({
+          sourceRevision: "12",
+          observedAt: "2026-08-30T18:00:00.000Z",
+          users: [],
+          workspaces: [],
+          memberships: [],
+          reason: "Reconcile the canonical Arth customer directory.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runtime.beginPlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "customer-directory.snapshot.reconcile",
+        requiredCapability: "platform:customer-directory:sync",
+        targetId: "12",
+        idempotencyKey: "directory-revision-12",
+      }),
+    );
+    expect(runtime.reconcileCustomerDirectorySnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({ sourceRevision: "12" }),
+    );
   });
 
   it("searches and exports immutable audit evidence with separate capabilities", async () => {

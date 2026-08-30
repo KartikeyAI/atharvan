@@ -37,4 +37,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0011_platform_command_audit.sql` adds named/versioned command envelopes, secret-safe payload and idempotency fingerprints, optional approval/evidence references, append-only terminal results, and command linkage on audit events. PostgreSQL triggers reject updates and deletion across command, result, and audit history. The migration is additive: historical audit rows remain valid with a null command reference.
 
+`0012_customer_directory_projection.sql` adds disposable, environment-scoped projections of Arth users, workspaces, and memberships plus a monotonic source checkpoint. Projected permissions are copied from Arth rather than inferred, sensitive searches and inspections are audited without retaining search terms, and no customer code, chats, credentials, secrets, environment values, or integration tokens are stored.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

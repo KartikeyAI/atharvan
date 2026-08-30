@@ -2,6 +2,7 @@ import { createOperatorOnboardingService } from "@atharvan/auth";
 import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import { createPlatformCommandService } from "@atharvan/commands";
+import { createCustomerDirectoryService } from "@atharvan/customers";
 import type { AuthenticatedOperator } from "@atharvan/domain";
 import { createPlatformFeatureFlagService } from "@atharvan/flags";
 import { createPlatformIntegrationRegistryService } from "@atharvan/integrations";
@@ -17,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
 import { createPostgresPlatformCommandAuditStore } from "./platform-command-audit-store";
+import { createPostgresCustomerDirectoryStore } from "./customer-directory-store";
 import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 import { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 import { createPostgresModelRoutingStore } from "./model-routing-store";
@@ -27,6 +29,9 @@ import { createPostgresPlatformAdapterRegistryStore } from "./platform-adapter-s
 import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
   auditEvents,
+  customerUserProjections,
+  customerWorkspaceMembershipProjections,
+  customerWorkspaceProjections,
   operatorInvitations,
   operators,
   operatorVerificationChallenges,
@@ -644,6 +649,130 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
           .set({ reason: "Attempt to rewrite immutable command history." })
           .where(eq(platformCommands.id, begun.commandId)),
       ).rejects.toThrow(/command history cannot be mutated/u);
+      const customerDirectoryService = createCustomerDirectoryService({
+        store: createPostgresCustomerDirectoryStore(database),
+        environment: "development",
+        now: () => commandTime,
+        randomId: () => "00000000-0000-4000-8000-000000000128",
+      });
+      const customerSnapshot = {
+        actor,
+        sourceRevision: "42",
+        observedAt: commandTime.toISOString(),
+        users: [
+          {
+            id: "arth-user-integration-1",
+            email: "customer@artharvan-ci.example",
+            displayName: "Customer Integration",
+            lifecycle: "active" as const,
+            verificationStatus: "verified" as const,
+            createdAt: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+        workspaces: [
+          {
+            id: "arth-workspace-integration-1",
+            organizationId: "arth-organization-integration-1",
+            name: "Integration Workspace",
+            slug: "integration-workspace",
+            lifecycle: "active" as const,
+            createdAt: "2026-08-02T00:00:00.000Z",
+          },
+        ],
+        memberships: [
+          {
+            id: "arth-membership-integration-1",
+            userId: "arth-user-integration-1",
+            workspaceId: "arth-workspace-integration-1",
+            role: "owner",
+            lifecycle: "active" as const,
+            grantedPermissions: ["workspace:read", "workspace:write"],
+            deniedPermissions: ["workspace:delete"],
+            effectivePermissions: ["workspace:read", "workspace:write"],
+          },
+        ],
+        reason: "Reconcile the Arth integration projection.",
+        correlationId: "00000000-0000-4000-8000-000000000128",
+      };
+      await expect(
+        customerDirectoryService.reconcileSnapshot(customerSnapshot),
+      ).resolves.toEqual({
+        outcome: "updated",
+        sourceRevision: "42",
+        users: 1,
+        workspaces: 1,
+        memberships: 1,
+      });
+      const customerSearch = await customerDirectoryService.search({
+        actor,
+        query: "customer@artharvan-ci.example",
+        scope: "all",
+        reason: "Investigate the integration customer account.",
+        correlationId: "00000000-0000-4000-8000-000000000129",
+      });
+      expect(customerSearch).toMatchObject({
+        status: { freshness: "current", sourceRevision: "42" },
+        users: [expect.objectContaining({ id: "arth-user-integration-1" })],
+      });
+      expect(customerSearch.queryFingerprint).toMatch(/^[0-9a-f]{64}$/u);
+      await expect(
+        customerDirectoryService.inspect({
+          actor,
+          entityType: "workspace",
+          entityId: "arth-workspace-integration-1",
+          reason: "Inspect effective integration permissions.",
+          correlationId: "00000000-0000-4000-8000-000000000130",
+        }),
+      ).resolves.toMatchObject({
+        entityType: "workspace",
+        memberships: [
+          {
+            membership: {
+              effectivePermissions: ["workspace:read", "workspace:write"],
+            },
+            user: { id: "arth-user-integration-1" },
+          },
+        ],
+      });
+      await expect(
+        customerDirectoryService.reconcileSnapshot({
+          ...customerSnapshot,
+          sourceRevision: "41",
+          correlationId: "00000000-0000-4000-8000-000000000131",
+        }),
+      ).resolves.toEqual({ outcome: "unchanged", sourceRevision: "42" });
+      await expect(
+        customerDirectoryService.reconcileSnapshot({
+          ...customerSnapshot,
+          sourceRevision: "43",
+          users: [],
+          workspaces: [],
+          memberships: [],
+          correlationId: "00000000-0000-4000-8000-000000000132",
+        }),
+      ).resolves.toMatchObject({ outcome: "updated", sourceRevision: "43" });
+      expect(await database.select().from(customerUserProjections)).toEqual([]);
+      expect(
+        await database.select().from(customerWorkspaceProjections),
+      ).toEqual([]);
+      expect(
+        await database.select().from(customerWorkspaceMembershipProjections),
+      ).toEqual([]);
+      const [customerSearchAudit] = await database
+        .select({ evidence: auditEvents.evidence })
+        .from(auditEvents)
+        .where(
+          eq(auditEvents.eventType, "platform.customer_directory.searched"),
+        );
+      const serializedCustomerSearchAudit = JSON.stringify(
+        customerSearchAudit?.evidence,
+      );
+      expect(serializedCustomerSearchAudit).toContain(
+        customerSearch.queryFingerprint,
+      );
+      expect(serializedCustomerSearchAudit).not.toContain(
+        "customer@artharvan-ci.example",
+      );
       await secretService.revoke({
         actor,
         referenceId: createdSecret.id,

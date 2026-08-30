@@ -12,9 +12,11 @@ import {
   createPlatformConfigurationAdministrationService,
   parseAuthenticationRuntimeConfig,
 } from "@atharvan/config";
+import { createCustomerDirectoryService } from "@atharvan/customers";
 import {
   authDatabaseSchema,
   createNeonDatabase,
+  createPostgresCustomerDirectoryStore,
   createPostgresOperatorOnboardingStore,
   createPostgresOperatorRoleAdministrationStore,
   createPostgresOperatorSessionPolicyStore,
@@ -147,6 +149,10 @@ async function createProductionAuthenticationRuntime(input: {
     store: createPostgresPlatformCommandAuditStore(databaseHandle.database),
     environment: config.ATHARVAN_ENVIRONMENT,
   });
+  const customerDirectoryService = createCustomerDirectoryService({
+    store: createPostgresCustomerDirectoryStore(databaseHandle.database),
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -223,6 +229,14 @@ async function createProductionAuthenticationRuntime(input: {
     listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
     listPlatformAdapters: () => adapterRegistryService.listRegistry(),
     listPlatformFeatureFlags: () => featureFlagService.listFlags(),
+    getCustomerDirectoryStatus: (actor) =>
+      customerDirectoryService.getStatus(actor),
+    searchCustomerDirectory: (actor, command) =>
+      customerDirectoryService.search({ actor, ...command }),
+    inspectCustomerDirectory: (actor, command) =>
+      customerDirectoryService.inspect({ actor, ...command }),
+    reconcileCustomerDirectorySnapshot: (actor, command) =>
+      customerDirectoryService.reconcileSnapshot({ actor, ...command }),
     beginPlatformCommand: (command) => commandService.begin(command),
     completePlatformCommand: (command) => commandService.complete(command),
     listPlatformAuditEvents: (actor, query) =>

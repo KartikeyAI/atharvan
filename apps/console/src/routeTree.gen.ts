@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdaptersRouteImport } from './routes/adapters'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
@@ -36,6 +37,11 @@ const AdaptersRoute = AdaptersRouteImport.update({
 const AuditRoute = AuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CustomersRoute = CustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/adapters': typeof AdaptersRoute
   '/audit': typeof AuditRoute
+  '/customers': typeof CustomersRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/adapters': typeof AdaptersRoute
   '/audit': typeof AuditRoute
+  '/customers': typeof CustomersRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/adapters': typeof AdaptersRoute
   '/audit': typeof AuditRoute
+  '/customers': typeof CustomersRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/'
     | '/adapters'
     | '/audit'
+    | '/customers'
     | '/feature-flags'
     | '/integrations'
     | '/login'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | '/'
     | '/adapters'
     | '/audit'
+    | '/customers'
     | '/feature-flags'
     | '/integrations'
     | '/login'
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
     | '/'
     | '/adapters'
     | '/audit'
+    | '/customers'
     | '/feature-flags'
     | '/integrations'
     | '/login'
@@ -187,6 +199,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdaptersRoute: typeof AdaptersRoute
   AuditRoute: typeof AuditRoute
+  CustomersRoute: typeof CustomersRoute
   FeatureFlagsRoute: typeof FeatureFlagsRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
@@ -220,6 +233,13 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/customers': {
+      id: '/customers'
+      path: '/customers'
+      fullPath: '/customers'
+      preLoaderRoute: typeof CustomersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/feature-flags': {
@@ -299,6 +319,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdaptersRoute: AdaptersRoute,
   AuditRoute: AuditRoute,
+  CustomersRoute: CustomersRoute,
   FeatureFlagsRoute: FeatureFlagsRoute,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,

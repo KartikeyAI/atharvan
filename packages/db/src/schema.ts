@@ -318,6 +318,28 @@ export const platformFeatureFlagLifecycle = pgEnum(
   ["draft", "active", "archived"],
 );
 
+export const customerUserLifecycle = pgEnum("customer_user_lifecycle", [
+  "active",
+  "restricted",
+  "suspended",
+  "deactivated",
+]);
+
+export const customerVerificationStatus = pgEnum(
+  "customer_verification_status",
+  ["unverified", "pending", "verified"],
+);
+
+export const customerWorkspaceLifecycle = pgEnum(
+  "customer_workspace_lifecycle",
+  ["active", "restricted", "suspended", "archived"],
+);
+
+export const customerMembershipLifecycle = pgEnum(
+  "customer_membership_lifecycle",
+  ["invited", "active", "suspended", "removed"],
+);
+
 export const operators = pgTable(
   "operators",
   {
@@ -1807,6 +1829,181 @@ export const platformFeatureFlagRevisions = pgTable(
     check(
       "platform_feature_flag_revisions_expiry_after_review",
       sql`${table.expiresAt} IS NULL OR ${table.expiresAt} > ${table.reviewAt}`,
+    ),
+  ],
+);
+
+export const customerDirectorySources = pgTable(
+  "customer_directory_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    source: text("source").notNull(),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    synchronizedAt: timestamp("synchronized_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_directory_sources_environment_source_unique").on(
+      table.environment,
+      table.source,
+    ),
+    check(
+      "customer_directory_sources_source_arth",
+      sql`${table.source} = 'arth'`,
+    ),
+    check(
+      "customer_directory_sources_revision_positive",
+      sql`${table.sourceRevision} > 0`,
+    ),
+  ],
+);
+
+export const customerUserProjections = pgTable(
+  "customer_user_projections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    sourceId: text("source_id").notNull(),
+    email: text("email").notNull(),
+    displayName: text("display_name").notNull(),
+    lifecycle: customerUserLifecycle("lifecycle").notNull(),
+    verificationStatus: customerVerificationStatus(
+      "verification_status",
+    ).notNull(),
+    sourceCreatedAt: timestamp("source_created_at", {
+      withTimezone: true,
+    }).notNull(),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    projectedAt: timestamp("projected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_users_environment_source_unique").on(
+      table.environment,
+      table.sourceId,
+    ),
+    index("customer_users_environment_email_idx").on(
+      table.environment,
+      table.email,
+    ),
+    index("customer_users_environment_lifecycle_idx").on(
+      table.environment,
+      table.lifecycle,
+    ),
+    check(
+      "customer_users_email_normalized",
+      sql`${table.email} = lower(${table.email})`,
+    ),
+    check("customer_users_email_shape", sql`${table.email} ~ '^[^@]+@[^@]+$'`),
+    check("customer_users_revision_positive", sql`${table.sourceRevision} > 0`),
+  ],
+);
+
+export const customerWorkspaceProjections = pgTable(
+  "customer_workspace_projections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    sourceId: text("source_id").notNull(),
+    organizationId: text("organization_id").notNull(),
+    name: text("name").notNull(),
+    slug: text("slug"),
+    lifecycle: customerWorkspaceLifecycle("lifecycle").notNull(),
+    sourceCreatedAt: timestamp("source_created_at", {
+      withTimezone: true,
+    }).notNull(),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    projectedAt: timestamp("projected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_workspaces_environment_source_unique").on(
+      table.environment,
+      table.sourceId,
+    ),
+    index("customer_workspaces_environment_organization_idx").on(
+      table.environment,
+      table.organizationId,
+    ),
+    index("customer_workspaces_environment_slug_idx").on(
+      table.environment,
+      table.slug,
+    ),
+    index("customer_workspaces_environment_lifecycle_idx").on(
+      table.environment,
+      table.lifecycle,
+    ),
+    check(
+      "customer_workspaces_slug_normalized",
+      sql`${table.slug} IS NULL OR ${table.slug} = lower(${table.slug})`,
+    ),
+    check(
+      "customer_workspaces_revision_positive",
+      sql`${table.sourceRevision} > 0`,
+    ),
+  ],
+);
+
+export const customerWorkspaceMembershipProjections = pgTable(
+  "customer_workspace_membership_projections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    sourceId: text("source_id").notNull(),
+    userSourceId: text("user_source_id").notNull(),
+    workspaceSourceId: text("workspace_source_id").notNull(),
+    role: text("role").notNull(),
+    lifecycle: customerMembershipLifecycle("lifecycle").notNull(),
+    grantedPermissions: text("granted_permissions")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    deniedPermissions: text("denied_permissions")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    effectivePermissions: text("effective_permissions")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    projectedAt: timestamp("projected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_memberships_environment_source_unique").on(
+      table.environment,
+      table.sourceId,
+    ),
+    uniqueIndex("customer_memberships_environment_pair_unique").on(
+      table.environment,
+      table.userSourceId,
+      table.workspaceSourceId,
+    ),
+    index("customer_memberships_environment_user_idx").on(
+      table.environment,
+      table.userSourceId,
+    ),
+    index("customer_memberships_environment_workspace_idx").on(
+      table.environment,
+      table.workspaceSourceId,
+    ),
+    check(
+      "customer_memberships_revision_positive",
+      sql`${table.sourceRevision} > 0`,
+    ),
+    check(
+      "customer_memberships_permission_sets_bounded",
+      sql`cardinality(${table.grantedPermissions}) <= 200 AND cardinality(${table.deniedPermissions}) <= 200 AND cardinality(${table.effectivePermissions}) <= 200`,
     ),
   ],
 );
