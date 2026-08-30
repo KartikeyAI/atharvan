@@ -16,10 +16,10 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ## Current blockers
 
-- GitHub Actions validation and branch-driven development deployment are operational. Run `33320316142` passed the clean PostgreSQL migration, contract verification, type-check, PostgreSQL-backed tests, builds, live database migration, runtime-secret synchronization, and both Cloudflare deployments.
+- GitHub Actions validation and branch-driven development deployment are operational. Run `33325755499` passed the clean PostgreSQL migration, contract verification, type-check, PostgreSQL-backed tests, builds, live database migration, runtime-secret synchronization, and both Cloudflare deployments.
 - The development console is live at `https://atharvan-console-dev.rokad.workers.dev`; the development control-plane Worker is live at `https://atharvan-control-plane-dev.rokad.workers.dev`. Liveness, readiness, SSR routes, the console service binding, unauthenticated denial, and Better Auth session resolution are verified.
 - Resend is the first replaceable transactional-email adapter. Live OTP delivery remains fail-closed until `RESEND_API_KEY` is added to the `development` environment and the sender domain is verified. The production public origin remains a placeholder until production configuration begins.
-- The dedicated `atharvan-development` Neon PostgreSQL 18 project is provisioned and migrations `0000` through `0010` are live. The complete schema was also recreated and contract-verified against a clean PostgreSQL 18 service in CI.
+- The dedicated `atharvan-development` Neon PostgreSQL 18 project is provisioned and migrations `0000` through `0011` are live. The complete schema was also recreated and contract-verified against a clean PostgreSQL 18 service in CI.
 - The platform secret-management adapter additionally needs `CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID`, `CLOUDFLARE_SECRETS_STORE_ID`, and a dedicated `CLOUDFLARE_SECRETS_STORE_API_TOKEN` with Secrets Store write authority. Live create/rotate/revoke verification is deferred with the environment work.
 - Production deployment remains intentionally unconfigured and was not triggered from `dev`.
 - Rendered browser sign-off is pending: the Cloudflare Vite development/preview runtime cannot start in this container because network-interface enumeration fails, and the hosted browser rejects loopback with `ERR_BLOCKED_BY_CLIENT`. Source validation, route generation, and production builds are unaffected.
@@ -54,7 +54,7 @@ An item may be marked complete only when its implementation, tests, operational 
 - [x] Implement the singleton Super Administrator invariant and `platform:*` authority.
 - [x] Enforce hard customer-private data denies outside the platform wildcard namespace.
 - [x] Implement capability-based permissions and default role bundles.
-- [~] Enforce server-side authorisation on every operator command.
+- [x] Enforce server-side authorisation on every operator command.
 - [~] Implement organisation email-domain allowlist administration.
 - [x] Reject invitations and activation when the email domain is not allowed.
 - [x] Implement invited-to-active first-login email verification code flow.
@@ -72,11 +72,11 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ### Audit and command foundation
 
-- [ ] Implement named/versioned command envelope.
-- [~] Implement immutable operator audit events.
-- [~] Add reason, correlation, approval, and evidence fields.
-- [ ] Add audit search and export.
-- [ ] Verify audit coverage for all Phase 1 mutations.
+- [x] Implement named/versioned command envelope.
+- [x] Implement immutable operator audit events.
+- [x] Add reason, correlation, approval, and evidence fields.
+- [x] Add audit search and export.
+- [x] Verify audit coverage for all Phase 1 mutations.
 
 ### Users and workspaces
 
@@ -225,6 +225,7 @@ An item may be marked complete only when its implementation, tests, operational 
 | 2026-08-30 | Platform integrations use environment-scoped immutable revisions, secret-reference bindings, exact OAuth callbacks/scopes, explicit controls, and expiring health evidence; customer installations and tokens are excluded.                                  | Accepted | `docs/adr/0007-platform-integration-and-oauth-registry.md`              |
 | 2026-08-30 | Platform adapter releases use immutable package identity, an exact eight-capability maturity matrix, declarative contracts, evidence-gated activation, and explicit block/deprecation controls; executable packages and customer installations are excluded. | Accepted | `docs/adr/0008-versioned-platform-adapter-releases.md`                  |
 | 2026-08-30 | Platform feature flags use owned append-only revisions, ordered typed targeting, deterministic basis-point buckets, mandatory review/expiry surfacing, and a fail-closed emergency kill switch; flags are not durable configuration.                         | Accepted | `docs/adr/0009-versioned-platform-feature-flags.md`                     |
+| 2026-08-30 | Material platform mutations use named/versioned command envelopes, secret-safe payload and idempotency fingerprints, replayable terminal results, and append-only audit evidence; raw request payloads and idempotency keys are not retained.                | Accepted | `docs/adr/0010-named-platform-commands-and-immutable-audit.md`          |
 
 ## Work log
 
@@ -248,3 +249,4 @@ An item may be marked complete only when its implementation, tests, operational 
 | 2026-08-30 | Added environment-scoped immutable adapter releases, exact eight-capability maturity contracts, package digest identity, permissions/configuration/command/health declarations, signing and security-review gates, release channels, block/deprecation controls, protected APIs, migration `0009`, ADR 0008, and the Adapters console surface.           | Formatting, Drizzle migration-history consistency, 122 local tests, 12-workspace type-check, TanStack client/SSR build, and Worker dry-run build; the expanded PostgreSQL scenario, live migration, signed artifact operations, and rendered QA remain environment-gated                   | `4f64703c996063f9d2bd826328ec349b69df733f` |
 | 2026-08-30 | Restored branch-driven deployment, selected the Cloudflare Vite environment at build time, attached the console service binding, ordered Worker-before-console publication, synchronized required Worker runtime secrets without read-back, set the real development origin, and deployed the complete `dev` state.                                      | Actions run `33318604482` passed validation and deployment; migrations `0000`–`0009`, Worker liveness/readiness, console SSR, service binding, `401` protected-route denial, and Better Auth session resolution were verified live                                                         | `0e3ddf7e6ba1180ab24781c53ae275965554afd6` |
 | 2026-08-30 | Added environment-scoped feature flags with active ownership, immutable revisions, ordered targeting across plan/workspace/user/region/cohort/staff/account-age/percentage context, deterministic evaluation, review/expiry surfacing, emergency containment, protected APIs, migration `0010`, ADR 0009, and the Feature Flags console surface.         | Formatting, migration consistency, 131 local tests, 13-workspace type-check, both production bundles, PostgreSQL-backed two-revision targeting/kill-switch verification, live Neon migration, live route `200`, Worker health, and unauthenticated `401`; Actions run `33320316142` passed | `007ebc9b292a3df808135489ae62c1d673e2679b` |
+| 2026-08-30 | Added named/versioned command envelopes to every platform mutation route, secret-safe payload fingerprints, idempotent response replay and conflict handling, immutable command/result/audit history, bounded NDJSON export, protected APIs, migration `0011`, ADR 0010, and the Audit console surface.                                                  | Formatting, migration consistency, 137 local tests, 14-workspace type-check, production builds, PostgreSQL-backed replay/conflict/immutability verification, live Neon migration, Worker health, live `/audit` SSR, and unauthenticated `401`; Actions run `33325755499` passed            | `28dfec740aaed51a9426e7d8bd609a88d1d31b32` |
