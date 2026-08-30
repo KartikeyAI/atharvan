@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AuthenticatedOperator } from "@atharvan/domain";
 import type { TransactionalEmailSender } from "@atharvan/email";
+import { memoryAdapter } from "better-auth/adapters/memory";
 
 import {
   createOperatorOnboardingService,
+  createAtharvanAuth,
+  digestBetterAuthOtp,
   type OperatorOnboardingStore,
+  type OperatorSessionPolicyStore,
 } from "./index";
 
 const fixedNow = new Date("2026-08-28T12:00:00.000Z");
@@ -248,3 +252,121 @@ describe("operator onboarding commands", () => {
     );
   });
 });
+
+describe("Better Auth OTP storage", () => {
+  it("uses a deterministic secret-bound digest instead of storing the code", async () => {
+    const first = await digestBetterAuthOtp("123456", verificationSecret);
+    const repeated = await digestBetterAuthOtp("123456", verificationSecret);
+    const differentSecret = await digestBetterAuthOtp("123456", "x".repeat(32));
+
+    expect(first).toBe(repeated);
+    expect(first).not.toBe("123456");
+    expect(first).not.toBe(differentSecret);
+  });
+});
+
+describe("Better Auth operator login", () => {
+  it("does not issue an OTP or create a user outside onboarding policy", async () => {
+    const emailSender = createEmailSender();
+    const policyStore = createSessionPolicyStore(false);
+    const auth = createTestAuth(policyStore, emailSender);
+    const response = await auth.handler(
+      authRequest("/email-otp/send-verification-otp", {
+        email: "outsider@untrusted.example",
+        type: "sign-in",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
+    expect(emailSender.sendFirstLoginVerification).not.toHaveBeenCalled();
+    expect(policyStore.activateOperatorForAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("uses one invited OTP to create the Better Auth session and activate the operator", async () => {
+    const emailSender = createEmailSender();
+    const policyStore = createSessionPolicyStore(true);
+    const auth = createTestAuth(policyStore, emailSender);
+    const issueResponse = await auth.handler(
+      authRequest("/email-otp/send-verification-otp", {
+        email: "operator@example.com",
+        type: "sign-in",
+      }),
+    );
+    const code = vi.mocked(emailSender.sendFirstLoginVerification).mock
+      .calls[0]?.[0].code;
+
+    expect(issueResponse.status).toBe(200);
+    expect(code).toMatch(/^\d{6}$/);
+
+    const signInResponse = await auth.handler(
+      authRequest("/sign-in/email-otp", {
+        email: "operator@example.com",
+        otp: code,
+        name: "Operator",
+      }),
+    );
+
+    expect(signInResponse.status).toBe(200);
+    expect(signInResponse.headers.get("set-cookie")).toContain(
+      "atharvan.session_token",
+    );
+    expect(policyStore.activateOperatorForAuthUser).toHaveBeenCalledOnce();
+    expect(policyStore.activateOperatorForAuthUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authUserId: expect.any(String),
+      }),
+    );
+  });
+});
+
+function createSessionPolicyStore(
+  eligible: boolean,
+): OperatorSessionPolicyStore {
+  return {
+    canIssueSignInOtp: vi.fn(async () => eligible),
+    activateOperatorForAuthUser: vi.fn(async () =>
+      eligible
+        ? {
+            operatorId: "operator-1",
+            isSuperAdministrator: false,
+            effectiveCapabilities: ["platform:overview:read"],
+          }
+        : null,
+    ),
+    resolveActiveOperator: vi.fn(async () => null),
+  };
+}
+
+function createTestAuth(
+  policyStore: OperatorSessionPolicyStore,
+  emailSender: TransactionalEmailSender,
+) {
+  return createAtharvanAuth({
+    database: memoryAdapter({
+      account: [],
+      rateLimit: [],
+      session: [],
+      user: [],
+      verification: [],
+    }),
+    policyStore,
+    emailSender,
+    secret: "b".repeat(32),
+    verificationHmacSecret: verificationSecret,
+    baseURL: "https://auth.atharvan.example",
+    trustedOrigins: ["https://console.atharvan.example"],
+    now: () => fixedNow,
+  });
+}
+
+function authRequest(path: string, body: unknown): Request {
+  return new Request(`https://auth.atharvan.example/api/auth${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://console.atharvan.example",
+    },
+    body: JSON.stringify(body),
+  });
+}

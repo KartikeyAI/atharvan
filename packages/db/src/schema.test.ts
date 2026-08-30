@@ -2,10 +2,15 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 
 import {
+  account,
   allowedEmailDomains,
   operatorInvitations,
   operators,
   operatorVerificationChallenges,
+  rateLimit,
+  session,
+  user,
+  verification,
 } from "./schema";
 
 describe("operator onboarding schema", () => {
@@ -22,6 +27,9 @@ describe("operator onboarding schema", () => {
     );
     expect(operatorConfig.indexes.map((entry) => entry.config.name)).toContain(
       "operators_single_super_administrator",
+    );
+    expect(operatorConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "operators_auth_user_id_unique",
     );
     expect(domainConfig.checks.map((constraint) => constraint.name)).toContain(
       "allowed_email_domains_normalized",
@@ -47,5 +55,15 @@ describe("operator onboarding schema", () => {
     expect(
       invitationConfig.indexes.map((entry) => entry.config.name),
     ).toContain("operator_invitations_one_pending_per_operator");
+  });
+
+  it("isolates Better Auth state in a dedicated PostgreSQL schema", () => {
+    for (const table of [account, rateLimit, session, user, verification]) {
+      expect(getTableConfig(table).schema).toBe("auth");
+    }
+
+    expect(
+      getTableConfig(verification).columns.map((column) => column.name),
+    ).toContain("value");
   });
 });

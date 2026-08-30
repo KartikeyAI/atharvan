@@ -6,11 +6,13 @@ import { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
+import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 import {
   auditEvents,
   operatorInvitations,
   operators,
   operatorVerificationChallenges,
+  user,
 } from "./schema";
 import * as schema from "./schema";
 
@@ -25,6 +27,8 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
     const pool = new Pool({ connectionString: databaseUrl, max: 4 });
     const database = drizzle({ client: pool, schema });
     const store = createPostgresOperatorOnboardingStore(database);
+    const sessionPolicyStore =
+      createPostgresOperatorSessionPolicyStore(database);
     const commandTime = new Date("2026-08-28T12:00:00.000Z");
     let deliveredCode: string | undefined;
     const emailSender = {
@@ -134,6 +138,59 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
       );
       expect(challenge?.status).toBe("consumed");
       expect(activationAudits).toHaveLength(1);
+
+      await service.createInvitation({
+        actor,
+        email: "session-operator@atharvan-ci.example",
+        organizationId: "arth",
+        intendedCapabilities: ["platform:overview:read"],
+        reason: "Better Auth session integration operator",
+        correlationId: "00000000-0000-4000-8000-000000000105",
+      });
+      await database.insert(user).values({
+        id: "auth-user-integration-1",
+        name: "Session Operator",
+        email: "session-operator@atharvan-ci.example",
+        emailVerified: true,
+        createdAt: commandTime,
+        updatedAt: commandTime,
+      });
+
+      await expect(
+        sessionPolicyStore.canIssueSignInOtp({
+          normalizedEmail: "outsider@untrusted.example",
+          now: commandTime,
+        }),
+      ).resolves.toBe(false);
+      await expect(
+        sessionPolicyStore.canIssueSignInOtp({
+          normalizedEmail: "session-operator@atharvan-ci.example",
+          now: commandTime,
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        sessionPolicyStore.activateOperatorForAuthUser({
+          authUserId: "auth-user-integration-1",
+          correlationId: "00000000-0000-4000-8000-000000000106",
+          now: commandTime,
+        }),
+      ).resolves.toMatchObject({
+        isSuperAdministrator: false,
+        effectiveCapabilities: ["platform:overview:read"],
+      });
+      await expect(
+        sessionPolicyStore.resolveActiveOperator("auth-user-integration-1"),
+      ).resolves.toMatchObject({
+        effectiveCapabilities: ["platform:overview:read"],
+      });
+
+      await database
+        .update(operators)
+        .set({ status: "suspended", suspendedAt: commandTime })
+        .where(eq(operators.authUserId, "auth-user-integration-1"));
+      await expect(
+        sessionPolicyStore.resolveActiveOperator("auth-user-integration-1"),
+      ).resolves.toBeNull();
     } finally {
       await pool.end();
     }

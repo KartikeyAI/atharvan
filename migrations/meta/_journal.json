@@ -15,6 +15,13 @@
       "when": 1787955533800,
       "tag": "0001_atomic_operator_onboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788051575361,
+      "tag": "0002_operator_sessions",
+      "breakpoints": true
     }
   ]
 }

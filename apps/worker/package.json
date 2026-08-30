@@ -12,8 +12,12 @@
     "typecheck": "wrangler types && tsc --noEmit"
   },
   "dependencies": {
+    "@atharvan/auth": "workspace:*",
     "@atharvan/config": "workspace:*",
+    "@atharvan/db": "workspace:*",
     "@atharvan/domain": "workspace:*",
+    "@atharvan/email": "workspace:*",
+    "@better-auth/drizzle-adapter": "1.7.2",
     "hono": "4.13.5"
   },
   "devDependencies": {

@@ -15,6 +15,8 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0000_operator_onboarding.sql` only creates the initial Atharvan-owned types, tables, constraints, and indexes; it does not modify Arth or any customer database.
 
+`0002_operator_sessions.sql` creates Better Auth's isolated `auth` schema and links an Atharvan operator to one auth user. It remains additive and does not grant access to Arth or customer-private data.
+
 `0001_atomic_operator_onboarding.sql` adds audit correlation to verification challenges and prevents the singleton Super Administrator designation from being held by an inactive operator. Its nullable-add/backfill/not-null sequence keeps upgrades safe when challenge rows already exist.
 
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

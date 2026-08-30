@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@atharvan/domain": "workspace:*",
-    "@atharvan/email": "workspace:*"
+    "@atharvan/email": "workspace:*",
+    "better-auth": "1.7.2"
   },
   "devDependencies": {
     "typescript": "catalog:",

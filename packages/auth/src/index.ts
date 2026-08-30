@@ -11,10 +11,19 @@ import {
   type AuthenticatedOperator,
 } from "@atharvan/domain";
 import type { TransactionalEmailSender } from "@atharvan/email";
+import {
+  betterAuth,
+  type BetterAuthOptions,
+  type Session,
+  type User,
+} from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
+import { emailOTP } from "better-auth/plugins";
 
 const defaultInvitationLifetimeMs = 24 * 60 * 60 * 1_000;
 const defaultVerificationLifetimeMs = 10 * 60 * 1_000;
 const defaultMaximumVerificationAttempts = 5;
+const betterAuthOtpLifetimeSeconds = 10 * 60;
 
 export type StoreCommandResult =
   | { readonly outcome: "created"; readonly id: string }
@@ -128,6 +137,221 @@ export interface OperatorOnboardingStore {
     readonly correlationId: string;
     readonly now: Date;
   }): Promise<boolean>;
+}
+
+export interface OperatorSessionPolicyStore {
+  canIssueSignInOtp(input: {
+    readonly normalizedEmail: string;
+    readonly now: Date;
+  }): Promise<boolean>;
+
+  activateOperatorForAuthUser(input: {
+    readonly authUserId: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<AuthenticatedOperator | null>;
+
+  resolveActiveOperator(
+    authUserId: string,
+  ): Promise<AuthenticatedOperator | null>;
+}
+
+export interface AtharvanAuthOptions {
+  readonly database: NonNullable<BetterAuthOptions["database"]>;
+  readonly policyStore: OperatorSessionPolicyStore;
+  readonly emailSender: TransactionalEmailSender;
+  readonly secret: string;
+  readonly verificationHmacSecret: string;
+  readonly baseURL: string;
+  readonly trustedOrigins: ReadonlyArray<string>;
+  readonly now?: () => Date;
+  readonly defer?: (operation: Promise<void>) => void;
+}
+
+export function createAtharvanAuth(options: AtharvanAuthOptions) {
+  const now = options.now ?? (() => new Date());
+
+  return betterAuth({
+    appName: "Atharvan",
+    baseURL: options.baseURL,
+    basePath: "/api/auth",
+    secret: options.secret,
+    database: options.database,
+    trustedOrigins: [...options.trustedOrigins],
+    emailAndPassword: { enabled: false },
+    session: {
+      cookieCache: { enabled: false },
+      expiresIn: 8 * 60 * 60,
+      updateAge: 60 * 60,
+    },
+    rateLimit: {
+      enabled: true,
+      storage: "database",
+      window: 60,
+      max: 20,
+      customRules: {
+        "/email-otp/send-verification-otp": { window: 60, max: 3 },
+        "/sign-in/email-otp": { window: 60, max: 5 },
+      },
+    },
+    advanced: {
+      cookiePrefix: "atharvan",
+      ipAddress: {
+        ipAddressHeaders: ["cf-connecting-ip"],
+        disableIpTracking: false,
+      },
+    },
+    plugins: [
+      emailOTP({
+        otpLength: 6,
+        expiresIn: betterAuthOtpLifetimeSeconds,
+        allowedAttempts: 5,
+        disableSignUp: false,
+        resendStrategy: "rotate",
+        storeOTP: {
+          hash: (otp) =>
+            digestBetterAuthOtp(otp, options.verificationHmacSecret),
+        },
+        async sendVerificationOTP(data) {
+          if (data.type !== "sign-in") {
+            return;
+          }
+
+          const delivery = options.emailSender
+            .sendFirstLoginVerification({
+              to: normalizeOperatorEmail(data.email),
+              code: data.otp,
+              expiresAt: new Date(
+                now().getTime() + betterAuthOtpLifetimeSeconds * 1_000,
+              ),
+              correlationId: crypto.randomUUID(),
+            })
+            .then(() => undefined);
+
+          if (options.defer) {
+            options.defer(delivery);
+            return;
+          }
+
+          await delivery;
+        },
+      }),
+    ],
+    disabledPaths: [
+      "/email-otp/check-verification-otp",
+      "/email-otp/verify-email",
+      "/email-otp/request-password-reset",
+      "/forget-password/email-otp",
+      "/email-otp/reset-password",
+      "/email-otp/request-email-change",
+      "/email-otp/change-email",
+      "/sign-up/email",
+      "/sign-in/email",
+      "/change-email",
+      "/change-password",
+      "/set-password",
+      "/delete-user",
+      "/update-user",
+    ],
+    hooks: {
+      before: createAuthMiddleware(async (context) => {
+        if (context.path !== "/email-otp/send-verification-otp") {
+          return;
+        }
+
+        const request = readOtpRequest(context.body);
+
+        if (request === null) {
+          return context.json({ success: true });
+        }
+
+        const eligible = await options.policyStore.canIssueSignInOtp({
+          normalizedEmail: request.email,
+          now: now(),
+        });
+
+        if (!eligible) {
+          return context.json({ success: true });
+        }
+      }),
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user: User & Record<string, unknown>) => {
+            let normalizedEmail: string;
+
+            try {
+              normalizedEmail = normalizeOperatorEmail(user.email);
+            } catch {
+              return false;
+            }
+
+            return options.policyStore.canIssueSignInOtp({
+              normalizedEmail,
+              now: now(),
+            });
+          },
+        },
+      },
+      session: {
+        create: {
+          before: async (session: Session & Record<string, unknown>) => {
+            const operator =
+              await options.policyStore.activateOperatorForAuthUser({
+                authUserId: session.userId,
+                correlationId: crypto.randomUUID(),
+                now: now(),
+              });
+
+            return operator !== null;
+          },
+        },
+      },
+    },
+    telemetry: { enabled: false },
+  });
+}
+
+export async function digestBetterAuthOtp(
+  otp: string,
+  secret: string,
+): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`atharvan:better-auth:email-otp:${otp}`),
+  );
+
+  return encodeBase64Url(new Uint8Array(digest));
+}
+
+function readOtpRequest(body: unknown): { readonly email: string } | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const candidate = body as {
+    readonly email?: unknown;
+    readonly type?: unknown;
+  };
+
+  if (candidate.type !== "sign-in" || typeof candidate.email !== "string") {
+    return null;
+  }
+
+  try {
+    return { email: normalizeOperatorEmail(candidate.email) };
+  } catch {
+    return null;
+  }
 }
 
 export class OnboardingCommandRejectedError extends Error {

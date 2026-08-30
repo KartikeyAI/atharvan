@@ -16,9 +16,10 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ## Current blockers
 
-- GitHub Actions still fails the `validate` job before assigning a runner or executing any steps, including on run `33216781359` attempt 2 on 2026-08-30. Repository/organisation Actions availability or billing must be restored before remote CI and deployment can run.
-- After Actions can allocate a runner, the GitHub `development` environment must expose `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; the workflow has not reached the deployment steps yet, so those credentials remain unverified. The available GitHub connector intentionally does not expose Actions secret mutation APIs.
-- The dedicated `atharvan-development` Neon project is provisioned and migrations `0000` and `0001` are live. Executing the complete provider-backed onboarding path still requires runtime configuration for `DATABASE_URL`, `BETTER_AUTH_SECRET`, `ATHARVAN_VERIFICATION_HMAC_SECRET`, `ATHARVAN_SUPER_ADMIN_EMAIL`, and the first transactional-email provider adapter/configuration.
+- GitHub Actions still fails the `validate` job before assigning a runner or executing any steps, including on run `33282855327` attempt 2 on 2026-08-30. The user deferred Actions/deployment investigation until the remaining development slices are complete.
+- The GitHub `development` environment now contains the database, Better Auth, verification, Super Administrator, email-from, and Cloudflare secrets shown by the user. Their values remain unreadable and operationally unverified because Actions cannot allocate a runner.
+- Resend is the first replaceable transactional-email adapter. Live OTP delivery remains fail-closed until `RESEND_API_KEY` is added to the `development` environment and the sender domain is verified. Development and production public origins also remain placeholders until deployment configuration resumes.
+- The dedicated `atharvan-development` Neon project is provisioned and migrations `0000`, `0001`, and `0002` are live. Better Auth's five isolated auth tables, the unique operator identity link, and the Drizzle history hash were verified on PostgreSQL 18.
 - Rendered browser sign-off is pending: the hosted browser cannot open the local loopback preview, and the fallback Chromium download timed out. Source validation and production builds are unaffected.
 
 ## Phase 0 — Product and repository foundation
@@ -34,7 +35,7 @@ An item may be marked complete only when its implementation, tests, operational 
 - [~] Add coding, testing, migration, and security conventions.
 - [x] Configure CI for formatting, migration validation, type-checking, tests, and production builds.
 - [x] Define the boot-only environment and secret bootstrap contract.
-- [ ] Record initial architecture decision records.
+- [x] Record initial architecture decision records.
 
 ### Phase 0 exit evidence
 
@@ -47,14 +48,14 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ### Operator identity and access
 
-- [~] Implement operator identity domain.
-- [~] Implement the singleton Super Administrator invariant and `platform:*` authority.
-- [~] Enforce hard customer-private data denies outside the platform wildcard namespace.
+- [x] Implement operator identity domain.
+- [x] Implement the singleton Super Administrator invariant and `platform:*` authority.
+- [x] Enforce hard customer-private data denies outside the platform wildcard namespace.
 - [ ] Implement capability-based permissions and default role bundles.
 - [~] Enforce server-side authorisation on every operator command.
 - [~] Implement organisation email-domain allowlist administration.
-- [~] Reject invitations and activation when the email domain is not allowed.
-- [~] Implement invited-to-active first-login email verification code flow.
+- [x] Reject invitations and activation when the email domain is not allowed.
+- [x] Implement invited-to-active first-login email verification code flow.
 - [ ] Add mandatory strong MFA/passkey policy.
 - [~] Add step-up authentication for sensitive actions.
 - [ ] Add break-glass grant lifecycle with expiry and review.
@@ -193,8 +194,8 @@ An item may be marked complete only when its implementation, tests, operational 
 ## Cross-cutting quality gates
 
 - [x] No fake data, placeholder metrics, or mock operational success states in the foundation operator shell.
-- [ ] No client-side-only authorisation.
-- [ ] No plaintext secret storage or read-back.
+- [x] No client-side-only authorisation in implemented routes.
+- [x] No plaintext authentication code, secret storage, or read-back.
 - [ ] No ad hoc database mutation path for routine operations.
 - [ ] No high-impact external mutation without idempotency and reconciliation.
 - [ ] No production-affecting command without audit and recovery/containment.
@@ -224,5 +225,6 @@ An item may be marked complete only when its implementation, tests, operational 
 | 2026-08-28 | Built the initial monorepo, operator shell, platform worker, database boundary, CI, and branch-driven deployment workflow.                                                                                    | Formatting, type-check, 9 tests, and production builds                                                                                                          | `6364d34f3c3ecd2fb609d241627c0d661152d87c` |
 | 2026-08-28 | Published the first development slice and removed duplicate/reusable workflow coordination as failure variables.                                                                                              | Exactly `dev` and `main`; GitHub run `33204688336` failed before runner allocation                                                                              | `4425a46daa51951facbf3fa7849865539445b9a2` |
 | 2026-08-28 | Added operator allowlist, invitation, verification-code, email-adapter, transactional Neon, and immutable migration foundations.                                                                              | Formatting, migration history check, 28 tests, 7-workspace type-check, and production builds                                                                    | `f1e85ebc793382dc57dda4cc86137fc90379428f` |
-| 2026-08-28 | Implemented onboarding application commands and the PostgreSQL transactional adapter for bootstrap, domain changes, invitation, challenge issuance/delivery tracking, attempt locking, and atomic activation. | Formatting, migration history check, 39 local tests, 8-workspace type-check, production builds, and one PostgreSQL concurrency test wired for CI                | Current `dev` slice                        |
+| 2026-08-28 | Implemented onboarding application commands and the PostgreSQL transactional adapter for bootstrap, domain changes, invitation, challenge issuance/delivery tracking, attempt locking, and atomic activation. | Formatting, migration history check, 39 local tests, 8-workspace type-check, production builds, and one PostgreSQL concurrency test wired for CI                | `1a0fcc83197232b4dba83f56676d3917ccfbe77e` |
 | 2026-08-30 | Provisioned the separate `atharvan-development` Neon PostgreSQL 18 project and applied immutable migrations `0000` and `0001`.                                                                                | Six live tables, both Drizzle migration hashes, singleton Super Administrator index, active-state constraint, and pending-challenge index verified through Neon | External development environment           |
+| 2026-08-30 | Added Better Auth email-OTP sessions, policy-gated user/session hooks, server-side protected routes, Resend delivery, the operator identity link, and ADR 0001.                                                 | Formatting, migration consistency, 51 local tests, 8-workspace type-check, both production bundles, and live Neon migration `0002` verification                | Current `dev` slice                        |
