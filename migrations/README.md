@@ -23,4 +23,8 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0004_platform_configuration_registry.sql` adds typed non-secret configuration definitions, append-only revisions, and current platform/environment bindings. It seeds declared operational defaults but no overrides. A PostgreSQL trigger rejects revision updates or deletion, while current bindings may move forward only through the audited command path. Secret-like keys are rejected by both application validation and a database constraint.
 
+`0005_platform_secret_references.sql` adds provider-neutral secret-reference and version metadata. It stores provider identifiers and lifecycle evidence only; no credential value, ciphertext, digest, or preview exists in PostgreSQL. Delete triggers preserve lifecycle history.
+
+`0006_model_provider_catalogue.sql` adds environment-scoped providers, immutable provider/model revisions, integer model pricing, data-classification limits, and append-only expiring provider-health observations. Provider credentials are foreign-key references to secret metadata and never embedded in catalogue revisions. Delete triggers preserve all catalogue and health history.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

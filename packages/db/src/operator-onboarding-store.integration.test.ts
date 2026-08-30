@@ -1,6 +1,7 @@
 import { createOperatorOnboardingService } from "@atharvan/auth";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import type { AuthenticatedOperator } from "@atharvan/domain";
+import { createModelCatalogueService } from "@atharvan/models";
 import { createPlatformSecretLifecycleService } from "@atharvan/secrets";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -9,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
 import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
+import { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 import { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
@@ -158,6 +160,71 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         value: "integration-provider-key-v2",
         reason: "Exercise metadata-only secret rotation.",
         correlationId: "00000000-0000-4000-8000-000000000111",
+      });
+      let modelIdSequence = 400;
+      const modelCatalogueService = createModelCatalogueService({
+        store: createPostgresModelCatalogueStore(database),
+        environment: "development",
+        now: () => commandTime,
+        randomId: () =>
+          `00000000-0000-4000-8000-${String(++modelIdSequence).padStart(12, "0")}`,
+      });
+      const provider = await modelCatalogueService.setProvider({
+        actor,
+        key: "openai",
+        displayName: "OpenAI",
+        adapterKind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        credentialReferenceId: createdSecret.id,
+        regions: ["global"],
+        maximumDataClassification: "confidential",
+        lifecycle: "active",
+        reason: "Exercise the model provider revision path.",
+        correlationId: "00000000-0000-4000-8000-000000000113",
+      });
+      await modelCatalogueService.setModel({
+        actor,
+        providerId: provider.id,
+        key: "integration-model",
+        displayName: "Integration Model",
+        kind: "generation",
+        capabilities: ["reasoning", "tool_use"],
+        contextWindowTokens: 128_000,
+        maximumOutputTokens: 8_192,
+        inputPriceMicrounitsPerMillion: 1_000_000,
+        outputPriceMicrounitsPerMillion: 5_000_000,
+        regions: ["global"],
+        maximumDataClassification: "confidential",
+        lifecycle: "active",
+        reason: "Exercise the model metadata revision path.",
+        correlationId: "00000000-0000-4000-8000-000000000114",
+      });
+      await modelCatalogueService.recordHealthObservation({
+        actor,
+        providerId: provider.id,
+        status: "healthy",
+        latencyMs: 125,
+        httpStatusCode: 200,
+        reason: "Exercise evidence-backed provider health.",
+        correlationId: "00000000-0000-4000-8000-000000000115",
+      });
+      await expect(
+        modelCatalogueService.listCatalogue(),
+      ).resolves.toMatchObject({
+        environment: "development",
+        items: [
+          expect.objectContaining({
+            key: "openai",
+            credentialReferenceKey: "models.openai",
+            health: expect.objectContaining({ state: "healthy" }),
+            models: [
+              expect.objectContaining({
+                key: "integration-model",
+                inputPriceMicrounitsPerMillion: 1_000_000,
+              }),
+            ],
+          }),
+        ],
       });
       await secretService.revoke({
         actor,

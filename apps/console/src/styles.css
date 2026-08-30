@@ -651,6 +651,7 @@ button {
 
 .card-header h1,
 .card-header h2,
+.card-title,
 .card-header p {
   margin: 0;
 }
@@ -664,6 +665,15 @@ button {
   font-size: 15px;
 }
 
+.card-title {
+  font-size: 15px;
+}
+
+.card-description {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+}
+
 .card-header p {
   margin-top: 4px;
   color: var(--muted-foreground);
@@ -671,6 +681,13 @@ button {
 
 .card-content {
   padding: 6px 20px 20px;
+}
+
+.card-footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding: 14px 20px;
 }
 
 .badge {
@@ -732,10 +749,30 @@ button {
 }
 
 .field-stack,
-.form-stack {
+.form-stack,
+.field,
+.field-group {
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+.field-description {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.field-set {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.field-legend {
+  margin-bottom: 7px;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .form-stack {
@@ -806,6 +843,97 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.model-editor-grid,
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.provider-grid {
+  align-items: start;
+}
+
+.capability-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.provider-card .card-header {
+  align-items: flex-start;
+}
+
+.inline-empty {
+  margin-top: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  padding: 16px;
+  text-align: center;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.model-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.model-row-heading,
+.model-badges {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-row-heading strong,
+.model-row-heading code {
+  display: block;
+}
+
+.model-row-heading code {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.model-row .capability-list {
+  margin-top: 10px;
+}
+
+.model-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.model-metrics div {
+  border-radius: 6px;
+  background: var(--muted);
+  padding: 8px;
+}
+
+.model-metrics dt {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.model-metrics dd {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .field-span,
@@ -1128,6 +1256,11 @@ button {
   .platform-health {
     display: none;
   }
+
+  .model-editor-grid,
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 780px) {
@@ -1165,8 +1298,13 @@ button {
   .role-catalog,
   .configuration-grid,
   .secret-grid,
+  .capability-choice-grid,
   .configuration-editor,
   .configuration-values {
+    grid-template-columns: 1fr;
+  }
+
+  .model-metrics {
     grid-template-columns: 1fr;
   }
 

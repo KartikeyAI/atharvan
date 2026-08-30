@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type {
   MembershipDomainEntry,
+  ModelProviderCatalogue,
   OperatorDirectoryEntry,
   OperatorRoleDefinitionEntry,
   PlatformConfigurationRegistry,
@@ -93,6 +94,8 @@ export type OperatorRolesResponse = {
 export type PlatformConfigurationResponse = PlatformConfigurationRegistry;
 
 export type PlatformSecretReferencesResponse = PlatformSecretReferenceRegistry;
+
+export type ModelProviderCatalogueResponse = ModelProviderCatalogue;
 
 function isApiErrorBody(
   value: unknown,

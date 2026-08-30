@@ -12,12 +12,20 @@ import {
   unknownPlatformOverview,
   type AuthenticatedOperator,
   type MembershipDomainEntry,
+  type ModelCapability,
+  type ModelCatalogueLifecycle,
+  type ModelDataClassification,
+  type ModelKind,
+  type ModelProviderAdapterKind,
+  type ModelProviderCatalogue,
+  type ModelProviderReportedHealth,
   type OperatorDirectoryEntry,
   type OperatorRoleDefinitionEntry,
   type PlatformConfigurationRegistry,
   type PlatformConfigurationScope,
   type PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
+import { ModelCatalogueCommandRejectedError } from "@atharvan/models";
 import {
   PlatformSecretCommandRejectedError,
   PlatformSecretProviderError,
@@ -59,6 +67,7 @@ export interface AuthenticationRuntime {
   listPlatformSecretReferences(): Promise<
     ReadonlyArray<PlatformSecretReferenceEntry>
   >;
+  listModelCatalogue(): Promise<ModelProviderCatalogue>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -107,6 +116,66 @@ export interface AuthenticationRuntime {
     actor: AuthenticatedOperator,
     input: RevokePlatformSecretCommand,
   ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
+  setModelProvider(
+    actor: AuthenticatedOperator,
+    input: SetModelProviderCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  setModel(
+    actor: AuthenticatedOperator,
+    input: SetModelCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  recordModelProviderHealth(
+    actor: AuthenticatedOperator,
+    input: RecordModelProviderHealthCommand,
+  ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+}
+
+export interface SetModelProviderCommand {
+  readonly key: string;
+  readonly displayName: string;
+  readonly adapterKind: ModelProviderAdapterKind;
+  readonly baseUrl: string | null;
+  readonly credentialReferenceId?: string | null;
+  readonly regions: ReadonlyArray<string>;
+  readonly maximumDataClassification: ModelDataClassification;
+  readonly lifecycle: ModelCatalogueLifecycle;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface SetModelCommand {
+  readonly providerId: string;
+  readonly key: string;
+  readonly displayName: string;
+  readonly kind: ModelKind;
+  readonly capabilities: ReadonlyArray<ModelCapability>;
+  readonly contextWindowTokens: number;
+  readonly maximumOutputTokens: number | null;
+  readonly inputPriceMicrounitsPerMillion: number;
+  readonly outputPriceMicrounitsPerMillion: number;
+  readonly regions: ReadonlyArray<string>;
+  readonly maximumDataClassification: ModelDataClassification;
+  readonly lifecycle: ModelCatalogueLifecycle;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface RecordModelProviderHealthCommand {
+  readonly providerId: string;
+  readonly status: ModelProviderReportedHealth;
+  readonly latencyMs: number | null;
+  readonly httpStatusCode: number | null;
+  readonly errorCode: string | null;
+  readonly reason: string;
+  readonly correlationId: string;
 }
 
 export interface CreatePlatformSecretCommand {
@@ -421,6 +490,62 @@ export function createApp(
     },
   );
 
+  app.get("/v1/platform/model-catalogue", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:models:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listModelCatalogue());
+  });
+
+  app.put("/v1/platform/model-providers/:key", async (context) => {
+    const input = await readJson(context, parseSetModelProvider);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.setModelProvider(context.get("operator"), {
+        ...input,
+        key: context.req.param("key"),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.put(
+    "/v1/platform/model-providers/:providerId/models/:key",
+    async (context) => {
+      const input = await readJson(context, parseSetModel);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(context, () =>
+        runtime.setModel(context.get("operator"), {
+          ...input,
+          providerId: context.req.param("providerId"),
+          key: context.req.param("key"),
+          correlationId: context.get("requestId"),
+        }),
+      );
+    },
+  );
+
+  app.post(
+    "/v1/platform/model-providers/:providerId/health-observations",
+    async (context) => {
+      const input = await readJson(context, parseModelProviderHealth);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(context, () =>
+        runtime.recordModelProviderHealth(context.get("operator"), {
+          ...input,
+          providerId: context.req.param("providerId"),
+          correlationId: context.get("requestId"),
+        }),
+      );
+    },
+  );
+
   app.post(
     "/v1/platform/secret-references/:referenceId/revoke",
     async (context) => {
@@ -685,6 +810,188 @@ function parseDisableMembershipDomain(
     : null;
 }
 
+function parseSetModelProvider(
+  value: unknown,
+): Omit<SetModelProviderCommand, "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const hasBaseUrl = value.baseUrl !== null && value.baseUrl !== undefined;
+  const baseUrl = !hasBaseUrl ? null : readTrimmedString(value.baseUrl, 500);
+  const hasCredentialReference = "credentialReferenceId" in value;
+  const credentialReferenceId =
+    !hasCredentialReference || value.credentialReferenceId === null
+      ? null
+      : readTrimmedString(value.credentialReferenceId, 36);
+  const reason = readReason(value.reason);
+  const regions = readStringArray(value.regions, 32, 32);
+  const adapterKind = value.adapterKind;
+  const maximumDataClassification = value.maximumDataClassification;
+  const lifecycle = value.lifecycle;
+  return displayName !== null &&
+    (!hasBaseUrl || baseUrl !== null) &&
+    (!hasCredentialReference ||
+      value.credentialReferenceId === null ||
+      credentialReferenceId !== null) &&
+    reason !== null &&
+    regions !== null &&
+    isModelProviderAdapterKind(adapterKind) &&
+    isModelDataClassification(maximumDataClassification) &&
+    isModelCatalogueLifecycle(lifecycle)
+    ? {
+        displayName,
+        adapterKind,
+        baseUrl,
+        ...(hasCredentialReference ? { credentialReferenceId } : {}),
+        regions,
+        maximumDataClassification,
+        lifecycle,
+        reason,
+      }
+    : null;
+}
+
+function parseSetModel(
+  value: unknown,
+): Omit<SetModelCommand, "providerId" | "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const capabilities = readStringArray(value.capabilities, 7, 32);
+  const regions = readStringArray(value.regions, 32, 32);
+  const reason = readReason(value.reason);
+  const kind = value.kind;
+  const maximumDataClassification = value.maximumDataClassification;
+  const lifecycle = value.lifecycle;
+  const maximumOutputTokens =
+    value.maximumOutputTokens === null ? null : value.maximumOutputTokens;
+  return displayName !== null &&
+    capabilities !== null &&
+    capabilities.every(isModelCapability) &&
+    regions !== null &&
+    reason !== null &&
+    isModelKind(kind) &&
+    isModelDataClassification(maximumDataClassification) &&
+    isModelCatalogueLifecycle(lifecycle) &&
+    typeof value.contextWindowTokens === "number" &&
+    (maximumOutputTokens === null || typeof maximumOutputTokens === "number") &&
+    typeof value.inputPriceMicrounitsPerMillion === "number" &&
+    typeof value.outputPriceMicrounitsPerMillion === "number"
+    ? {
+        displayName,
+        kind,
+        capabilities: capabilities as ReadonlyArray<ModelCapability>,
+        contextWindowTokens: value.contextWindowTokens,
+        maximumOutputTokens,
+        inputPriceMicrounitsPerMillion: value.inputPriceMicrounitsPerMillion,
+        outputPriceMicrounitsPerMillion: value.outputPriceMicrounitsPerMillion,
+        regions,
+        maximumDataClassification,
+        lifecycle,
+        reason,
+      }
+    : null;
+}
+
+function parseModelProviderHealth(
+  value: unknown,
+): Omit<
+  RecordModelProviderHealthCommand,
+  "providerId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const latencyMs = value.latencyMs === null ? null : value.latencyMs;
+  const httpStatusCode =
+    value.httpStatusCode === null ? null : value.httpStatusCode;
+  const errorCode =
+    value.errorCode === null || value.errorCode === undefined
+      ? null
+      : readTrimmedString(value.errorCode, 96);
+  return reason !== null &&
+    (value.status === "healthy" ||
+      value.status === "degraded" ||
+      value.status === "unavailable") &&
+    (latencyMs === null || typeof latencyMs === "number") &&
+    (httpStatusCode === null || typeof httpStatusCode === "number") &&
+    (errorCode !== null ||
+      value.errorCode === null ||
+      value.errorCode === undefined)
+    ? {
+        status: value.status,
+        latencyMs,
+        httpStatusCode,
+        errorCode,
+        reason,
+      }
+    : null;
+}
+
+function readStringArray(
+  value: unknown,
+  maximumItems: number,
+  maximumItemLength: number,
+): ReadonlyArray<string> | null {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > maximumItems ||
+    value.some(
+      (item) =>
+        typeof item !== "string" ||
+        item.trim().length === 0 ||
+        item.trim().length > maximumItemLength,
+    )
+  ) {
+    return null;
+  }
+  return value as ReadonlyArray<string>;
+}
+
+function isModelProviderAdapterKind(
+  value: unknown,
+): value is ModelProviderAdapterKind {
+  return (
+    value === "openai" ||
+    value === "anthropic" ||
+    value === "google" ||
+    value === "azure_openai" ||
+    value === "openai_compatible" ||
+    value === "self_hosted"
+  );
+}
+
+function isModelDataClassification(
+  value: unknown,
+): value is ModelDataClassification {
+  return (
+    value === "public" ||
+    value === "internal" ||
+    value === "confidential" ||
+    value === "restricted"
+  );
+}
+
+function isModelCatalogueLifecycle(
+  value: unknown,
+): value is ModelCatalogueLifecycle {
+  return value === "draft" || value === "active" || value === "deprecated";
+}
+
+function isModelKind(value: unknown): value is ModelKind {
+  return value === "generation" || value === "embedding";
+}
+
+function isModelCapability(value: string): value is ModelCapability {
+  return (
+    value === "text_generation" ||
+    value === "code_generation" ||
+    value === "reasoning" ||
+    value === "vision" ||
+    value === "tool_use" ||
+    value === "structured_output" ||
+    value === "embeddings"
+  );
+}
+
 function readReason(value: unknown): string | null {
   const reason = readTrimmedString(value, 500);
   return reason !== null && reason.length >= 8 ? reason : null;
@@ -805,6 +1112,18 @@ async function executeCommand(
           code: "secret_change_rejected",
           reason: error.reason,
           message: "The requested secret lifecycle change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (error instanceof ModelCatalogueCommandRejectedError) {
+      return context.json(
+        {
+          code: "model_catalogue_change_rejected",
+          reason: error.reason,
+          message: "The requested model catalogue change was not accepted.",
           requestId: context.get("requestId"),
         },
         409,

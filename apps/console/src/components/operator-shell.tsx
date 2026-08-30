@@ -34,7 +34,7 @@ const navigation: ReadonlyArray<{
     icon: ShieldCheckIcon,
     available: true,
   },
-  { label: "Models", href: "/models", icon: BotIcon, available: false },
+  { label: "Models", href: "/models", icon: BotIcon, available: true },
   {
     label: "Integrations",
     href: "/integrations",

@@ -48,6 +48,10 @@ function createRuntime(input?: {
       items: [],
     })),
     listPlatformSecretReferences: vi.fn(async () => []),
+    listModelCatalogue: vi.fn(async () => ({
+      environment: "development" as const,
+      items: [],
+    })),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -80,6 +84,20 @@ function createRuntime(input?: {
     revokePlatformSecret: vi.fn(async () => ({
       outcome: "updated" as const,
       id: "00000000-0000-4000-8000-000000000301",
+    })),
+    setModelProvider: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000401",
+      revisionNumber: 1,
+    })),
+    setModel: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000402",
+      revisionNumber: 1,
+    })),
+    recordModelProviderHealth: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000403",
     })),
   };
 }
@@ -455,6 +473,135 @@ describe("Atharvan control-plane worker", () => {
     );
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain("never-return-this");
+  });
+
+  it("returns an evidence-based model catalogue to model readers", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.listModelCatalogue).mockResolvedValue({
+      environment: "development",
+      items: [
+        {
+          id: "00000000-0000-4000-8000-000000000401",
+          key: "openai",
+          displayName: "OpenAI",
+          adapterKind: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          credentialReferenceId: "00000000-0000-4000-8000-000000000301",
+          credentialReferenceKey: "models.openai",
+          regions: ["global"],
+          maximumDataClassification: "confidential",
+          lifecycle: "active",
+          revisionNumber: 1,
+          updatedAt: "2026-08-30T00:00:00.000Z",
+          health: {
+            id: "unknown",
+            state: "unknown",
+            reportedStatus: null,
+            source: null,
+            latencyMs: null,
+            httpStatusCode: null,
+            errorCode: null,
+            observedAt: null,
+            expiresAt: null,
+          },
+          models: [],
+        },
+      ],
+    });
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-catalogue",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      environment: "development",
+      items: [{ key: "openai", health: { state: "unknown" } }],
+    });
+  });
+
+  it("validates and delegates provider revisions", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-providers/openai",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "OpenAI",
+          adapterKind: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          credentialReferenceId: "00000000-0000-4000-8000-000000000301",
+          regions: ["global"],
+          maximumDataClassification: "confidential",
+          lifecycle: "active",
+          reason: "Register the development model provider.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.setModelProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        key: "openai",
+        credentialReferenceId: "00000000-0000-4000-8000-000000000301",
+      }),
+    );
+  });
+
+  it("validates and delegates model revisions", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-providers/00000000-0000-4000-8000-000000000401/models/gpt-5.6",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "GPT 5.6",
+          kind: "generation",
+          capabilities: ["reasoning", "tool_use"],
+          contextWindowTokens: 400000,
+          maximumOutputTokens: 128000,
+          inputPriceMicrounitsPerMillion: 2500000,
+          outputPriceMicrounitsPerMillion: 15000000,
+          regions: ["global"],
+          maximumDataClassification: "confidential",
+          lifecycle: "active",
+          reason: "Publish the verified model metadata.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.setModel).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({ key: "gpt-5.6", kind: "generation" }),
+    );
+  });
+
+  it("records bounded provider health evidence without requiring step-up", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-providers/00000000-0000-4000-8000-000000000401/health-observations",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: "degraded",
+          latencyMs: 1200,
+          httpStatusCode: 429,
+          errorCode: "rate_limited",
+          reason: "Recorded from an authenticated provider probe.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.recordModelProviderHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorId: "operator-1" }),
+      expect.objectContaining({ status: "degraded", httpStatusCode: 429 }),
+    );
   });
 
   it("rejects malformed administrative commands before storage", async () => {

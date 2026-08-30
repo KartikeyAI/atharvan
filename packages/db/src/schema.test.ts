@@ -9,6 +9,11 @@ import {
   operatorRoleDefinitions,
   operators,
   operatorVerificationChallenges,
+  modelProviderHealthObservations,
+  modelProviderRevisions,
+  modelProviders,
+  modelRevisions,
+  models,
   platformConfigurationBindings,
   platformConfigurationDefinitions,
   platformConfigurationRevisions,
@@ -146,6 +151,48 @@ describe("operator onboarding schema", () => {
         "platform_secret_versions_one_pending",
         "platform_secret_versions_correlation_unique",
       ]),
+    );
+  });
+
+  it("versions model catalogue metadata and keeps health evidence append-only", () => {
+    const providerConfig = getTableConfig(modelProviders);
+    const providerRevisionConfig = getTableConfig(modelProviderRevisions);
+    const modelConfig = getTableConfig(models);
+    const modelRevisionConfig = getTableConfig(modelRevisions);
+    const healthConfig = getTableConfig(modelProviderHealthObservations);
+
+    expect(providerConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "model_providers_key_environment_unique",
+    );
+    expect(
+      providerRevisionConfig.indexes.map((entry) => entry.config.name),
+    ).toEqual(
+      expect.arrayContaining([
+        "model_provider_revisions_number_unique",
+        "model_provider_revisions_correlation_unique",
+        "model_provider_revisions_credential_reference_idx",
+      ]),
+    );
+    expect(modelConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "models_provider_key_unique",
+    );
+    expect(modelRevisionConfig.checks.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "model_revisions_token_bounds",
+        "model_revisions_price_nonnegative",
+        "model_revisions_currency_usd",
+      ]),
+    );
+    expect(healthConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "model_provider_health_correlation_unique",
+        "model_provider_health_provider_observed_idx",
+      ]),
+    );
+    expect(
+      providerRevisionConfig.columns.map((column) => column.name),
+    ).not.toEqual(
+      expect.arrayContaining(["credential_value", "api_key", "token"]),
     );
   });
 });

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MembershipDomainsRouteImport } from './routes/membership-domains'
+import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OperatorsRouteImport } from './routes/operators'
 import { Route as SecretsRouteImport } from './routes/secrets'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -30,6 +31,11 @@ const LoginRoute = LoginRouteImport.update({
 const MembershipDomainsRoute = MembershipDomainsRouteImport.update({
   id: '/membership-domains',
   path: '/membership-domains',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModelsRoute = ModelsRouteImport.update({
+  id: '/models',
+  path: '/models',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OperatorsRoute = OperatorsRouteImport.update({
@@ -57,6 +63,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/membership-domains': typeof MembershipDomainsRoute
+  '/models': typeof ModelsRoute
   '/operators': typeof OperatorsRoute
   '/secrets': typeof SecretsRoute
   '/settings': typeof SettingsRoute
@@ -66,6 +73,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/membership-domains': typeof MembershipDomainsRoute
+  '/models': typeof ModelsRoute
   '/operators': typeof OperatorsRoute
   '/secrets': typeof SecretsRoute
   '/settings': typeof SettingsRoute
@@ -76,6 +84,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/membership-domains': typeof MembershipDomainsRoute
+  '/models': typeof ModelsRoute
   '/operators': typeof OperatorsRoute
   '/secrets': typeof SecretsRoute
   '/settings': typeof SettingsRoute
@@ -87,6 +96,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/membership-domains'
+    | '/models'
     | '/operators'
     | '/secrets'
     | '/settings'
@@ -96,6 +106,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/membership-domains'
+    | '/models'
     | '/operators'
     | '/secrets'
     | '/settings'
@@ -105,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/membership-domains'
+    | '/models'
     | '/operators'
     | '/secrets'
     | '/settings'
@@ -115,6 +127,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   MembershipDomainsRoute: typeof MembershipDomainsRoute
+  ModelsRoute: typeof ModelsRoute
   OperatorsRoute: typeof OperatorsRoute
   SecretsRoute: typeof SecretsRoute
   SettingsRoute: typeof SettingsRoute
@@ -142,6 +155,13 @@ declare module '@tanstack/react-router' {
       path: '/membership-domains'
       fullPath: '/membership-domains'
       preLoaderRoute: typeof MembershipDomainsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/models': {
+      id: '/models'
+      path: '/models'
+      fullPath: '/models'
+      preLoaderRoute: typeof ModelsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/operators': {
@@ -179,6 +199,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   MembershipDomainsRoute: MembershipDomainsRoute,
+  ModelsRoute: ModelsRoute,
   OperatorsRoute: OperatorsRoute,
   SecretsRoute: SecretsRoute,
   SettingsRoute: SettingsRoute,

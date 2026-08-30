@@ -43,6 +43,13 @@
       "when": 1788063766829,
       "tag": "0005_platform_secret_references",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788077161673,
+      "tag": "0006_model_provider_catalogue",
+      "breakpoints": true
     }
   ]
 }

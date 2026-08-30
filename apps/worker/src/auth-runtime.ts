@@ -19,6 +19,7 @@ import {
   createPostgresPlatformAdministrationReader,
   createPostgresPlatformConfigurationStore,
   createPostgresPlatformSecretStore,
+  createPostgresModelCatalogueStore,
 } from "@atharvan/db";
 import {
   createResendTransactionalEmailSender,
@@ -29,6 +30,7 @@ import {
   createPlatformSecretLifecycleService,
   unconfiguredPlatformSecretMaterialProvider,
 } from "@atharvan/secrets";
+import { createModelCatalogueService } from "@atharvan/models";
 
 import type { AuthenticationRuntime, RuntimeBindings } from "./index";
 
@@ -107,6 +109,10 @@ async function createProductionAuthenticationRuntime(input: {
     provider: secretMaterialProvider,
     environment: config.ATHARVAN_ENVIRONMENT,
   });
+  const modelCatalogueService = createModelCatalogueService({
+    store: createPostgresModelCatalogueStore(databaseHandle.database),
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -178,6 +184,7 @@ async function createProductionAuthenticationRuntime(input: {
     listPlatformConfiguration: () =>
       configurationStore.listConfiguration(config.ATHARVAN_ENVIRONMENT),
     listPlatformSecretReferences: () => secretLifecycleService.listReferences(),
+    listModelCatalogue: () => modelCatalogueService.listCatalogue(),
     async createOperatorInvitation(actor, command) {
       const registry = await configurationStore.listConfiguration(
         config.ATHARVAN_ENVIRONMENT,
@@ -258,5 +265,11 @@ async function createProductionAuthenticationRuntime(input: {
       secretLifecycleService.rotate({ actor, ...command }),
     revokePlatformSecret: (actor, command) =>
       secretLifecycleService.revoke({ actor, ...command }),
+    setModelProvider: (actor, command) =>
+      modelCatalogueService.setProvider({ actor, ...command }),
+    setModel: (actor, command) =>
+      modelCatalogueService.setModel({ actor, ...command }),
+    recordModelProviderHealth: (actor, command) =>
+      modelCatalogueService.recordHealthObservation({ actor, ...command }),
   };
 }

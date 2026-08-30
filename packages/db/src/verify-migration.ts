@@ -9,6 +9,11 @@ if (databaseUrl === undefined || databaseUrl.length === 0) {
 const expectedTables = [
   "allowed_email_domains",
   "audit_events",
+  "model_provider_health_observations",
+  "model_provider_revisions",
+  "model_providers",
+  "model_revisions",
+  "models",
   "operator_invitations",
   "operator_verification_challenges",
   "operators",
@@ -25,6 +30,11 @@ const expectedIndexes = [
   "operator_invitations_one_pending_per_operator",
   "operator_verification_challenges_one_pending_per_operator",
   "operator_verification_challenges_correlation_idx",
+  "model_provider_health_provider_observed_idx",
+  "model_provider_revisions_number_unique",
+  "model_providers_key_environment_unique",
+  "model_revisions_number_unique",
+  "models_provider_key_unique",
   "platform_configuration_bindings_environment_unique",
   "platform_configuration_bindings_platform_unique",
   "platform_configuration_definitions_key_unique",
@@ -51,6 +61,8 @@ const expectedAuthIndexes = [
 
 const expectedConstraints = [
   "operators_super_administrator_must_be_active",
+  "model_provider_health_expiry_after_observation",
+  "model_revisions_token_bounds",
   "platform_secret_references_active_metadata",
   "platform_secret_versions_terminal_metadata",
 ] as const;
@@ -59,12 +71,18 @@ const forbiddenSecretMaterialColumns = new Set([
   "value",
   "secret_value",
   "ciphertext",
+  "api_key",
+  "credential_value",
+  "token",
   "value_hash",
   "value_preview",
 ]);
 
 const expectedTriggers = [
   "platform_configuration_revisions_immutable",
+  "model_provider_health_observations_immutable",
+  "model_provider_revisions_immutable",
+  "model_revisions_immutable",
   "platform_secret_references_no_delete",
   "platform_secret_versions_no_delete",
 ] as const;
@@ -100,7 +118,7 @@ try {
     table_name: string;
     column_name: string;
   }>(
-    "select table_name, column_name from information_schema.columns where table_schema = 'public' and table_name in ('platform_secret_references', 'platform_secret_versions')",
+    "select table_name, column_name from information_schema.columns where table_schema = 'public' and table_name in ('platform_secret_references', 'platform_secret_versions', 'model_provider_revisions')",
   );
   const tableNames = new Set(tableResult.rows.map((row) => row.table_name));
   const indexNames = new Set(indexResult.rows.map((row) => row.indexname));

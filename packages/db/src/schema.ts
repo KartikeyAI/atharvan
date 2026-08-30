@@ -187,6 +187,40 @@ export const platformSecretProvider = pgEnum("platform_secret_provider", [
   "cloudflare_secrets_store",
 ]);
 
+export const modelProviderAdapterKind = pgEnum("model_provider_adapter_kind", [
+  "openai",
+  "anthropic",
+  "google",
+  "azure_openai",
+  "openai_compatible",
+  "self_hosted",
+]);
+
+export const modelCatalogueLifecycle = pgEnum("model_catalogue_lifecycle", [
+  "draft",
+  "active",
+  "deprecated",
+]);
+
+export const modelDataClassification = pgEnum("model_data_classification", [
+  "public",
+  "internal",
+  "confidential",
+  "restricted",
+]);
+
+export const modelKind = pgEnum("model_kind", ["generation", "embedding"]);
+
+export const modelProviderHealthStatus = pgEnum(
+  "model_provider_health_status",
+  ["healthy", "degraded", "unavailable"],
+);
+
+export const modelProviderHealthSource = pgEnum(
+  "model_provider_health_source",
+  ["operator_probe"],
+);
+
 export const operators = pgTable(
   "operators",
   {
@@ -760,6 +794,256 @@ export const platformSecretVersions = pgTable(
     check(
       "platform_secret_versions_terminal_metadata",
       sql`(${table.status} = 'pending' AND ${table.activatedAt} IS NULL AND ${table.retiredAt} IS NULL AND ${table.failedAt} IS NULL) OR (${table.status} = 'active' AND ${table.activatedAt} IS NOT NULL AND ${table.retiredAt} IS NULL AND ${table.failedAt} IS NULL) OR (${table.status} = 'retired' AND ${table.activatedAt} IS NOT NULL AND ${table.retiredAt} IS NOT NULL AND ${table.failedAt} IS NULL) OR (${table.status} = 'failed' AND ${table.activatedAt} IS NULL AND ${table.retiredAt} IS NULL AND ${table.failedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const modelProviders = pgTable(
+  "model_providers",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_providers_key_environment_unique").on(
+      table.key,
+      table.environment,
+    ),
+    index("model_providers_environment_updated_idx").on(
+      table.environment,
+      table.updatedAt,
+    ),
+    check(
+      "model_providers_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_-]{1,63}$'`,
+    ),
+    check(
+      "model_providers_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const modelProviderRevisions = pgTable(
+  "model_provider_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => modelProviders.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    displayName: text("display_name").notNull(),
+    adapterKind: modelProviderAdapterKind("adapter_kind").notNull(),
+    baseUrl: text("base_url"),
+    credentialReferenceId: uuid("credential_reference_id").references(
+      () => platformSecretReferences.id,
+      { onDelete: "restrict" },
+    ),
+    regions: text("regions").array().notNull(),
+    maximumDataClassification: modelDataClassification(
+      "maximum_data_classification",
+    ).notNull(),
+    lifecycle: modelCatalogueLifecycle("lifecycle").notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_provider_revisions_number_unique").on(
+      table.providerId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("model_provider_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("model_provider_revisions_provider_created_idx").on(
+      table.providerId,
+      table.createdAt,
+    ),
+    index("model_provider_revisions_credential_reference_idx")
+      .on(table.credentialReferenceId)
+      .where(sql`${table.credentialReferenceId} IS NOT NULL`),
+    check(
+      "model_provider_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "model_provider_revisions_name_nonempty",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120`,
+    ),
+    check(
+      "model_provider_revisions_regions_nonempty",
+      sql`cardinality(${table.regions}) BETWEEN 1 AND 32`,
+    ),
+    check(
+      "model_provider_revisions_base_url_https",
+      sql`${table.baseUrl} IS NULL OR ${table.baseUrl} ~ '^https://[^[:space:]@]+$'`,
+    ),
+  ],
+);
+
+export const models = pgTable(
+  "models",
+  {
+    id: uuid("id").primaryKey(),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => modelProviders.id, { onDelete: "restrict" }),
+    key: text("key").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("models_provider_key_unique").on(table.providerId, table.key),
+    index("models_provider_updated_idx").on(table.providerId, table.updatedAt),
+    check(
+      "models_key_shape",
+      sql`${table.key} ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'`,
+    ),
+    check("models_revision_positive", sql`${table.currentRevisionNumber} > 0`),
+  ],
+);
+
+export const modelRevisions = pgTable(
+  "model_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    modelId: uuid("model_id")
+      .notNull()
+      .references(() => models.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    displayName: text("display_name").notNull(),
+    kind: modelKind("kind").notNull(),
+    capabilities: text("capabilities").array().notNull(),
+    contextWindowTokens: integer("context_window_tokens").notNull(),
+    maximumOutputTokens: integer("maximum_output_tokens"),
+    inputPriceMicrounitsPerMillion: bigint(
+      "input_price_microunits_per_million",
+      { mode: "number" },
+    ).notNull(),
+    outputPriceMicrounitsPerMillion: bigint(
+      "output_price_microunits_per_million",
+      { mode: "number" },
+    ).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    regions: text("regions").array().notNull(),
+    maximumDataClassification: modelDataClassification(
+      "maximum_data_classification",
+    ).notNull(),
+    lifecycle: modelCatalogueLifecycle("lifecycle").notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_revisions_number_unique").on(
+      table.modelId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("model_revisions_correlation_unique").on(table.correlationId),
+    index("model_revisions_model_created_idx").on(
+      table.modelId,
+      table.createdAt,
+    ),
+    check("model_revisions_number_positive", sql`${table.revisionNumber} > 0`),
+    check(
+      "model_revisions_name_nonempty",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120`,
+    ),
+    check(
+      "model_revisions_capabilities_nonempty",
+      sql`cardinality(${table.capabilities}) > 0`,
+    ),
+    check(
+      "model_revisions_regions_nonempty",
+      sql`cardinality(${table.regions}) BETWEEN 1 AND 32`,
+    ),
+    check(
+      "model_revisions_token_bounds",
+      sql`${table.contextWindowTokens} > 0 AND ((${table.kind} = 'generation' AND ${table.maximumOutputTokens} > 0) OR (${table.kind} = 'embedding' AND ${table.maximumOutputTokens} IS NULL))`,
+    ),
+    check(
+      "model_revisions_price_nonnegative",
+      sql`${table.inputPriceMicrounitsPerMillion} >= 0 AND ${table.outputPriceMicrounitsPerMillion} >= 0`,
+    ),
+    check("model_revisions_currency_usd", sql`${table.currency} = 'USD'`),
+  ],
+);
+
+export const modelProviderHealthObservations = pgTable(
+  "model_provider_health_observations",
+  {
+    id: uuid("id").primaryKey(),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => modelProviders.id, { onDelete: "restrict" }),
+    status: modelProviderHealthStatus("status").notNull(),
+    source: modelProviderHealthSource("source").notNull(),
+    latencyMs: integer("latency_ms"),
+    httpStatusCode: integer("http_status_code"),
+    errorCode: text("error_code"),
+    recordedByOperatorId: uuid("recorded_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_provider_health_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("model_provider_health_provider_observed_idx").on(
+      table.providerId,
+      table.observedAt,
+    ),
+    index("model_provider_health_expiry_idx").on(table.expiresAt),
+    check(
+      "model_provider_health_latency_bounds",
+      sql`${table.latencyMs} IS NULL OR ${table.latencyMs} BETWEEN 0 AND 120000`,
+    ),
+    check(
+      "model_provider_health_http_status_bounds",
+      sql`${table.httpStatusCode} IS NULL OR ${table.httpStatusCode} BETWEEN 100 AND 599`,
+    ),
+    check(
+      "model_provider_health_error_code_shape",
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} ~ '^[a-z][a-z0-9_.-]{1,95}$'`,
+    ),
+    check(
+      "model_provider_health_healthy_has_no_error",
+      sql`${table.status} <> 'healthy' OR ${table.errorCode} IS NULL`,
+    ),
+    check(
+      "model_provider_health_expiry_after_observation",
+      sql`${table.expiresAt} > ${table.observedAt}`,
     ),
   ],
 );
