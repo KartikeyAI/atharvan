@@ -1203,6 +1203,51 @@ button {
   font-size: 11px;
 }
 
+.adapter-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.adapter-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.adapter-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.adapter-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.adapter-capability-matrix {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.adapter-capability-matrix > div {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.adapter-capability-matrix span,
+.adapter-capability-matrix strong {
+  display: block;
+}
+
+.adapter-capability-matrix span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
 .capability-details {
   margin-top: 8px;
   color: var(--muted-foreground);
@@ -1395,6 +1440,15 @@ button {
 
   .model-editor-grid,
   .provider-grid,
+  .routing-editor-grid,
+  .adapter-evidence-grid,
+  .adapter-capability-grid,
+  .adapter-capability-matrix {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .model-editor-grid,
+  .provider-grid,
   .routing-editor-grid {
     grid-template-columns: 1fr;
   }
@@ -1459,7 +1513,11 @@ button {
   .secret-grid,
   .capability-choice-grid,
   .configuration-editor,
-  .configuration-values {
+  .configuration-values,
+  .adapter-contract-grid,
+  .adapter-evidence-grid,
+  .adapter-capability-grid,
+  .adapter-capability-matrix {
     grid-template-columns: 1fr;
   }
 

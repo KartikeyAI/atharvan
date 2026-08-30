@@ -12,6 +12,7 @@
     "typecheck": "wrangler types && tsc --noEmit"
   },
   "dependencies": {
+    "@atharvan/adapters": "workspace:*",
     "@atharvan/auth": "workspace:*",
     "@atharvan/config": "workspace:*",
     "@atharvan/db": "workspace:*",

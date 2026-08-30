@@ -16,6 +16,10 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type {
+  PlatformAdapterCapabilityDeclaration,
+  PlatformAdapterCommandDeclaration,
+  PlatformAdapterConfigurationField,
+  PlatformAdapterHealthCheckDeclaration,
   PlatformConfigurationValidation,
   PlatformConfigurationValue,
 } from "@atharvan/domain";
@@ -261,6 +265,45 @@ export const platformIntegrationHealthSource = pgEnum(
   "platform_integration_health_source",
   ["operator_probe"],
 );
+
+export const platformAdapterCategory = pgEnum("platform_adapter_category", [
+  "language",
+  "framework",
+  "package_manager",
+  "build",
+  "test",
+  "database",
+  "deployment",
+  "cloud",
+  "source_control",
+  "observability",
+  "security",
+  "model",
+  "design_system",
+  "private_enterprise",
+]);
+
+export const platformAdapterReleaseChannel = pgEnum(
+  "platform_adapter_release_channel",
+  ["internal", "canary", "beta", "stable"],
+);
+
+export const platformAdapterSignatureStatus = pgEnum(
+  "platform_adapter_signature_status",
+  ["unverified", "verified", "invalid"],
+);
+
+export const platformAdapterSecurityReviewStatus = pgEnum(
+  "platform_adapter_security_review_status",
+  ["pending", "approved", "changes_required", "rejected"],
+);
+
+export const platformAdapterLifecycle = pgEnum("platform_adapter_lifecycle", [
+  "draft",
+  "active",
+  "deprecated",
+  "blocked",
+]);
 
 export const operators = pgTable(
   "operators",
@@ -1280,6 +1323,158 @@ export const platformIntegrationHealthObservations = pgTable(
     check(
       "platform_integration_health_expiry_after_observation",
       sql`${table.expiresAt} > ${table.observedAt}`,
+    ),
+  ],
+);
+
+export const platformAdapterReleases = pgTable(
+  "platform_adapter_releases",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    version: text("version").notNull(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_adapter_releases_identity_unique").on(
+      table.key,
+      table.version,
+      table.environment,
+    ),
+    index("platform_adapter_releases_environment_updated_idx").on(
+      table.environment,
+      table.updatedAt,
+    ),
+    check(
+      "platform_adapter_releases_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_-]{1,63}$'`,
+    ),
+    check(
+      "platform_adapter_releases_version_shape",
+      sql`${table.version} ~ '^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$'`,
+    ),
+    check(
+      "platform_adapter_releases_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const platformAdapterReleaseRevisions = pgTable(
+  "platform_adapter_release_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    releaseId: uuid("release_id")
+      .notNull()
+      .references(() => platformAdapterReleases.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    displayName: text("display_name").notNull(),
+    category: platformAdapterCategory("category").notNull(),
+    packageName: text("package_name").notNull(),
+    packageDigestSha256: text("package_digest_sha256").notNull(),
+    documentationUrl: text("documentation_url"),
+    capabilities: jsonb("capabilities")
+      .$type<ReadonlyArray<PlatformAdapterCapabilityDeclaration>>()
+      .notNull(),
+    declaredPermissions: text("declared_permissions").array().notNull(),
+    configurationFields: jsonb("configuration_fields")
+      .$type<ReadonlyArray<PlatformAdapterConfigurationField>>()
+      .notNull(),
+    commands: jsonb("commands")
+      .$type<ReadonlyArray<PlatformAdapterCommandDeclaration>>()
+      .notNull(),
+    supportedEnvironments: text("supported_environments").array().notNull(),
+    compatibilityTags: text("compatibility_tags").array().notNull(),
+    requiredSecretPurposes: text("required_secret_purposes").array().notNull(),
+    healthChecks: jsonb("health_checks")
+      .$type<ReadonlyArray<PlatformAdapterHealthCheckDeclaration>>()
+      .notNull(),
+    releaseChannel: platformAdapterReleaseChannel("release_channel").notNull(),
+    signatureStatus:
+      platformAdapterSignatureStatus("signature_status").notNull(),
+    securityReviewStatus: platformAdapterSecurityReviewStatus(
+      "security_review_status",
+    ).notNull(),
+    securityReviewReference: text("security_review_reference"),
+    lifecycle: platformAdapterLifecycle("lifecycle").notNull(),
+    blockReason: text("block_reason"),
+    deprecatedAt: timestamp("deprecated_at", { withTimezone: true }),
+    sunsetAt: timestamp("sunset_at", { withTimezone: true }),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_adapter_release_revisions_number_unique").on(
+      table.releaseId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("platform_adapter_release_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("platform_adapter_release_revisions_release_created_idx").on(
+      table.releaseId,
+      table.createdAt,
+    ),
+    index("platform_adapter_release_revisions_lifecycle_idx").on(
+      table.lifecycle,
+      table.releaseChannel,
+    ),
+    check(
+      "platform_adapter_release_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "platform_adapter_release_revisions_name_nonempty",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120`,
+    ),
+    check(
+      "platform_adapter_release_revisions_package_shape",
+      sql`${table.packageName} ~ '^@[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9._-]*$' AND ${table.packageDigestSha256} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "platform_adapter_release_revisions_documentation_https",
+      sql`${table.documentationUrl} IS NULL OR ${table.documentationUrl} ~ '^https://[^[:space:]@]+$'`,
+    ),
+    check(
+      "platform_adapter_release_revisions_json_arrays",
+      sql`jsonb_typeof(${table.capabilities}) = 'array' AND jsonb_array_length(${table.capabilities}) = 8 AND jsonb_typeof(${table.configurationFields}) = 'array' AND jsonb_typeof(${table.commands}) = 'array' AND jsonb_typeof(${table.healthChecks}) = 'array'`,
+    ),
+    check(
+      "platform_adapter_release_revisions_array_limits",
+      sql`cardinality(${table.declaredPermissions}) <= 64 AND cardinality(${table.supportedEnvironments}) BETWEEN 1 AND 5 AND cardinality(${table.compatibilityTags}) <= 64 AND cardinality(${table.requiredSecretPurposes}) <= 32`,
+    ),
+    check(
+      "platform_adapter_release_revisions_activation_evidence",
+      sql`${table.lifecycle} <> 'active' OR (${table.signatureStatus} = 'verified' AND ${table.securityReviewStatus} = 'approved' AND ${table.securityReviewReference} IS NOT NULL)`,
+    ),
+    check(
+      "platform_adapter_release_revisions_stable_active",
+      sql`${table.releaseChannel} <> 'stable' OR ${table.lifecycle} = 'active'`,
+    ),
+    check(
+      "platform_adapter_release_revisions_block_metadata",
+      sql`(${table.lifecycle} = 'blocked' AND ${table.blockReason} IS NOT NULL) OR (${table.lifecycle} <> 'blocked' AND ${table.blockReason} IS NULL)`,
+    ),
+    check(
+      "platform_adapter_release_revisions_unsafe_blocked",
+      sql`(${table.signatureStatus} <> 'invalid' AND ${table.securityReviewStatus} <> 'rejected') OR ${table.lifecycle} = 'blocked'`,
+    ),
+    check(
+      "platform_adapter_release_revisions_deprecation_metadata",
+      sql`(${table.lifecycle} = 'deprecated' AND ${table.deprecatedAt} IS NOT NULL AND (${table.sunsetAt} IS NULL OR ${table.sunsetAt} > ${table.deprecatedAt})) OR (${table.lifecycle} <> 'deprecated' AND ${table.deprecatedAt} IS NULL AND ${table.sunsetAt} IS NULL)`,
     ),
   ],
 );

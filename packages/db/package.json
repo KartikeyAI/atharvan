@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@atharvan/adapters": "workspace:*",
     "@atharvan/auth": "workspace:*",
     "@atharvan/config": "workspace:*",
     "@atharvan/domain": "workspace:*",

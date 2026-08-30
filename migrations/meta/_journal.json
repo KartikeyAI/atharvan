@@ -64,6 +64,13 @@
       "when": 1788097962299,
       "tag": "0008_platform_integration_registry",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788100475445,
+      "tag": "0009_platform_adapter_registry",
+      "breakpoints": true
     }
   ]
 }

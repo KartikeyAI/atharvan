@@ -1,5 +1,6 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 
+import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import {
   createAtharvanAuth,
   createOperatorOnboardingService,
@@ -17,6 +18,7 @@ import {
   createPostgresOperatorRoleAdministrationStore,
   createPostgresOperatorSessionPolicyStore,
   createPostgresPlatformAdministrationReader,
+  createPostgresPlatformAdapterRegistryStore,
   createPostgresPlatformConfigurationStore,
   createPostgresPlatformIntegrationRegistryStore,
   createPostgresPlatformSecretStore,
@@ -129,6 +131,10 @@ async function createProductionAuthenticationRuntime(input: {
     ),
     environment: config.ATHARVAN_ENVIRONMENT,
   });
+  const adapterRegistryService = createPlatformAdapterRegistryService({
+    store: createPostgresPlatformAdapterRegistryStore(databaseHandle.database),
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -203,6 +209,7 @@ async function createProductionAuthenticationRuntime(input: {
     listModelCatalogue: () => modelCatalogueService.listCatalogue(),
     listModelRoutingOperations: () => modelRoutingService.listOperations(),
     listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
+    listPlatformAdapters: () => adapterRegistryService.listRegistry(),
     async createOperatorInvitation(actor, command) {
       const registry = await configurationStore.listConfiguration(
         config.ATHARVAN_ENVIRONMENT,
@@ -301,5 +308,7 @@ async function createProductionAuthenticationRuntime(input: {
         actor,
         ...command,
       }),
+    setPlatformAdapterRelease: (actor, command) =>
+      adapterRegistryService.setRelease({ actor, ...command }),
   };
 }

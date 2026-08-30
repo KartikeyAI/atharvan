@@ -11,6 +11,7 @@ import {
   GitPullRequestArrowIcon,
   MenuIcon,
   KeyRoundIcon,
+  PuzzleIcon,
   RouteIcon,
   SettingsIcon,
   ShieldCheckIcon,
@@ -48,6 +49,7 @@ const navigation: ReadonlyArray<{
     icon: CableIcon,
     available: true,
   },
+  { label: "Adapters", href: "/adapters", icon: PuzzleIcon, available: true },
   { label: "Runners", href: "/runners", icon: BoxIcon, available: false },
   {
     label: "Workflows",

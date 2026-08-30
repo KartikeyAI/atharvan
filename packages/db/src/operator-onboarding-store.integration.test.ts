@@ -1,4 +1,5 @@
 import { createOperatorOnboardingService } from "@atharvan/auth";
+import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import type { AuthenticatedOperator } from "@atharvan/domain";
 import { createPlatformIntegrationRegistryService } from "@atharvan/integrations";
@@ -18,6 +19,7 @@ import { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 import { createPostgresModelRoutingStore } from "./model-routing-store";
 import { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 import { createPostgresPlatformIntegrationRegistryStore } from "./platform-integration-store";
+import { createPostgresPlatformAdapterRegistryStore } from "./platform-adapter-store";
 import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
   auditEvents,
@@ -357,6 +359,125 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
             clientSecretReferenceKey: "models.openai",
             effectiveOperationalState: "enabled",
             health: expect.objectContaining({ state: "healthy" }),
+          }),
+        ],
+      });
+      let adapterIdSequence = 700;
+      const adapterRegistryService = createPlatformAdapterRegistryService({
+        store: createPostgresPlatformAdapterRegistryStore(database),
+        environment: "development",
+        now: () => commandTime,
+        randomId: () =>
+          `00000000-0000-4000-8000-${String(++adapterIdSequence).padStart(12, "0")}`,
+      });
+      const adapterRelease = await adapterRegistryService.setRelease({
+        actor,
+        key: "django",
+        version: "1.2.0",
+        displayName: "Django",
+        category: "framework",
+        packageName: "@arth/django-adapter",
+        packageDigestSha256: "a".repeat(64),
+        documentationUrl: "https://docs.arth.sh/adapters/django",
+        capabilities: [
+          { name: "detect", maturity: "stable" },
+          { name: "understand", maturity: "stable" },
+          { name: "modify", maturity: "beta" },
+          { name: "validate", maturity: "stable" },
+          { name: "preview", maturity: "unsupported" },
+          { name: "deploy", maturity: "unsupported" },
+          { name: "operate", maturity: "unsupported" },
+          { name: "migrate", maturity: "alpha" },
+        ],
+        declaredPermissions: ["repository:read", "repository:write"],
+        configurationFields: [
+          {
+            key: "python_version",
+            label: "Python version",
+            type: "string",
+            required: true,
+          },
+        ],
+        commands: [
+          {
+            key: "detect",
+            description: "Detect a Django repository.",
+            risk: "read",
+          },
+        ],
+        supportedEnvironments: ["development", "production"],
+        compatibilityTags: ["django:5", "python:3.13"],
+        requiredSecretPurposes: [],
+        healthChecks: [
+          {
+            key: "doctor",
+            command: "arth-adapter doctor",
+            timeoutSeconds: 30,
+          },
+        ],
+        releaseChannel: "stable",
+        signatureStatus: "verified",
+        securityReviewStatus: "approved",
+        securityReviewReference: "SEC-2026-0042",
+        lifecycle: "active",
+        reason: "Exercise reviewed adapter release publication.",
+        correlationId: "00000000-0000-4000-8000-000000000122",
+      });
+      expect(adapterRelease).toMatchObject({
+        outcome: "created",
+        revisionNumber: 1,
+      });
+      await expect(
+        adapterRegistryService.setRelease({
+          actor,
+          key: "django",
+          version: "1.2.0",
+          displayName: "Django",
+          category: "framework",
+          packageName: "@arth/django-adapter",
+          packageDigestSha256: "b".repeat(64),
+          capabilities: [
+            { name: "detect", maturity: "stable" },
+            { name: "understand", maturity: "stable" },
+            { name: "modify", maturity: "beta" },
+            { name: "validate", maturity: "stable" },
+            { name: "preview", maturity: "unsupported" },
+            { name: "deploy", maturity: "unsupported" },
+            { name: "operate", maturity: "unsupported" },
+            { name: "migrate", maturity: "alpha" },
+          ],
+          declaredPermissions: [],
+          configurationFields: [],
+          commands: [],
+          supportedEnvironments: ["development"],
+          compatibilityTags: [],
+          requiredSecretPurposes: [],
+          healthChecks: [],
+          releaseChannel: "stable",
+          signatureStatus: "verified",
+          securityReviewStatus: "approved",
+          securityReviewReference: "SEC-2026-0042",
+          lifecycle: "active",
+          reason: "Prove published artifact identity is immutable.",
+          correlationId: "00000000-0000-4000-8000-000000000123",
+        }),
+      ).rejects.toMatchObject({ reason: "adapter_release_artifact_immutable" });
+      await expect(
+        adapterRegistryService.listRegistry(),
+      ).resolves.toMatchObject({
+        environment: "development",
+        items: [
+          expect.objectContaining({
+            key: "django",
+            version: "1.2.0",
+            packageDigestSha256: "a".repeat(64),
+            signatureStatus: "verified",
+            securityReviewStatus: "approved",
+            lifecycle: "active",
+            capabilities: expect.arrayContaining([
+              { name: "detect", maturity: "stable" },
+              { name: "migrate", maturity: "alpha" },
+            ]),
           }),
         ],
       });

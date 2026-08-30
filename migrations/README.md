@@ -31,4 +31,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0008_platform_integration_registry.sql` adds environment-scoped platform integrations, immutable OAuth/application metadata revisions, secret-reference bindings, declared adapter capabilities and scopes, bounded maintenance controls, and append-only expiring health evidence. It contains no customer installation, access token, repository, code, environment, or secret material.
 
+`0009_platform_adapter_registry.sql` adds environment-scoped adapter releases and immutable review/control revisions. Every release declares the complete eight-capability maturity matrix, permissions, typed configuration fields, commands, supported environments, compatibility, required secret purposes, health checks, package digest, signing evidence, security review, channel, lifecycle, and deprecation/block state. A trigger prevents a package name or digest from changing under an existing semantic version.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

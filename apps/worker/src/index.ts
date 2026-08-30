@@ -3,6 +3,7 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 
 import { OnboardingCommandRejectedError } from "@atharvan/auth";
+import { PlatformAdapterCommandRejectedError } from "@atharvan/adapters";
 import {
   parseRuntimeConfig,
   PlatformConfigurationRejectedError,
@@ -12,6 +13,16 @@ import {
   unknownPlatformOverview,
   type AuthenticatedOperator,
   type MembershipDomainEntry,
+  type PlatformAdapterCapabilityDeclaration,
+  type PlatformAdapterCategory,
+  type PlatformAdapterCommandDeclaration,
+  type PlatformAdapterConfigurationField,
+  type PlatformAdapterHealthCheckDeclaration,
+  type PlatformAdapterLifecycle,
+  type PlatformAdapterRegistry,
+  type PlatformAdapterReleaseChannel,
+  type PlatformAdapterSecurityReviewStatus,
+  type PlatformAdapterSignatureStatus,
   type ModelCapability,
   type ModelCatalogueLifecycle,
   type ModelDataClassification,
@@ -85,6 +96,7 @@ export interface AuthenticationRuntime {
   listModelCatalogue(): Promise<ModelProviderCatalogue>;
   listModelRoutingOperations(): Promise<ModelRoutingOperations>;
   listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
+  listPlatformAdapters(): Promise<PlatformAdapterRegistry>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -184,6 +196,42 @@ export interface AuthenticationRuntime {
     actor: AuthenticatedOperator,
     input: RecordPlatformIntegrationHealthCommand,
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+  setPlatformAdapterRelease(
+    actor: AuthenticatedOperator,
+    input: SetPlatformAdapterReleaseCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+}
+
+export interface SetPlatformAdapterReleaseCommand {
+  readonly key: string;
+  readonly version: string;
+  readonly displayName: string;
+  readonly category: PlatformAdapterCategory;
+  readonly packageName: string;
+  readonly packageDigestSha256: string;
+  readonly documentationUrl: string | null;
+  readonly capabilities: ReadonlyArray<PlatformAdapterCapabilityDeclaration>;
+  readonly declaredPermissions: ReadonlyArray<string>;
+  readonly configurationFields: ReadonlyArray<PlatformAdapterConfigurationField>;
+  readonly commands: ReadonlyArray<PlatformAdapterCommandDeclaration>;
+  readonly supportedEnvironments: ReadonlyArray<string>;
+  readonly compatibilityTags: ReadonlyArray<string>;
+  readonly requiredSecretPurposes: ReadonlyArray<string>;
+  readonly healthChecks: ReadonlyArray<PlatformAdapterHealthCheckDeclaration>;
+  readonly releaseChannel: PlatformAdapterReleaseChannel;
+  readonly signatureStatus: PlatformAdapterSignatureStatus;
+  readonly securityReviewStatus: PlatformAdapterSecurityReviewStatus;
+  readonly securityReviewReference: string | null;
+  readonly lifecycle: PlatformAdapterLifecycle;
+  readonly blockReason: string | null;
+  readonly deprecatedAt: string | null;
+  readonly sunsetAt: string | null;
+  readonly reason: string;
+  readonly correlationId: string;
 }
 
 export interface SetPlatformIntegrationCommand {
@@ -685,6 +733,30 @@ export function createApp(
     return context.json(await runtime.listPlatformIntegrations());
   });
 
+  app.get("/v1/platform/adapters", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:adapters:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listPlatformAdapters());
+  });
+
+  app.put("/v1/platform/adapters/:key/releases/:version", async (context) => {
+    const input = await readJson(context, parseSetPlatformAdapterRelease);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.setPlatformAdapterRelease(context.get("operator"), {
+        ...input,
+        key: context.req.param("key"),
+        version: context.req.param("version"),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
   app.put("/v1/platform/integrations/:key", async (context) => {
     const input = await readJson(context, parseSetPlatformIntegration);
     if (input === null) return invalidRequest(context);
@@ -1154,6 +1226,195 @@ function parseSetPlatformIntegration(
     : null;
 }
 
+function parseSetPlatformAdapterRelease(
+  value: unknown,
+): Omit<
+  SetPlatformAdapterReleaseCommand,
+  "key" | "version" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const packageName = readTrimmedString(value.packageName, 214);
+  const packageDigestSha256 = readTrimmedString(value.packageDigestSha256, 64);
+  const documentationUrl = readNullableString(value.documentationUrl, 500);
+  const declaredPermissions = readPossiblyEmptyStringArray(
+    value.declaredPermissions,
+    64,
+    128,
+  );
+  const supportedEnvironments = readStringArray(
+    value.supportedEnvironments,
+    5,
+    32,
+  );
+  const compatibilityTags = readPossiblyEmptyStringArray(
+    value.compatibilityTags,
+    64,
+    128,
+  );
+  const requiredSecretPurposes = readPossiblyEmptyStringArray(
+    value.requiredSecretPurposes,
+    32,
+    128,
+  );
+  const capabilities = parseAdapterCapabilities(value.capabilities);
+  const configurationFields = parseAdapterConfigurationFields(
+    value.configurationFields,
+  );
+  const commands = parseAdapterCommands(value.commands);
+  const healthChecks = parseAdapterHealthChecks(value.healthChecks);
+  const securityReviewReference = readNullableString(
+    value.securityReviewReference,
+    200,
+  );
+  const blockReason = readNullableString(value.blockReason, 500);
+  const deprecatedAt = readNullableString(value.deprecatedAt, 40);
+  const sunsetAt = readNullableString(value.sunsetAt, 40);
+  const reason = readReason(value.reason);
+  return displayName !== null &&
+    packageName !== null &&
+    packageDigestSha256 !== null &&
+    documentationUrl !== undefined &&
+    declaredPermissions !== null &&
+    supportedEnvironments !== null &&
+    compatibilityTags !== null &&
+    requiredSecretPurposes !== null &&
+    capabilities !== null &&
+    configurationFields !== null &&
+    commands !== null &&
+    healthChecks !== null &&
+    securityReviewReference !== undefined &&
+    blockReason !== undefined &&
+    deprecatedAt !== undefined &&
+    sunsetAt !== undefined &&
+    reason !== null &&
+    isPlatformAdapterCategory(value.category) &&
+    isPlatformAdapterReleaseChannel(value.releaseChannel) &&
+    isPlatformAdapterSignatureStatus(value.signatureStatus) &&
+    isPlatformAdapterReviewStatus(value.securityReviewStatus) &&
+    isPlatformAdapterLifecycle(value.lifecycle)
+    ? {
+        displayName,
+        category: value.category,
+        packageName,
+        packageDigestSha256,
+        documentationUrl,
+        capabilities,
+        declaredPermissions,
+        configurationFields,
+        commands,
+        supportedEnvironments,
+        compatibilityTags,
+        requiredSecretPurposes,
+        healthChecks,
+        releaseChannel: value.releaseChannel,
+        signatureStatus: value.signatureStatus,
+        securityReviewStatus: value.securityReviewStatus,
+        securityReviewReference,
+        lifecycle: value.lifecycle,
+        blockReason,
+        deprecatedAt,
+        sunsetAt,
+        reason,
+      }
+    : null;
+}
+
+function parseAdapterCapabilities(
+  value: unknown,
+): ReadonlyArray<PlatformAdapterCapabilityDeclaration> | null {
+  if (!Array.isArray(value) || value.length !== 8) return null;
+  const parsed = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const name = item.name;
+    const maturity = item.maturity;
+    return (name === "detect" ||
+      name === "understand" ||
+      name === "modify" ||
+      name === "validate" ||
+      name === "preview" ||
+      name === "deploy" ||
+      name === "operate" ||
+      name === "migrate") &&
+      (maturity === "unsupported" ||
+        maturity === "experimental" ||
+        maturity === "alpha" ||
+        maturity === "beta" ||
+        maturity === "stable" ||
+        maturity === "deprecated")
+      ? { name, maturity }
+      : null;
+  });
+  return parsed.some((item) => item === null)
+    ? null
+    : (parsed as ReadonlyArray<PlatformAdapterCapabilityDeclaration>);
+}
+
+function parseAdapterConfigurationFields(
+  value: unknown,
+): ReadonlyArray<PlatformAdapterConfigurationField> | null {
+  if (!Array.isArray(value) || value.length > 64) return null;
+  const parsed = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const key = readTrimmedString(item.key, 64);
+    const label = readTrimmedString(item.label, 120);
+    const type = item.type;
+    return key !== null &&
+      label !== null &&
+      (type === "string" ||
+        type === "boolean" ||
+        type === "integer" ||
+        type === "string_list" ||
+        type === "secret_reference") &&
+      typeof item.required === "boolean"
+      ? { key, label, type, required: item.required }
+      : null;
+  });
+  return parsed.some((item) => item === null)
+    ? null
+    : (parsed as ReadonlyArray<PlatformAdapterConfigurationField>);
+}
+
+function parseAdapterCommands(
+  value: unknown,
+): ReadonlyArray<PlatformAdapterCommandDeclaration> | null {
+  if (!Array.isArray(value) || value.length > 64) return null;
+  const parsed = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const key = readTrimmedString(item.key, 64);
+    const description = readTrimmedString(item.description, 240);
+    return key !== null &&
+      description !== null &&
+      (item.risk === "read" ||
+        item.risk === "write" ||
+        item.risk === "destructive")
+      ? { key, description, risk: item.risk }
+      : null;
+  });
+  return parsed.some((item) => item === null)
+    ? null
+    : (parsed as ReadonlyArray<PlatformAdapterCommandDeclaration>);
+}
+
+function parseAdapterHealthChecks(
+  value: unknown,
+): ReadonlyArray<PlatformAdapterHealthCheckDeclaration> | null {
+  if (!Array.isArray(value) || value.length > 16) return null;
+  const parsed = value.map((item) => {
+    if (!isRecord(item)) return null;
+    const key = readTrimmedString(item.key, 64);
+    const command = readTrimmedString(item.command, 240);
+    return key !== null &&
+      command !== null &&
+      typeof item.timeoutSeconds === "number"
+      ? { key, command, timeoutSeconds: item.timeoutSeconds }
+      : null;
+  });
+  return parsed.some((item) => item === null)
+    ? null
+    : (parsed as ReadonlyArray<PlatformAdapterHealthCheckDeclaration>);
+}
+
 function parsePlatformIntegrationHealth(
   value: unknown,
 ): Omit<
@@ -1400,6 +1661,75 @@ function readPossiblyEmptyStringArray(
     return null;
   }
   return value as ReadonlyArray<string>;
+}
+
+function readNullableString(
+  value: unknown,
+  maximumLength: number,
+): string | null | undefined {
+  return value === null || value === undefined
+    ? null
+    : (readTrimmedString(value, maximumLength) ?? undefined);
+}
+
+function isPlatformAdapterCategory(
+  value: unknown,
+): value is PlatformAdapterCategory {
+  return (
+    value === "language" ||
+    value === "framework" ||
+    value === "package_manager" ||
+    value === "build" ||
+    value === "test" ||
+    value === "database" ||
+    value === "deployment" ||
+    value === "cloud" ||
+    value === "source_control" ||
+    value === "observability" ||
+    value === "security" ||
+    value === "model" ||
+    value === "design_system" ||
+    value === "private_enterprise"
+  );
+}
+
+function isPlatformAdapterReleaseChannel(
+  value: unknown,
+): value is PlatformAdapterReleaseChannel {
+  return (
+    value === "internal" ||
+    value === "canary" ||
+    value === "beta" ||
+    value === "stable"
+  );
+}
+
+function isPlatformAdapterSignatureStatus(
+  value: unknown,
+): value is PlatformAdapterSignatureStatus {
+  return value === "unverified" || value === "verified" || value === "invalid";
+}
+
+function isPlatformAdapterReviewStatus(
+  value: unknown,
+): value is PlatformAdapterSecurityReviewStatus {
+  return (
+    value === "pending" ||
+    value === "approved" ||
+    value === "changes_required" ||
+    value === "rejected"
+  );
+}
+
+function isPlatformAdapterLifecycle(
+  value: unknown,
+): value is PlatformAdapterLifecycle {
+  return (
+    value === "draft" ||
+    value === "active" ||
+    value === "deprecated" ||
+    value === "blocked"
+  );
 }
 
 function isPlatformIntegrationProtocol(
@@ -1649,6 +1979,18 @@ async function executeCommand(
           reason: error.reason,
           message:
             "The requested integration registry change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (error instanceof PlatformAdapterCommandRejectedError) {
+      return context.json(
+        {
+          code: "adapter_change_rejected",
+          reason: error.reason,
+          message: "The requested adapter release change was not accepted.",
           requestId: context.get("requestId"),
         },
         409,

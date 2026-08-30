@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdaptersRouteImport } from './routes/adapters'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MembershipDomainsRouteImport } from './routes/membership-domains'
@@ -23,6 +24,11 @@ import { Route as ApiSplatRouteImport } from './routes/api.$'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdaptersRoute = AdaptersRouteImport.update({
+  id: '/adapters',
+  path: '/adapters',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
@@ -73,6 +79,7 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/adapters': typeof AdaptersRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/membership-domains': typeof MembershipDomainsRoute
@@ -85,6 +92,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/adapters': typeof AdaptersRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/membership-domains': typeof MembershipDomainsRoute
@@ -98,6 +106,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/adapters': typeof AdaptersRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/membership-domains': typeof MembershipDomainsRoute
@@ -112,6 +121,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/adapters'
     | '/integrations'
     | '/login'
     | '/membership-domains'
@@ -124,6 +134,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/adapters'
     | '/integrations'
     | '/login'
     | '/membership-domains'
@@ -136,6 +147,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/adapters'
     | '/integrations'
     | '/login'
     | '/membership-domains'
@@ -149,6 +161,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdaptersRoute: typeof AdaptersRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
   MembershipDomainsRoute: typeof MembershipDomainsRoute
@@ -167,6 +180,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/adapters': {
+      id: '/adapters'
+      path: '/adapters'
+      fullPath: '/adapters'
+      preLoaderRoute: typeof AdaptersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations': {
@@ -237,6 +257,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdaptersRoute: AdaptersRoute,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
   MembershipDomainsRoute: MembershipDomainsRoute,

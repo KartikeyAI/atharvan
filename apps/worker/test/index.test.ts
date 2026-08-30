@@ -61,6 +61,10 @@ function createRuntime(input?: {
       environment: "development" as const,
       items: [],
     })),
+    listPlatformAdapters: vi.fn(async () => ({
+      environment: "development" as const,
+      items: [],
+    })),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -134,6 +138,11 @@ function createRuntime(input?: {
     recordPlatformIntegrationHealth: vi.fn(async () => ({
       outcome: "created" as const,
       id: "00000000-0000-4000-8000-000000000802",
+    })),
+    setPlatformAdapterRelease: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000901",
+      revisionNumber: 1,
     })),
   };
 }
@@ -717,6 +726,99 @@ describe("Atharvan control-plane worker", () => {
     expect(runtime.recordPlatformIntegrationHealth).toHaveBeenCalledWith(
       expect.objectContaining({ operatorId: "operator-1" }),
       expect.objectContaining({ status: "degraded", httpStatusCode: 429 }),
+    );
+  });
+
+  it("returns adapter releases to adapter readers", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/adapters",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      environment: "development",
+      items: [],
+    });
+  });
+
+  it("validates and delegates reviewed adapter release revisions", async () => {
+    const runtime = createRuntime();
+    const capabilityNames = [
+      "detect",
+      "understand",
+      "modify",
+      "validate",
+      "preview",
+      "deploy",
+      "operate",
+      "migrate",
+    ];
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/adapters/django/releases/1.2.0",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "Django",
+          category: "framework",
+          packageName: "@arth/django-adapter",
+          packageDigestSha256: "a".repeat(64),
+          documentationUrl: "https://docs.arth.sh/adapters/django",
+          capabilities: capabilityNames.map((name) => ({
+            name,
+            maturity: name === "detect" ? "stable" : "unsupported",
+          })),
+          declaredPermissions: ["repository:read"],
+          configurationFields: [
+            {
+              key: "python_version",
+              label: "Python version",
+              type: "string",
+              required: true,
+            },
+          ],
+          commands: [
+            {
+              key: "detect",
+              description: "Detect a Django repository.",
+              risk: "read",
+            },
+          ],
+          supportedEnvironments: ["development", "production"],
+          compatibilityTags: ["python:3.13", "django:5"],
+          requiredSecretPurposes: [],
+          healthChecks: [
+            {
+              key: "doctor",
+              command: "arth-adapter doctor",
+              timeoutSeconds: 30,
+            },
+          ],
+          releaseChannel: "stable",
+          signatureStatus: "verified",
+          securityReviewStatus: "approved",
+          securityReviewReference: "SEC-2026-0042",
+          lifecycle: "active",
+          blockReason: null,
+          deprecatedAt: null,
+          sunsetAt: null,
+          reason: "Publish the reviewed Django adapter release.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.setPlatformAdapterRelease).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        key: "django",
+        version: "1.2.0",
+        capabilities: expect.arrayContaining([
+          { name: "detect", maturity: "stable" },
+        ]),
+      }),
     );
   });
 

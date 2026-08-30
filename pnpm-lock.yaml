@@ -104,6 +104,9 @@ importers:
 
   apps/worker:
     dependencies:
+      "@atharvan/adapters":
+        specifier: workspace:*
+        version: link:../../packages/adapters
       "@atharvan/auth":
         specifier: workspace:*
         version: link:../../packages/auth
@@ -151,6 +154,19 @@ importers:
         specifier: 4.127.1
         version: 4.127.1(@cloudflare/workers-types@5.20260828.1)
 
+  packages/adapters:
+    dependencies:
+      "@atharvan/domain":
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: "catalog:"
+        version: 7.0.2
+      vitest:
+        specifier: "catalog:"
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12))
+
   packages/auth:
     dependencies:
       "@atharvan/domain":
@@ -188,6 +204,9 @@ importers:
 
   packages/db:
     dependencies:
+      "@atharvan/adapters":
+        specifier: workspace:*
+        version: link:../adapters
       "@atharvan/auth":
         specifier: workspace:*
         version: link:../auth

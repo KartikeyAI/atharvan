@@ -22,6 +22,8 @@ import {
   platformConfigurationBindings,
   platformConfigurationDefinitions,
   platformConfigurationRevisions,
+  platformAdapterReleaseRevisions,
+  platformAdapterReleases,
   platformIntegrationHealthObservations,
   platformIntegrationRevisions,
   platformIntegrations,
@@ -268,6 +270,43 @@ describe("operator onboarding schema", () => {
     );
     expect(healthConfig.indexes.map((entry) => entry.config.name)).toContain(
       "platform_integration_health_integration_observed_idx",
+    );
+  });
+
+  it("versions signed adapter releases without executable or secret material", () => {
+    const releaseConfig = getTableConfig(platformAdapterReleases);
+    const revisionConfig = getTableConfig(platformAdapterReleaseRevisions);
+    const revisionColumns = revisionConfig.columns.map((column) => column.name);
+
+    expect(releaseConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_adapter_releases_identity_unique",
+        "platform_adapter_releases_environment_updated_idx",
+      ]),
+    );
+    expect(revisionConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_adapter_release_revisions_number_unique",
+        "platform_adapter_release_revisions_correlation_unique",
+        "platform_adapter_release_revisions_lifecycle_idx",
+      ]),
+    );
+    expect(revisionConfig.checks.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "platform_adapter_release_revisions_json_arrays",
+        "platform_adapter_release_revisions_activation_evidence",
+        "platform_adapter_release_revisions_unsafe_blocked",
+        "platform_adapter_release_revisions_deprecation_metadata",
+      ]),
+    );
+    expect(revisionColumns).not.toEqual(
+      expect.arrayContaining([
+        "package_bytes",
+        "package_archive",
+        "secret_value",
+        "credential_value",
+        "customer_configuration",
+      ]),
     );
   });
 });
