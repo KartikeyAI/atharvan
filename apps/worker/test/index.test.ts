@@ -52,6 +52,11 @@ function createRuntime(input?: {
       environment: "development" as const,
       items: [],
     })),
+    listModelRoutingOperations: vi.fn(async () => ({
+      environment: "development" as const,
+      policies: [],
+      controls: [],
+    })),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -98,6 +103,24 @@ function createRuntime(input?: {
     recordModelProviderHealth: vi.fn(async () => ({
       outcome: "created" as const,
       id: "00000000-0000-4000-8000-000000000403",
+    })),
+    setModelRoutingPolicy: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000501",
+      revisionNumber: 1,
+    })),
+    setModelRoutingControl: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000502",
+      revisionNumber: 1,
+    })),
+    previewModelRoute: vi.fn(async () => ({
+      outcome: "unavailable" as const,
+      reason: "policy_not_found" as const,
+      policyId: null,
+      policyKey: "code_generation",
+      policyRevisionNumber: null,
+      evaluations: [],
     })),
   };
 }
@@ -601,6 +624,103 @@ describe("Atharvan control-plane worker", () => {
     expect(runtime.recordModelProviderHealth).toHaveBeenCalledWith(
       expect.objectContaining({ operatorId: "operator-1" }),
       expect.objectContaining({ status: "degraded", httpStatusCode: 429 }),
+    );
+  });
+
+  it("returns model-routing policies and operational controls to model readers", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-routing",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      environment: "development",
+      policies: [],
+      controls: [],
+    });
+  });
+
+  it("validates and delegates versioned routing policies", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-routing/policies/code_generation",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "Code generation",
+          requiredCapabilities: ["code_generation", "tool_use"],
+          maximumDataClassification: "confidential",
+          allowedRegions: ["global"],
+          targets: [
+            {
+              modelId: "00000000-0000-4000-8000-000000000402",
+              rolloutBasisPoints: 10000,
+              allowDegraded: false,
+            },
+          ],
+          reason: "Publish the development coding route.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.setModelRoutingPolicy).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        key: "code_generation",
+        targets: [expect.objectContaining({ rolloutBasisPoints: 10000 })],
+      }),
+    );
+  });
+
+  it("validates and delegates immediate model kill switches", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-routing/controls/model/00000000-0000-4000-8000-000000000402",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          state: "disabled",
+          reason: "Contain the model after a safety incident.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.setModelRoutingControl).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        targetKind: "model",
+        state: "disabled",
+        maintenanceExpiresAt: null,
+      }),
+    );
+  });
+
+  it("previews routing decisions without mutating catalogue state", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/model-routing/preview",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          policyKey: "code_generation",
+          stableRoutingKey: "preview-request-1",
+          requiredCapabilities: ["reasoning"],
+          dataClassification: "internal",
+          region: "global",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    expect(runtime.previewModelRoute).toHaveBeenCalledWith(
+      expect.objectContaining({ stableRoutingKey: "preview-request-1" }),
     );
   });
 

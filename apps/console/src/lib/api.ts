@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   MembershipDomainEntry,
   ModelProviderCatalogue,
+  ModelRoutingOperations,
   OperatorDirectoryEntry,
   OperatorRoleDefinitionEntry,
   PlatformConfigurationRegistry,
@@ -96,6 +97,8 @@ export type PlatformConfigurationResponse = PlatformConfigurationRegistry;
 export type PlatformSecretReferencesResponse = PlatformSecretReferenceRegistry;
 
 export type ModelProviderCatalogueResponse = ModelProviderCatalogue;
+
+export type ModelRoutingOperationsResponse = ModelRoutingOperations;
 
 function isApiErrorBody(
   value: unknown,

@@ -11,6 +11,7 @@ import {
   GitPullRequestArrowIcon,
   MenuIcon,
   KeyRoundIcon,
+  RouteIcon,
   SettingsIcon,
   ShieldCheckIcon,
   SirenIcon,
@@ -35,6 +36,12 @@ const navigation: ReadonlyArray<{
     available: true,
   },
   { label: "Models", href: "/models", icon: BotIcon, available: true },
+  {
+    label: "Model routing",
+    href: "/model-routing",
+    icon: RouteIcon,
+    available: true,
+  },
   {
     label: "Integrations",
     href: "/integrations",

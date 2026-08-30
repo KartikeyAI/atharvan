@@ -27,4 +27,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0006_model_provider_catalogue.sql` adds environment-scoped providers, immutable provider/model revisions, integer model pricing, data-classification limits, and append-only expiring provider-health observations. Provider credentials are foreign-key references to secret metadata and never embedded in catalogue revisions. Delete triggers preserve all catalogue and health history.
 
+`0007_model_routing_operations.sql` adds immutable routing-policy revisions and ordered targets, deterministic rollout weights, and explicit provider/model operational controls. Maintenance windows expire safely, while kill switches remain disabled until an audited re-enable revision.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

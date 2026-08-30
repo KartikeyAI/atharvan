@@ -9,6 +9,7 @@ export { createPostgresPlatformAdministrationReader } from "./platform-administr
 export { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 export { createPostgresPlatformSecretStore } from "./platform-secret-store";
 export { createPostgresModelCatalogueStore } from "./model-catalogue-store";
+export { createPostgresModelRoutingStore } from "./model-routing-store";
 export { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 export * as authDatabaseSchema from "./schema";
 

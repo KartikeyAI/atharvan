@@ -19,13 +19,20 @@ import {
   type ModelProviderAdapterKind,
   type ModelProviderCatalogue,
   type ModelProviderReportedHealth,
+  type ModelRoutingControlState,
+  type ModelRoutingControlTargetKind,
+  type ModelRoutingDecision,
+  type ModelRoutingOperations,
   type OperatorDirectoryEntry,
   type OperatorRoleDefinitionEntry,
   type PlatformConfigurationRegistry,
   type PlatformConfigurationScope,
   type PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
-import { ModelCatalogueCommandRejectedError } from "@atharvan/models";
+import {
+  ModelCatalogueCommandRejectedError,
+  ModelRoutingCommandRejectedError,
+} from "@atharvan/models";
 import {
   PlatformSecretCommandRejectedError,
   PlatformSecretProviderError,
@@ -68,6 +75,7 @@ export interface AuthenticationRuntime {
     ReadonlyArray<PlatformSecretReferenceEntry>
   >;
   listModelCatalogue(): Promise<ModelProviderCatalogue>;
+  listModelRoutingOperations(): Promise<ModelRoutingOperations>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -136,6 +144,57 @@ export interface AuthenticationRuntime {
     actor: AuthenticatedOperator,
     input: RecordModelProviderHealthCommand,
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+  setModelRoutingPolicy(
+    actor: AuthenticatedOperator,
+    input: SetModelRoutingPolicyCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  setModelRoutingControl(
+    actor: AuthenticatedOperator,
+    input: SetModelRoutingControlCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  previewModelRoute(
+    input: PreviewModelRouteCommand,
+  ): Promise<ModelRoutingDecision>;
+}
+
+export interface SetModelRoutingPolicyCommand {
+  readonly key: string;
+  readonly displayName: string;
+  readonly requiredCapabilities: ReadonlyArray<ModelCapability>;
+  readonly maximumDataClassification: ModelDataClassification;
+  readonly allowedRegions: ReadonlyArray<string>;
+  readonly targets: ReadonlyArray<{
+    readonly modelId: string;
+    readonly rolloutBasisPoints: number;
+    readonly allowDegraded: boolean;
+  }>;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface SetModelRoutingControlCommand {
+  readonly targetKind: ModelRoutingControlTargetKind;
+  readonly targetId: string;
+  readonly state: ModelRoutingControlState;
+  readonly maintenanceExpiresAt: string | null;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface PreviewModelRouteCommand {
+  readonly policyKey: string;
+  readonly stableRoutingKey: string;
+  readonly requiredCapabilities: ReadonlyArray<ModelCapability>;
+  readonly dataClassification: ModelDataClassification;
+  readonly region: string;
 }
 
 export interface SetModelProviderCommand {
@@ -489,6 +548,64 @@ export function createApp(
       );
     },
   );
+
+  app.get("/v1/platform/model-routing", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:models:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listModelRoutingOperations());
+  });
+
+  app.put("/v1/platform/model-routing/policies/:key", async (context) => {
+    const input = await readJson(context, parseSetModelRoutingPolicy);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.setModelRoutingPolicy(context.get("operator"), {
+        ...input,
+        key: context.req.param("key"),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.put(
+    "/v1/platform/model-routing/controls/:targetKind/:targetId",
+    async (context) => {
+      const targetKind = context.req.param("targetKind");
+      const input = await readJson(context, parseSetModelRoutingControl);
+      if (
+        input === null ||
+        (targetKind !== "provider" && targetKind !== "model")
+      ) {
+        return invalidRequest(context);
+      }
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(context, () =>
+        runtime.setModelRoutingControl(context.get("operator"), {
+          ...input,
+          targetKind,
+          targetId: context.req.param("targetId"),
+          correlationId: context.get("requestId"),
+        }),
+      );
+    },
+  );
+
+  app.post("/v1/platform/model-routing/preview", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:models:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const input = await readJson(context, parsePreviewModelRoute);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.previewModelRoute(input));
+  });
 
   app.get("/v1/platform/model-catalogue", async (context) => {
     if (
@@ -925,6 +1042,112 @@ function parseModelProviderHealth(
     : null;
 }
 
+function parseSetModelRoutingPolicy(
+  value: unknown,
+): Omit<SetModelRoutingPolicyCommand, "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const requiredCapabilities = readStringArray(
+    value.requiredCapabilities,
+    7,
+    32,
+  );
+  const allowedRegions = readStringArray(value.allowedRegions, 32, 32);
+  const maximumDataClassification = value.maximumDataClassification;
+  const reason = readReason(value.reason);
+  const targets = value.targets;
+  if (
+    displayName === null ||
+    requiredCapabilities === null ||
+    !requiredCapabilities.every(isModelCapability) ||
+    allowedRegions === null ||
+    !isModelDataClassification(maximumDataClassification) ||
+    reason === null ||
+    !Array.isArray(targets) ||
+    targets.length === 0 ||
+    targets.length > 16
+  ) {
+    return null;
+  }
+  const parsedTargets = targets.map((target) => {
+    if (!isRecord(target)) return null;
+    const modelId = readTrimmedString(target.modelId, 36);
+    return modelId !== null &&
+      typeof target.rolloutBasisPoints === "number" &&
+      (target.allowDegraded === undefined ||
+        typeof target.allowDegraded === "boolean")
+      ? {
+          modelId,
+          rolloutBasisPoints: target.rolloutBasisPoints,
+          allowDegraded: target.allowDegraded ?? false,
+        }
+      : null;
+  });
+  return parsedTargets.some((target) => target === null)
+    ? null
+    : {
+        displayName,
+        requiredCapabilities:
+          requiredCapabilities as ReadonlyArray<ModelCapability>,
+        maximumDataClassification,
+        allowedRegions,
+        targets: parsedTargets as SetModelRoutingPolicyCommand["targets"],
+        reason,
+      };
+}
+
+function parseSetModelRoutingControl(
+  value: unknown,
+): Omit<
+  SetModelRoutingControlCommand,
+  "targetKind" | "targetId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const state = value.state;
+  const maintenanceExpiresAt =
+    value.maintenanceExpiresAt === null ||
+    value.maintenanceExpiresAt === undefined
+      ? null
+      : readTrimmedString(value.maintenanceExpiresAt, 40);
+  return reason !== null &&
+    (state === "enabled" || state === "maintenance" || state === "disabled") &&
+    (maintenanceExpiresAt !== null ||
+      value.maintenanceExpiresAt === null ||
+      value.maintenanceExpiresAt === undefined)
+    ? { state, maintenanceExpiresAt, reason }
+    : null;
+}
+
+function parsePreviewModelRoute(
+  value: unknown,
+): PreviewModelRouteCommand | null {
+  if (!isRecord(value)) return null;
+  const policyKey = readTrimmedString(value.policyKey, 64);
+  const stableRoutingKey = readTrimmedString(value.stableRoutingKey, 256);
+  const region = readTrimmedString(value.region, 32);
+  const dataClassification = value.dataClassification;
+  const requiredCapabilities =
+    value.requiredCapabilities === undefined
+      ? []
+      : readStringArray(value.requiredCapabilities, 7, 32);
+  return policyKey !== null &&
+    stableRoutingKey !== null &&
+    region !== null &&
+    requiredCapabilities !== null &&
+    requiredCapabilities.every(isModelCapability) &&
+    isModelDataClassification(dataClassification)
+    ? {
+        policyKey,
+        stableRoutingKey,
+        requiredCapabilities:
+          requiredCapabilities as ReadonlyArray<ModelCapability>,
+        dataClassification,
+        region,
+      }
+    : null;
+}
+
 function readStringArray(
   value: unknown,
   maximumItems: number,
@@ -1124,6 +1347,18 @@ async function executeCommand(
           code: "model_catalogue_change_rejected",
           reason: error.reason,
           message: "The requested model catalogue change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (error instanceof ModelRoutingCommandRejectedError) {
+      return context.json(
+        {
+          code: "model_routing_change_rejected",
+          reason: error.reason,
+          message: "The requested model routing change was not accepted.",
           requestId: context.get("requestId"),
         },
         409,

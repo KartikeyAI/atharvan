@@ -221,6 +221,17 @@ export const modelProviderHealthSource = pgEnum(
   ["operator_probe"],
 );
 
+export const modelRoutingControlState = pgEnum("model_routing_control_state", [
+  "enabled",
+  "maintenance",
+  "disabled",
+]);
+
+export const modelRoutingControlTargetKind = pgEnum(
+  "model_routing_control_target_kind",
+  ["provider", "model"],
+);
+
 export const operators = pgTable(
   "operators",
   {
@@ -1044,6 +1055,217 @@ export const modelProviderHealthObservations = pgTable(
     check(
       "model_provider_health_expiry_after_observation",
       sql`${table.expiresAt} > ${table.observedAt}`,
+    ),
+  ],
+);
+
+export const modelRoutingPolicies = pgTable(
+  "model_routing_policies",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_routing_policies_key_environment_unique").on(
+      table.key,
+      table.environment,
+    ),
+    index("model_routing_policies_environment_updated_idx").on(
+      table.environment,
+      table.updatedAt,
+    ),
+    check(
+      "model_routing_policies_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_]{2,63}$'`,
+    ),
+    check(
+      "model_routing_policies_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const modelRoutingPolicyRevisions = pgTable(
+  "model_routing_policy_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => modelRoutingPolicies.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    displayName: text("display_name").notNull(),
+    requiredCapabilities: text("required_capabilities").array().notNull(),
+    maximumDataClassification: modelDataClassification(
+      "maximum_data_classification",
+    ).notNull(),
+    allowedRegions: text("allowed_regions").array().notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_routing_policy_revisions_number_unique").on(
+      table.policyId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("model_routing_policy_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("model_routing_policy_revisions_policy_created_idx").on(
+      table.policyId,
+      table.createdAt,
+    ),
+    check(
+      "model_routing_policy_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "model_routing_policy_revisions_name_nonempty",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120`,
+    ),
+    check(
+      "model_routing_policy_revisions_capabilities_nonempty",
+      sql`cardinality(${table.requiredCapabilities}) BETWEEN 1 AND 7`,
+    ),
+    check(
+      "model_routing_policy_revisions_regions_nonempty",
+      sql`cardinality(${table.allowedRegions}) BETWEEN 1 AND 32`,
+    ),
+  ],
+);
+
+export const modelRoutingPolicyTargets = pgTable(
+  "model_routing_policy_targets",
+  {
+    id: uuid("id").primaryKey(),
+    policyRevisionId: uuid("policy_revision_id")
+      .notNull()
+      .references(() => modelRoutingPolicyRevisions.id, {
+        onDelete: "restrict",
+      }),
+    modelId: uuid("model_id")
+      .notNull()
+      .references(() => models.id, { onDelete: "restrict" }),
+    priority: integer("priority").notNull(),
+    rolloutBasisPoints: integer("rollout_basis_points").notNull(),
+    allowDegraded: boolean("allow_degraded").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_routing_policy_targets_priority_unique").on(
+      table.policyRevisionId,
+      table.priority,
+    ),
+    uniqueIndex("model_routing_policy_targets_model_unique").on(
+      table.policyRevisionId,
+      table.modelId,
+    ),
+    index("model_routing_policy_targets_model_idx").on(table.modelId),
+    check(
+      "model_routing_policy_targets_priority_bounds",
+      sql`${table.priority} BETWEEN 1 AND 16`,
+    ),
+    check(
+      "model_routing_policy_targets_rollout_bounds",
+      sql`${table.rolloutBasisPoints} BETWEEN 1 AND 10000`,
+    ),
+  ],
+);
+
+export const modelOperationalControls = pgTable(
+  "model_operational_controls",
+  {
+    id: uuid("id").primaryKey(),
+    targetKind: modelRoutingControlTargetKind("target_kind").notNull(),
+    providerId: uuid("provider_id").references(() => modelProviders.id, {
+      onDelete: "restrict",
+    }),
+    modelId: uuid("model_id").references(() => models.id, {
+      onDelete: "restrict",
+    }),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_operational_controls_provider_unique")
+      .on(table.providerId)
+      .where(sql`${table.providerId} IS NOT NULL`),
+    uniqueIndex("model_operational_controls_model_unique")
+      .on(table.modelId)
+      .where(sql`${table.modelId} IS NOT NULL`),
+    check(
+      "model_operational_controls_target_shape",
+      sql`(${table.targetKind} = 'provider' AND ${table.providerId} IS NOT NULL AND ${table.modelId} IS NULL) OR (${table.targetKind} = 'model' AND ${table.providerId} IS NULL AND ${table.modelId} IS NOT NULL)`,
+    ),
+    check(
+      "model_operational_controls_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const modelOperationalControlRevisions = pgTable(
+  "model_operational_control_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    controlId: uuid("control_id")
+      .notNull()
+      .references(() => modelOperationalControls.id, {
+        onDelete: "restrict",
+      }),
+    revisionNumber: integer("revision_number").notNull(),
+    state: modelRoutingControlState("state").notNull(),
+    maintenanceExpiresAt: timestamp("maintenance_expires_at", {
+      withTimezone: true,
+    }),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("model_operational_control_revisions_number_unique").on(
+      table.controlId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("model_operational_control_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("model_operational_control_revisions_control_created_idx").on(
+      table.controlId,
+      table.createdAt,
+    ),
+    check(
+      "model_operational_control_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "model_operational_control_revisions_maintenance_metadata",
+      sql`(${table.state} = 'maintenance' AND ${table.maintenanceExpiresAt} IS NOT NULL AND ${table.maintenanceExpiresAt} > ${table.createdAt}) OR (${table.state} <> 'maintenance' AND ${table.maintenanceExpiresAt} IS NULL)`,
     ),
   ],
 );

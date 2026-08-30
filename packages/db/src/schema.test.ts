@@ -12,7 +12,12 @@ import {
   modelProviderHealthObservations,
   modelProviderRevisions,
   modelProviders,
+  modelOperationalControlRevisions,
+  modelOperationalControls,
   modelRevisions,
+  modelRoutingPolicies,
+  modelRoutingPolicyRevisions,
+  modelRoutingPolicyTargets,
   models,
   platformConfigurationBindings,
   platformConfigurationDefinitions,
@@ -193,6 +198,36 @@ describe("operator onboarding schema", () => {
       providerRevisionConfig.columns.map((column) => column.name),
     ).not.toEqual(
       expect.arrayContaining(["credential_value", "api_key", "token"]),
+    );
+  });
+
+  it("versions routing policy chains and operational kill switches", () => {
+    const policyConfig = getTableConfig(modelRoutingPolicies);
+    const revisionConfig = getTableConfig(modelRoutingPolicyRevisions);
+    const targetConfig = getTableConfig(modelRoutingPolicyTargets);
+    const controlConfig = getTableConfig(modelOperationalControls);
+    const controlRevisionConfig = getTableConfig(
+      modelOperationalControlRevisions,
+    );
+
+    expect(policyConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "model_routing_policies_key_environment_unique",
+    );
+    expect(revisionConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "model_routing_policy_revisions_number_unique",
+    );
+    expect(targetConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "model_routing_policy_targets_priority_unique",
+        "model_routing_policy_targets_model_unique",
+        "model_routing_policy_targets_model_idx",
+      ]),
+    );
+    expect(controlConfig.checks.map((entry) => entry.name)).toContain(
+      "model_operational_controls_target_shape",
+    );
+    expect(controlRevisionConfig.checks.map((entry) => entry.name)).toContain(
+      "model_operational_control_revisions_maintenance_metadata",
     );
   });
 });

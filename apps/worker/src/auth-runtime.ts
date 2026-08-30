@@ -20,6 +20,7 @@ import {
   createPostgresPlatformConfigurationStore,
   createPostgresPlatformSecretStore,
   createPostgresModelCatalogueStore,
+  createPostgresModelRoutingStore,
 } from "@atharvan/db";
 import {
   createResendTransactionalEmailSender,
@@ -30,7 +31,10 @@ import {
   createPlatformSecretLifecycleService,
   unconfiguredPlatformSecretMaterialProvider,
 } from "@atharvan/secrets";
-import { createModelCatalogueService } from "@atharvan/models";
+import {
+  createModelCatalogueService,
+  createModelRoutingService,
+} from "@atharvan/models";
 
 import type { AuthenticationRuntime, RuntimeBindings } from "./index";
 
@@ -113,6 +117,10 @@ async function createProductionAuthenticationRuntime(input: {
     store: createPostgresModelCatalogueStore(databaseHandle.database),
     environment: config.ATHARVAN_ENVIRONMENT,
   });
+  const modelRoutingService = createModelRoutingService({
+    store: createPostgresModelRoutingStore(databaseHandle.database),
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -185,6 +193,7 @@ async function createProductionAuthenticationRuntime(input: {
       configurationStore.listConfiguration(config.ATHARVAN_ENVIRONMENT),
     listPlatformSecretReferences: () => secretLifecycleService.listReferences(),
     listModelCatalogue: () => modelCatalogueService.listCatalogue(),
+    listModelRoutingOperations: () => modelRoutingService.listOperations(),
     async createOperatorInvitation(actor, command) {
       const registry = await configurationStore.listConfiguration(
         config.ATHARVAN_ENVIRONMENT,
@@ -271,5 +280,10 @@ async function createProductionAuthenticationRuntime(input: {
       modelCatalogueService.setModel({ actor, ...command }),
     recordModelProviderHealth: (actor, command) =>
       modelCatalogueService.recordHealthObservation({ actor, ...command }),
+    setModelRoutingPolicy: (actor, command) =>
+      modelRoutingService.setPolicy({ actor, ...command }),
+    setModelRoutingControl: (actor, command) =>
+      modelRoutingService.setControl({ actor, ...command }),
+    previewModelRoute: (command) => modelRoutingService.previewRoute(command),
   };
 }

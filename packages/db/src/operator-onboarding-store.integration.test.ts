@@ -1,7 +1,10 @@
 import { createOperatorOnboardingService } from "@atharvan/auth";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import type { AuthenticatedOperator } from "@atharvan/domain";
-import { createModelCatalogueService } from "@atharvan/models";
+import {
+  createModelCatalogueService,
+  createModelRoutingService,
+} from "@atharvan/models";
 import { createPlatformSecretLifecycleService } from "@atharvan/secrets";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -11,6 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
 import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 import { createPostgresModelCatalogueStore } from "./model-catalogue-store";
+import { createPostgresModelRoutingStore } from "./model-routing-store";
 import { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
@@ -182,7 +186,7 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         reason: "Exercise the model provider revision path.",
         correlationId: "00000000-0000-4000-8000-000000000113",
       });
-      await modelCatalogueService.setModel({
+      const model = await modelCatalogueService.setModel({
         actor,
         providerId: provider.id,
         key: "integration-model",
@@ -225,6 +229,80 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
             ],
           }),
         ],
+      });
+      let routingIdSequence = 500;
+      const modelRoutingService = createModelRoutingService({
+        store: createPostgresModelRoutingStore(database),
+        environment: "development",
+        now: () => commandTime,
+        randomId: () =>
+          `00000000-0000-4000-8000-${String(++routingIdSequence).padStart(12, "0")}`,
+      });
+      await modelRoutingService.setControl({
+        actor,
+        targetKind: "provider",
+        targetId: provider.id,
+        state: "enabled",
+        reason: "Explicitly enable the integration provider route.",
+        correlationId: "00000000-0000-4000-8000-000000000116",
+      });
+      await modelRoutingService.setControl({
+        actor,
+        targetKind: "model",
+        targetId: model.id,
+        state: "enabled",
+        reason: "Explicitly enable the integration model route.",
+        correlationId: "00000000-0000-4000-8000-000000000117",
+      });
+      await modelRoutingService.setPolicy({
+        actor,
+        key: "code_generation",
+        displayName: "Code generation",
+        requiredCapabilities: ["reasoning", "tool_use"],
+        maximumDataClassification: "confidential",
+        allowedRegions: ["global"],
+        targets: [
+          {
+            modelId: model.id,
+            rolloutBasisPoints: 10_000,
+            allowDegraded: false,
+          },
+        ],
+        reason: "Exercise the immutable routing-policy revision path.",
+        correlationId: "00000000-0000-4000-8000-000000000118",
+      });
+      await expect(
+        modelRoutingService.previewRoute({
+          policyKey: "code_generation",
+          stableRoutingKey: "integration-route-request",
+          dataClassification: "confidential",
+          region: "global",
+        }),
+      ).resolves.toMatchObject({
+        outcome: "selected",
+        providerId: provider.id,
+        modelId: model.id,
+        evaluations: [{ accepted: true, reason: null }],
+      });
+      await modelRoutingService.setControl({
+        actor,
+        targetKind: "provider",
+        targetId: provider.id,
+        state: "disabled",
+        reason: "Exercise the immediate provider kill-switch path.",
+        correlationId: "00000000-0000-4000-8000-000000000119",
+      });
+      await expect(
+        modelRoutingService.previewRoute({
+          policyKey: "code_generation",
+          stableRoutingKey: "integration-route-request",
+          dataClassification: "confidential",
+          region: "global",
+        }),
+      ).resolves.toMatchObject({
+        outcome: "unavailable",
+        reason: "no_eligible_target",
+        evaluations: [{ accepted: false, reason: "provider_disabled" }],
       });
       await secretService.revoke({
         actor,
