@@ -37,6 +37,10 @@ import {
 } from "@/lib/api";
 import type {
   CustomerDirectoryStatus,
+  CustomerInternalNoteCategory,
+  CustomerRiskCategory,
+  CustomerRiskMarker,
+  CustomerRiskSeverity,
   CustomerRestrictionCapability,
   CustomerRestrictionDesiredState,
   CustomerUserSummary,
@@ -264,6 +268,17 @@ function CustomersPage() {
               reload={loadRestrictions}
               restrictions={restrictions}
             />
+            <CustomerOperationsControl
+              inspection={inspection.data}
+              reload={() =>
+                inspect(
+                  inspection.data.entityType,
+                  inspection.data.entityType === "user"
+                    ? inspection.data.user.id
+                    : inspection.data.workspace.id,
+                )
+              }
+            />
           </>
         ) : null}
       </div>
@@ -475,6 +490,525 @@ function RestrictionControl({
             variant={desiredState === "restricted" ? "destructive" : "default"}
           >
             {pending ? "Submitting…" : `Request ${desiredState}`}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CustomerOperationsControl({
+  inspection,
+  reload,
+}: Readonly<{
+  inspection: CustomerDirectoryInspectionResponse;
+  reload: () => Promise<void>;
+}>) {
+  const targetId =
+    inspection.entityType === "user"
+      ? inspection.user.id
+      : inspection.workspace.id;
+  return (
+    <div className="customer-result-grid">
+      <InternalNotesControl
+        inspection={inspection}
+        reload={reload}
+        targetId={targetId}
+      />
+      <RiskMarkersControl
+        inspection={inspection}
+        reload={reload}
+        targetId={targetId}
+      />
+      {inspection.entityType === "workspace" ? (
+        <OwnershipTransferControl inspection={inspection} reload={reload} />
+      ) : null}
+    </div>
+  );
+}
+
+function InternalNotesControl({
+  inspection,
+  targetId,
+  reload,
+}: Readonly<{
+  inspection: CustomerDirectoryInspectionResponse;
+  targetId: string;
+  reload: () => Promise<void>;
+}>) {
+  const [category, setCategory] =
+    useState<CustomerInternalNoteCategory>("support");
+  const [body, setBody] = useState("");
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      await apiRequest("/api/platform/customer-operations/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          targetType: inspection.entityType,
+          targetId,
+          category,
+          body,
+          reason,
+        }),
+      });
+      setBody("");
+      setReason("");
+      await reload();
+    } catch (requestError) {
+      setError(toApiError(requestError).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Internal notes</CardTitle>
+        <CardDescription>
+          Append-only operational context. Never enter customer code, prompts,
+          tokens, secrets, or environment contents.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {inspection.operations.notes.length === 0 ? (
+          <p className="customer-muted">No internal notes.</p>
+        ) : (
+          <div className="customer-membership-list">
+            {inspection.operations.notes.map((note) => (
+              <article className="customer-membership" key={note.id}>
+                <div className="customer-membership-heading">
+                  <strong>{note.body}</strong>
+                  <Badge>{note.category}</Badge>
+                </div>
+                <span className="customer-muted">
+                  {formatDate(note.createdAt)} · {note.reason}
+                </span>
+              </article>
+            ))}
+          </div>
+        )}
+        {error ? <Alert variant="destructive">{error}</Alert> : null}
+        <form className="form-stack" onSubmit={submit}>
+          <Field>
+            <FieldLabel htmlFor={`note-category-${targetId}`}>
+              Category
+            </FieldLabel>
+            <select
+              className="input"
+              id={`note-category-${targetId}`}
+              onChange={(event) =>
+                setCategory(event.target.value as CustomerInternalNoteCategory)
+              }
+              value={category}
+            >
+              <option value="support">Support</option>
+              <option value="operations">Operations</option>
+              <option value="billing">Billing</option>
+              <option value="security">Security</option>
+            </select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`note-body-${targetId}`}>Note</FieldLabel>
+            <Input
+              id={`note-body-${targetId}`}
+              maxLength={2000}
+              minLength={4}
+              onChange={(event) => setBody(event.target.value)}
+              required
+              value={body}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`note-reason-${targetId}`}>
+              Audit reason
+            </FieldLabel>
+            <Input
+              id={`note-reason-${targetId}`}
+              minLength={8}
+              onChange={(event) => setReason(event.target.value)}
+              required
+              value={reason}
+            />
+          </Field>
+          <Button disabled={pending} type="submit">
+            {pending ? "Recording…" : "Record note"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RiskMarkersControl({
+  inspection,
+  targetId,
+  reload,
+}: Readonly<{
+  inspection: CustomerDirectoryInspectionResponse;
+  targetId: string;
+  reload: () => Promise<void>;
+}>) {
+  const [category, setCategory] = useState<CustomerRiskCategory>("security");
+  const [severity, setSeverity] = useState<CustomerRiskSeverity>("medium");
+  const [summary, setSummary] = useState("");
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      await apiRequest("/api/platform/customer-operations/risk-markers", {
+        method: "POST",
+        body: JSON.stringify({
+          targetType: inspection.entityType,
+          targetId,
+          markerId: null,
+          category,
+          severity,
+          state: "active",
+          summary,
+          reason,
+        }),
+      });
+      setSummary("");
+      setReason("");
+      await reload();
+    } catch (requestError) {
+      setError(toApiError(requestError).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Risk markers</CardTitle>
+          <CardDescription>
+            Immutable risk history with explicit resolution evidence.
+          </CardDescription>
+        </div>
+        <Badge variant="warning">Step-up required</Badge>
+      </CardHeader>
+      <CardContent>
+        {inspection.operations.riskMarkers.length === 0 ? (
+          <p className="customer-muted">No risk markers.</p>
+        ) : (
+          <div className="customer-membership-list">
+            {inspection.operations.riskMarkers.map((marker) => (
+              <RiskMarkerItem key={marker.id} marker={marker} reload={reload} />
+            ))}
+          </div>
+        )}
+        {error ? <Alert variant="destructive">{error}</Alert> : null}
+        <form className="form-stack" onSubmit={submit}>
+          <div className="customer-search-grid">
+            <Field>
+              <FieldLabel htmlFor={`risk-category-${targetId}`}>
+                Category
+              </FieldLabel>
+              <select
+                className="input"
+                id={`risk-category-${targetId}`}
+                onChange={(event) =>
+                  setCategory(event.target.value as CustomerRiskCategory)
+                }
+                value={category}
+              >
+                <option value="security">Security</option>
+                <option value="abuse">Abuse</option>
+                <option value="billing">Billing</option>
+                <option value="identity">Identity</option>
+                <option value="support">Support</option>
+              </select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`risk-severity-${targetId}`}>
+                Severity
+              </FieldLabel>
+              <select
+                className="input"
+                id={`risk-severity-${targetId}`}
+                onChange={(event) =>
+                  setSeverity(event.target.value as CustomerRiskSeverity)
+                }
+                value={severity}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </Field>
+          </div>
+          <Field>
+            <FieldLabel htmlFor={`risk-summary-${targetId}`}>
+              Summary
+            </FieldLabel>
+            <Input
+              id={`risk-summary-${targetId}`}
+              minLength={4}
+              onChange={(event) => setSummary(event.target.value)}
+              required
+              value={summary}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`risk-reason-${targetId}`}>
+              Audit reason
+            </FieldLabel>
+            <Input
+              id={`risk-reason-${targetId}`}
+              minLength={8}
+              onChange={(event) => setReason(event.target.value)}
+              required
+              value={reason}
+            />
+          </Field>
+          <Button disabled={pending} type="submit" variant="destructive">
+            {pending ? "Recording…" : "Add risk marker"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RiskMarkerItem({
+  marker,
+  reload,
+}: Readonly<{
+  marker: CustomerRiskMarker;
+  reload: () => Promise<void>;
+}>) {
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function resolve(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      await apiRequest("/api/platform/customer-operations/risk-markers", {
+        method: "POST",
+        body: JSON.stringify({
+          targetType: marker.targetType,
+          targetId: marker.targetId,
+          markerId: marker.id,
+          category: marker.category,
+          severity: marker.severity,
+          state: "resolved",
+          summary: marker.summary,
+          reason,
+        }),
+      });
+      await reload();
+    } catch (requestError) {
+      setError(toApiError(requestError).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <article className="customer-membership">
+      <div className="customer-membership-heading">
+        <div>
+          <strong>{marker.summary}</strong>
+          <span>
+            Revision {marker.revisionNumber} · {formatDate(marker.changedAt)}
+          </span>
+        </div>
+        <div className="customer-badge-row">
+          <Badge variant={marker.state === "active" ? "critical" : "success"}>
+            {marker.state}
+          </Badge>
+          <Badge>{marker.severity}</Badge>
+          <Badge>{marker.category}</Badge>
+        </div>
+      </div>
+      {marker.state === "active" ? (
+        <form className="inline-confirmation" onSubmit={resolve}>
+          <FieldLabel htmlFor={`resolve-risk-${marker.id}`}>
+            Resolution reason
+          </FieldLabel>
+          <Input
+            id={`resolve-risk-${marker.id}`}
+            minLength={8}
+            onChange={(event) => setReason(event.target.value)}
+            required
+            value={reason}
+          />
+          {error ? <span className="form-error">{error}</span> : null}
+          <Button disabled={pending} type="submit" variant="outline">
+            {pending ? "Resolving…" : "Resolve marker"}
+          </Button>
+        </form>
+      ) : null}
+    </article>
+  );
+}
+
+function OwnershipTransferControl({
+  inspection,
+  reload,
+}: Readonly<{
+  inspection: Extract<
+    CustomerDirectoryInspectionResponse,
+    { entityType: "workspace" }
+  >;
+  reload: () => Promise<void>;
+}>) {
+  const [successorUserId, setSuccessorUserId] = useState("");
+  const [approvalReference, setApprovalReference] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const expected = `TRANSFER ${inspection.workspace.id} TO ${successorUserId}`;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      await apiRequest("/api/platform/customer-ownership-transfers", {
+        method: "POST",
+        body: JSON.stringify({
+          workspaceId: inspection.workspace.id,
+          successorUserId,
+          approvalReference,
+          confirmation,
+          reason,
+        }),
+      });
+      setSuccessorUserId("");
+      setApprovalReference("");
+      setConfirmation("");
+      setReason("");
+      await reload();
+    } catch (requestError) {
+      setError(toApiError(requestError).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Ownership recovery and transfer</CardTitle>
+          <CardDescription>
+            Current owner comes directly from Arth. A request remains pending
+            until Arth reports the observed owner.
+          </CardDescription>
+        </div>
+        <Badge variant="warning">Approval + step-up</Badge>
+      </CardHeader>
+      <CardContent>
+        <p className="customer-identifier">
+          Current owner: {inspection.workspace.ownerUserId ?? "Unknown"}
+        </p>
+        {inspection.operations.ownershipTransfers.length === 0 ? (
+          <p className="customer-muted">No ownership transfer history.</p>
+        ) : (
+          <div className="customer-membership-list">
+            {inspection.operations.ownershipTransfers.map((transfer) => (
+              <article className="customer-membership" key={transfer.id}>
+                <div className="customer-membership-heading">
+                  <div>
+                    <strong>{transfer.successorUserId}</strong>
+                    <span>
+                      Revision {transfer.revisionNumber} · approval{" "}
+                      {transfer.approvalReference}
+                    </span>
+                  </div>
+                  <Badge
+                    variant={reconciliationVariant(
+                      transfer.reconciliationState,
+                    )}
+                  >
+                    {transfer.reconciliationState}
+                  </Badge>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        {error ? <Alert variant="destructive">{error}</Alert> : null}
+        <form className="form-stack" onSubmit={submit}>
+          <Field>
+            <FieldLabel htmlFor={`successor-${inspection.workspace.id}`}>
+              Successor user ID
+            </FieldLabel>
+            <Input
+              id={`successor-${inspection.workspace.id}`}
+              onChange={(event) => {
+                setSuccessorUserId(event.target.value);
+                setConfirmation("");
+              }}
+              required
+              value={successorUserId}
+            />
+            <FieldDescription>
+              Must be an active, verified member of this workspace.
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`approval-${inspection.workspace.id}`}>
+              Approval reference
+            </FieldLabel>
+            <Input
+              id={`approval-${inspection.workspace.id}`}
+              minLength={3}
+              onChange={(event) => setApprovalReference(event.target.value)}
+              required
+              value={approvalReference}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`transfer-reason-${inspection.workspace.id}`}>
+              Reason
+            </FieldLabel>
+            <Input
+              id={`transfer-reason-${inspection.workspace.id}`}
+              minLength={8}
+              onChange={(event) => setReason(event.target.value)}
+              required
+              value={reason}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`transfer-confirm-${inspection.workspace.id}`}>
+              Type {expected}
+            </FieldLabel>
+            <Input
+              id={`transfer-confirm-${inspection.workspace.id}`}
+              onChange={(event) => setConfirmation(event.target.value)}
+              required
+              value={confirmation}
+            />
+          </Field>
+          <Button
+            disabled={pending || confirmation !== expected}
+            type="submit"
+            variant="destructive"
+          >
+            {pending ? "Requesting…" : "Request ownership transfer"}
           </Button>
         </form>
       </CardContent>

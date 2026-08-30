@@ -10,8 +10,13 @@ const expectedTables = [
   "allowed_email_domains",
   "audit_events",
   "customer_directory_sources",
+  "customer_internal_notes",
+  "customer_risk_marker_revisions",
+  "customer_risk_markers",
   "customer_user_projections",
   "customer_workspace_membership_projections",
+  "customer_workspace_ownership_transfer_observations",
+  "customer_workspace_ownership_transfers",
   "customer_workspace_projections",
   "model_provider_health_observations",
   "model_provider_revisions",
@@ -44,10 +49,14 @@ const expectedTables = [
 
 const expectedIndexes = [
   "customer_directory_sources_environment_source_unique",
+  "customer_internal_notes_correlation_unique",
+  "customer_risk_marker_revisions_number_unique",
   "customer_memberships_environment_pair_unique",
   "customer_memberships_environment_source_unique",
   "customer_users_environment_source_unique",
   "customer_workspaces_environment_source_unique",
+  "customer_ownership_transfer_observations_source_unique",
+  "customer_ownership_transfers_revision_unique",
   "operators_auth_user_id_unique",
   "operators_single_super_administrator",
   "operator_invitations_one_pending_per_operator",
@@ -102,6 +111,8 @@ const expectedAuthIndexes = [
 
 const expectedConstraints = [
   "operators_super_administrator_must_be_active",
+  "customer_ownership_transfer_observations_shape",
+  "customer_ownership_transfers_distinct_users",
   "model_provider_health_expiry_after_observation",
   "model_operational_controls_target_shape",
   "model_operational_control_revisions_maintenance_metadata",
@@ -152,6 +163,11 @@ const expectedTriggers = [
   "platform_integration_revisions_immutable",
   "platform_secret_references_no_delete",
   "platform_secret_versions_no_delete",
+  "customer_internal_notes_immutable",
+  "customer_risk_markers_immutable",
+  "customer_risk_marker_revisions_immutable",
+  "customer_workspace_ownership_transfers_immutable",
+  "customer_workspace_ownership_transfer_observations_immutable",
 ] as const;
 
 const pool = new Pool({

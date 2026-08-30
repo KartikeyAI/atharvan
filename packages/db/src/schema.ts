@@ -368,6 +368,36 @@ export const customerRestrictionObservedState = pgEnum(
   ["restricted", "restored", "failed"],
 );
 
+export const customerInternalNoteCategory = pgEnum(
+  "customer_internal_note_category",
+  ["support", "operations", "billing", "security"],
+);
+
+export const customerRiskCategory = pgEnum("customer_risk_category", [
+  "security",
+  "abuse",
+  "billing",
+  "identity",
+  "support",
+]);
+
+export const customerRiskSeverity = pgEnum("customer_risk_severity", [
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+
+export const customerRiskState = pgEnum("customer_risk_state", [
+  "active",
+  "resolved",
+]);
+
+export const customerOwnershipTransferObservedState = pgEnum(
+  "customer_ownership_transfer_observed_state",
+  ["observed", "failed"],
+);
+
 export const operators = pgTable(
   "operators",
   {
@@ -1942,6 +1972,7 @@ export const customerWorkspaceProjections = pgTable(
     name: text("name").notNull(),
     slug: text("slug"),
     lifecycle: customerWorkspaceLifecycle("lifecycle").notNull(),
+    ownerUserSourceId: text("owner_user_source_id"),
     sourceCreatedAt: timestamp("source_created_at", {
       withTimezone: true,
     }).notNull(),
@@ -2159,6 +2190,224 @@ export const customerAccessRestrictionObservations = pgTable(
     ),
     check(
       "customer_access_restriction_observations_message_bounded",
+      sql`${table.message} IS NULL OR length(btrim(${table.message})) BETWEEN 1 AND 500`,
+    ),
+  ],
+);
+
+export const customerInternalNotes = pgTable(
+  "customer_internal_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    targetType: customerRestrictionTargetType("target_type").notNull(),
+    targetSourceId: text("target_source_id").notNull(),
+    category: customerInternalNoteCategory("category").notNull(),
+    body: text("body").notNull(),
+    reason: text("reason").notNull(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_internal_notes_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("customer_internal_notes_target_created_idx").on(
+      table.environment,
+      table.targetType,
+      table.targetSourceId,
+      table.createdAt,
+    ),
+    check(
+      "customer_internal_notes_target_id_nonempty",
+      sql`length(btrim(${table.targetSourceId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "customer_internal_notes_body_bounded",
+      sql`length(btrim(${table.body})) BETWEEN 4 AND 2000`,
+    ),
+    check(
+      "customer_internal_notes_reason_bounded",
+      sql`length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const customerRiskMarkers = pgTable(
+  "customer_risk_markers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    targetType: customerRestrictionTargetType("target_type").notNull(),
+    targetSourceId: text("target_source_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("customer_risk_markers_target_idx").on(
+      table.environment,
+      table.targetType,
+      table.targetSourceId,
+      table.createdAt,
+    ),
+    check(
+      "customer_risk_markers_target_id_nonempty",
+      sql`length(btrim(${table.targetSourceId})) BETWEEN 1 AND 200`,
+    ),
+  ],
+);
+
+export const customerRiskMarkerRevisions = pgTable(
+  "customer_risk_marker_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    markerId: uuid("marker_id")
+      .notNull()
+      .references(() => customerRiskMarkers.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    category: customerRiskCategory("category").notNull(),
+    severity: customerRiskSeverity("severity").notNull(),
+    state: customerRiskState("state").notNull(),
+    summary: text("summary").notNull(),
+    reason: text("reason").notNull(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_risk_marker_revisions_number_unique").on(
+      table.markerId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("customer_risk_marker_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("customer_risk_marker_revisions_state_idx").on(
+      table.state,
+      table.changedAt,
+    ),
+    check(
+      "customer_risk_marker_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "customer_risk_marker_revisions_summary_bounded",
+      sql`length(btrim(${table.summary})) BETWEEN 4 AND 500`,
+    ),
+    check(
+      "customer_risk_marker_revisions_reason_bounded",
+      sql`length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const customerWorkspaceOwnershipTransfers = pgTable(
+  "customer_workspace_ownership_transfers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    workspaceSourceId: text("workspace_source_id").notNull(),
+    revisionNumber: integer("revision_number").notNull(),
+    currentOwnerUserSourceId: text("current_owner_user_source_id").notNull(),
+    successorUserSourceId: text("successor_user_source_id").notNull(),
+    approvalReference: text("approval_reference").notNull(),
+    reason: text("reason").notNull(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_ownership_transfers_revision_unique").on(
+      table.environment,
+      table.workspaceSourceId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("customer_ownership_transfers_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("customer_ownership_transfers_workspace_requested_idx").on(
+      table.environment,
+      table.workspaceSourceId,
+      table.requestedAt,
+    ),
+    check(
+      "customer_ownership_transfers_revision_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "customer_ownership_transfers_distinct_users",
+      sql`${table.currentOwnerUserSourceId} <> ${table.successorUserSourceId}`,
+    ),
+    check(
+      "customer_ownership_transfers_approval_bounded",
+      sql`length(btrim(${table.approvalReference})) BETWEEN 3 AND 200`,
+    ),
+    check(
+      "customer_ownership_transfers_reason_bounded",
+      sql`length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const customerWorkspaceOwnershipTransferObservations = pgTable(
+  "customer_workspace_ownership_transfer_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    transferId: uuid("transfer_id")
+      .notNull()
+      .references(() => customerWorkspaceOwnershipTransfers.id, {
+        onDelete: "restrict",
+      }),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    observedState:
+      customerOwnershipTransferObservedState("observed_state").notNull(),
+    observedOwnerUserSourceId: text("observed_owner_user_source_id"),
+    message: text("message"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    synchronizedAt: timestamp("synchronized_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("customer_ownership_transfer_observations_source_unique").on(
+      table.transferId,
+      table.sourceRevision,
+    ),
+    uniqueIndex(
+      "customer_ownership_transfer_observations_correlation_unique",
+    ).on(table.correlationId),
+    index("customer_ownership_transfer_observations_observed_idx").on(
+      table.transferId,
+      table.observedAt,
+    ),
+    check(
+      "customer_ownership_transfer_observations_source_positive",
+      sql`${table.sourceRevision} > 0`,
+    ),
+    check(
+      "customer_ownership_transfer_observations_shape",
+      sql`(${table.observedState} = 'observed' AND ${table.observedOwnerUserSourceId} IS NOT NULL) OR (${table.observedState} = 'failed' AND ${table.message} IS NOT NULL)`,
+    ),
+    check(
+      "customer_ownership_transfer_observations_message_bounded",
       sql`${table.message} IS NULL OR length(btrim(${table.message})) BETWEEN 1 AND 500`,
     ),
   ],

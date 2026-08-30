@@ -115,6 +115,24 @@ function createRuntime(input?: {
       outcome: "created" as const,
       restrictionId: input.restrictionId,
     })),
+    createCustomerInternalNote: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000702",
+    })),
+    setCustomerRiskMarker: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000703",
+      revisionNumber: 1,
+    })),
+    requestCustomerOwnershipTransfer: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000704",
+      revisionNumber: 1,
+    })),
+    recordCustomerOwnershipTransferObservation: vi.fn(async (actor, input) => ({
+      outcome: "created" as const,
+      id: input.transferId,
+    })),
     beginPlatformCommand: vi.fn(async () => ({
       state: "started" as const,
       commandId: "00000000-0000-4000-8000-000000000990",
@@ -520,6 +538,75 @@ describe("Atharvan control-plane worker", () => {
     expect(await response.json()).toMatchObject({
       code: "operator_capability_required",
     });
+  });
+
+  it("records ownership transfer approval in the shared command envelope", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/customer-ownership-transfers",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "transfer-workspace-owner-1",
+        },
+        body: JSON.stringify({
+          workspaceId: "wrk_1",
+          successorUserId: "usr_2",
+          approvalReference: "APR-42",
+          confirmation: "TRANSFER wrk_1 TO usr_2",
+          reason: "Recover ownership after verified owner departure.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(201);
+    expect(runtime.beginPlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "workspace.ownership-transfer.request",
+        requiredCapability: "platform:workspaces:transfer",
+        approvalReference: "APR-42",
+        idempotencyKey: "transfer-workspace-owner-1",
+      }),
+    );
+    expect(runtime.requestCustomerOwnershipTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        workspaceId: "wrk_1",
+        successorUserId: "usr_2",
+      }),
+    );
+  });
+
+  it("redacts internal note bodies from command fingerprints", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/customer-operations/notes",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "customer-note-1",
+        },
+        body: JSON.stringify({
+          targetType: "user",
+          targetId: "usr_1",
+          category: "support",
+          body: "Customer requested an account access review.",
+          reason: "Record bounded internal support context.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(201);
+    expect(runtime.beginPlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "user.internal-note.create",
+        safePayload: expect.objectContaining({ body: "[redacted]" }),
+      }),
+    );
   });
 
   it("searches and exports immutable audit evidence with separate capabilities", async () => {

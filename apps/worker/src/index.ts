@@ -28,6 +28,11 @@ import {
   type CustomerDirectoryInspection,
   type CustomerDirectorySearchResult,
   type CustomerDirectoryStatus,
+  type CustomerInternalNoteCategory,
+  type CustomerOwnershipTransferObservedState,
+  type CustomerRiskCategory,
+  type CustomerRiskSeverity,
+  type CustomerRiskState,
   type CustomerRestrictionCapability,
   type CustomerRestrictionDesiredState,
   type CustomerRestrictionObservedState,
@@ -168,6 +173,33 @@ export interface AuthenticationRuntime {
   ): Promise<{
     readonly outcome: "created" | "unchanged";
     readonly restrictionId: string;
+  }>;
+  createCustomerInternalNote(
+    actor: AuthenticatedOperator,
+    input: CreateCustomerInternalNoteCommand,
+  ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+  setCustomerRiskMarker(
+    actor: AuthenticatedOperator,
+    input: SetCustomerRiskMarkerCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  requestCustomerOwnershipTransfer(
+    actor: AuthenticatedOperator,
+    input: RequestCustomerOwnershipTransferCommand,
+  ): Promise<{
+    readonly outcome: "created";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  recordCustomerOwnershipTransferObservation(
+    actor: AuthenticatedOperator,
+    input: RecordCustomerOwnershipTransferObservationCommand,
+  ): Promise<{
+    readonly outcome: "created" | "unchanged";
+    readonly id: string;
   }>;
   beginPlatformCommand(
     input: BeginPlatformCommand,
@@ -370,6 +402,46 @@ export interface RecordCustomerRestrictionObservationCommand {
   readonly desiredRevisionNumber: number;
   readonly sourceRevision: string;
   readonly observedState: CustomerRestrictionObservedState;
+  readonly message: string | null;
+  readonly observedAt: string;
+  readonly correlationId: string;
+}
+
+export interface CreateCustomerInternalNoteCommand {
+  readonly targetType: CustomerDirectoryEntityType;
+  readonly targetId: string;
+  readonly category: CustomerInternalNoteCategory;
+  readonly body: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface SetCustomerRiskMarkerCommand {
+  readonly targetType: CustomerDirectoryEntityType;
+  readonly targetId: string;
+  readonly markerId: string | null;
+  readonly category: CustomerRiskCategory;
+  readonly severity: CustomerRiskSeverity;
+  readonly state: CustomerRiskState;
+  readonly summary: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface RequestCustomerOwnershipTransferCommand {
+  readonly workspaceId: string;
+  readonly successorUserId: string;
+  readonly approvalReference: string;
+  readonly confirmation: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface RecordCustomerOwnershipTransferObservationCommand {
+  readonly transferId: string;
+  readonly sourceRevision: string;
+  readonly observedState: CustomerOwnershipTransferObservedState;
+  readonly observedOwnerUserId: string | null;
   readonly message: string | null;
   readonly observedAt: string;
   readonly correlationId: string;
@@ -872,6 +944,115 @@ export function createApp(
               ...input,
               correlationId: context.get("requestId"),
             },
+          ),
+      );
+    },
+  );
+
+  app.post("/v1/platform/customer-operations/notes", async (context) => {
+    const input = await readJson(context, parseCreateCustomerInternalNote);
+    if (input === null) return invalidRequest(context);
+    const requiredCapability = `platform:${input.targetType}s:notes:write`;
+    if (!operatorHasCapability(context.get("operator"), requiredCapability)) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability,
+        name: `${input.targetType}.internal-note.create`,
+        version: 1,
+        targetType: `customer_${input.targetType}`,
+        targetId: input.targetId,
+        payload: input,
+        sensitivePayloadKeys: ["body"],
+        reason: input.reason,
+      },
+      () =>
+        runtime.createCustomerInternalNote(context.get("operator"), {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
+
+  app.post("/v1/platform/customer-operations/risk-markers", async (context) => {
+    const input = await readJson(context, parseSetCustomerRiskMarker);
+    if (input === null) return invalidRequest(context);
+    const requiredCapability = `platform:${input.targetType}s:risk:write`;
+    if (!operatorHasCapability(context.get("operator"), requiredCapability)) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability,
+        name: `${input.targetType}.risk-marker.${input.state}`,
+        version: 1,
+        targetType: `customer_${input.targetType}`,
+        targetId: input.targetId,
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.setCustomerRiskMarker(context.get("operator"), {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
+
+  app.post("/v1/platform/customer-ownership-transfers", async (context) => {
+    const input = await readJson(context, parseRequestOwnershipTransfer);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:workspaces:transfer",
+        name: "workspace.ownership-transfer.request",
+        version: 1,
+        targetType: "customer_workspace",
+        targetId: input.workspaceId,
+        payload: input,
+        reason: input.reason,
+        approvalReference: input.approvalReference,
+      },
+      () =>
+        runtime.requestCustomerOwnershipTransfer(context.get("operator"), {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
+
+  app.put(
+    "/v1/platform/customer-ownership-transfers/observations",
+    async (context) => {
+      const input = await readJson(context, parseOwnershipTransferObservation);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:customer-ownership:sync",
+          name: "workspace.ownership-transfer.observation.reconcile",
+          version: 1,
+          targetType: "customer_workspace_ownership_transfer",
+          targetId: input.transferId,
+          payload: input,
+          reason: "Reconcile the ownership state observed by Arth.",
+        },
+        () =>
+          runtime.recordCustomerOwnershipTransferObservation(
+            context.get("operator"),
+            { ...input, correlationId: context.get("requestId") },
           ),
       );
     },
@@ -1746,6 +1927,109 @@ function parseCustomerRestrictionObservation(
     : null;
 }
 
+function parseCreateCustomerInternalNote(
+  value: unknown,
+): Omit<CreateCustomerInternalNoteCommand, "correlationId"> | null {
+  const target = parseCustomerRestrictionTarget(value);
+  if (target === null || !isRecord(value)) return null;
+  const body = readTrimmedString(value.body, 2000);
+  const reason = readReason(value.reason);
+  return body !== null &&
+    body.length >= 4 &&
+    reason !== null &&
+    (value.category === "support" ||
+      value.category === "operations" ||
+      value.category === "billing" ||
+      value.category === "security")
+    ? { ...target, category: value.category, body, reason }
+    : null;
+}
+
+function parseSetCustomerRiskMarker(
+  value: unknown,
+): Omit<SetCustomerRiskMarkerCommand, "correlationId"> | null {
+  const target = parseCustomerRestrictionTarget(value);
+  if (target === null || !isRecord(value)) return null;
+  const markerId = readNullableString(value.markerId, 36);
+  const summary = readTrimmedString(value.summary, 500);
+  const reason = readReason(value.reason);
+  return markerId !== undefined &&
+    summary !== null &&
+    summary.length >= 4 &&
+    reason !== null &&
+    (value.category === "security" ||
+      value.category === "abuse" ||
+      value.category === "billing" ||
+      value.category === "identity" ||
+      value.category === "support") &&
+    (value.severity === "low" ||
+      value.severity === "medium" ||
+      value.severity === "high" ||
+      value.severity === "critical") &&
+    (value.state === "active" || value.state === "resolved")
+    ? {
+        ...target,
+        markerId,
+        category: value.category,
+        severity: value.severity,
+        state: value.state,
+        summary,
+        reason,
+      }
+    : null;
+}
+
+function parseRequestOwnershipTransfer(
+  value: unknown,
+): Omit<RequestCustomerOwnershipTransferCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const workspaceId = readTrimmedString(value.workspaceId, 200);
+  const successorUserId = readTrimmedString(value.successorUserId, 200);
+  const approvalReference = readTrimmedString(value.approvalReference, 200);
+  const confirmation = readTrimmedString(value.confirmation, 420);
+  const reason = readReason(value.reason);
+  return workspaceId !== null &&
+    successorUserId !== null &&
+    approvalReference !== null &&
+    approvalReference.length >= 3 &&
+    confirmation !== null &&
+    reason !== null
+    ? { workspaceId, successorUserId, approvalReference, confirmation, reason }
+    : null;
+}
+
+function parseOwnershipTransferObservation(
+  value: unknown,
+): Omit<
+  RecordCustomerOwnershipTransferObservationCommand,
+  "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const transferId = readTrimmedString(value.transferId, 36);
+  const sourceRevision = readTrimmedString(value.sourceRevision, 19);
+  const observedOwnerUserId = readNullableString(
+    value.observedOwnerUserId,
+    200,
+  );
+  const message = readNullableString(value.message, 500);
+  const observedAt = readTrimmedString(value.observedAt, 40);
+  return transferId !== null &&
+    sourceRevision !== null &&
+    observedOwnerUserId !== undefined &&
+    message !== undefined &&
+    observedAt !== null &&
+    (value.observedState === "observed" || value.observedState === "failed")
+    ? {
+        transferId,
+        sourceRevision,
+        observedState: value.observedState,
+        observedOwnerUserId,
+        message,
+        observedAt,
+      }
+    : null;
+}
+
 function parseCustomerSnapshotUsers(
   value: unknown,
 ): ReadonlyArray<CustomerDirectorySnapshotUser> | null {
@@ -1796,16 +2080,31 @@ function parseCustomerSnapshotWorkspaces(
       item.slug === null || item.slug === undefined
         ? null
         : readTrimmedString(item.slug, 160);
+    const ownerUserId =
+      item.ownerUserId === null || item.ownerUserId === undefined
+        ? null
+        : readTrimmedString(item.ownerUserId, 200);
     return id !== null &&
       organizationId !== null &&
       name !== null &&
       createdAt !== null &&
       (slug !== null || item.slug === null || item.slug === undefined) &&
+      (ownerUserId !== null ||
+        item.ownerUserId === null ||
+        item.ownerUserId === undefined) &&
       (item.lifecycle === "active" ||
         item.lifecycle === "restricted" ||
         item.lifecycle === "suspended" ||
         item.lifecycle === "archived")
-      ? { id, organizationId, name, slug, lifecycle: item.lifecycle, createdAt }
+      ? {
+          id,
+          organizationId,
+          name,
+          slug,
+          lifecycle: item.lifecycle,
+          ownerUserId,
+          createdAt,
+        }
       : null;
   });
   return items.some((item) => item === null)

@@ -30,8 +30,11 @@ import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
   auditEvents,
   customerAccessRestrictionRevisions,
+  customerInternalNotes,
+  customerRiskMarkerRevisions,
   customerUserProjections,
   customerWorkspaceMembershipProjections,
+  customerWorkspaceOwnershipTransfers,
   customerWorkspaceProjections,
   operatorInvitations,
   operators,
@@ -669,6 +672,14 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
             verificationStatus: "verified" as const,
             createdAt: "2026-08-01T00:00:00.000Z",
           },
+          {
+            id: "arth-user-integration-2",
+            email: "successor@artharvan-ci.example",
+            displayName: "Successor Integration",
+            lifecycle: "active" as const,
+            verificationStatus: "verified" as const,
+            createdAt: "2026-08-01T00:00:00.000Z",
+          },
         ],
         workspaces: [
           {
@@ -677,6 +688,7 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
             name: "Integration Workspace",
             slug: "integration-workspace",
             lifecycle: "active" as const,
+            ownerUserId: "arth-user-integration-1",
             createdAt: "2026-08-02T00:00:00.000Z",
           },
         ],
@@ -691,6 +703,16 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
             deniedPermissions: ["workspace:delete"],
             effectivePermissions: ["workspace:read", "workspace:write"],
           },
+          {
+            id: "arth-membership-integration-2",
+            userId: "arth-user-integration-2",
+            workspaceId: "arth-workspace-integration-1",
+            role: "administrator",
+            lifecycle: "active" as const,
+            grantedPermissions: ["workspace:read", "workspace:write"],
+            deniedPermissions: [],
+            effectivePermissions: ["workspace:read", "workspace:write"],
+          },
         ],
         reason: "Reconcile the Arth integration projection.",
         correlationId: "00000000-0000-4000-8000-000000000128",
@@ -700,9 +722,9 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
       ).resolves.toEqual({
         outcome: "updated",
         sourceRevision: "42",
-        users: 1,
+        users: 2,
         workspaces: 1,
-        memberships: 1,
+        memberships: 2,
       });
       const customerSearch = await customerDirectoryService.search({
         actor,
@@ -814,6 +836,96 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
             ),
           ),
       ).rejects.toThrow(/restriction history cannot be mutated/u);
+      const note = await customerDirectoryService.createInternalNote({
+        actor,
+        targetType: "workspace",
+        targetId: "arth-workspace-integration-1",
+        category: "support",
+        body: "Owner departure was verified through the support process.",
+        reason: "Record bounded ownership recovery context.",
+        correlationId: "00000000-0000-4000-8000-000000000136",
+      });
+      const marker = await customerDirectoryService.setRiskMarker({
+        actor,
+        targetType: "workspace",
+        targetId: "arth-workspace-integration-1",
+        category: "identity",
+        severity: "high",
+        state: "active",
+        summary: "Workspace owner is no longer available.",
+        reason: "Track the verified ownership recovery risk.",
+        correlationId: "00000000-0000-4000-8000-000000000137",
+      });
+      const transfer = await customerDirectoryService.requestOwnershipTransfer({
+        actor,
+        workspaceId: "arth-workspace-integration-1",
+        successorUserId: "arth-user-integration-2",
+        approvalReference: "APR-INTEGRATION-42",
+        confirmation:
+          "TRANSFER arth-workspace-integration-1 TO arth-user-integration-2",
+        reason: "Recover ownership after verified owner departure.",
+        correlationId: "00000000-0000-4000-8000-000000000138",
+      });
+      expect(transfer).toMatchObject({ outcome: "created", revisionNumber: 1 });
+      await expect(
+        customerDirectoryService.inspect({
+          actor,
+          entityType: "workspace",
+          entityId: "arth-workspace-integration-1",
+          reason: "Inspect the ownership recovery workflow.",
+          correlationId: "00000000-0000-4000-8000-000000000139",
+        }),
+      ).resolves.toMatchObject({
+        workspace: { ownerUserId: "arth-user-integration-1" },
+        operations: {
+          notes: [{ id: note.id }],
+          riskMarkers: [{ id: marker.id, state: "active" }],
+          ownershipTransfers: [
+            { id: transfer.id, reconciliationState: "pending" },
+          ],
+        },
+      });
+      await customerDirectoryService.recordOwnershipTransferObservation({
+        actor,
+        transferId: transfer.id,
+        sourceRevision: "200",
+        observedState: "observed",
+        observedOwnerUserId: "arth-user-integration-2",
+        message: "Arth reports the approved successor as owner.",
+        observedAt: commandTime.toISOString(),
+        correlationId: "00000000-0000-4000-8000-000000000140",
+      });
+      await expect(
+        customerDirectoryService.inspect({
+          actor,
+          entityType: "workspace",
+          entityId: "arth-workspace-integration-1",
+          reason: "Verify reconciled ownership recovery state.",
+          correlationId: "00000000-0000-4000-8000-000000000141",
+        }),
+      ).resolves.toMatchObject({
+        operations: {
+          ownershipTransfers: [{ reconciliationState: "applied" }],
+        },
+      });
+      await expect(
+        database
+          .update(customerInternalNotes)
+          .set({ body: "Attempt to rewrite internal note history." })
+          .where(eq(customerInternalNotes.id, note.id)),
+      ).rejects.toThrow(/customer operations history cannot be mutated/u);
+      await expect(
+        database
+          .update(customerRiskMarkerRevisions)
+          .set({ summary: "Attempt to rewrite risk history." })
+          .where(eq(customerRiskMarkerRevisions.markerId, marker.id)),
+      ).rejects.toThrow(/customer operations history cannot be mutated/u);
+      await expect(
+        database
+          .update(customerWorkspaceOwnershipTransfers)
+          .set({ reason: "Attempt to rewrite transfer history." })
+          .where(eq(customerWorkspaceOwnershipTransfers.id, transfer.id)),
+      ).rejects.toThrow(/customer operations history cannot be mutated/u);
       await expect(
         customerDirectoryService.reconcileSnapshot({
           ...customerSnapshot,

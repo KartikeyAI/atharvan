@@ -246,6 +246,17 @@ async function createProductionAuthenticationRuntime(input: {
         actor,
         ...command,
       }),
+    createCustomerInternalNote: (actor, command) =>
+      customerDirectoryService.createInternalNote({ actor, ...command }),
+    setCustomerRiskMarker: (actor, command) =>
+      customerDirectoryService.setRiskMarker({ actor, ...command }),
+    requestCustomerOwnershipTransfer: (actor, command) =>
+      customerDirectoryService.requestOwnershipTransfer({ actor, ...command }),
+    recordCustomerOwnershipTransferObservation: (actor, command) =>
+      customerDirectoryService.recordOwnershipTransferObservation({
+        actor,
+        ...command,
+      }),
     beginPlatformCommand: (command) => commandService.begin(command),
     completePlatformCommand: (command) => commandService.complete(command),
     listPlatformAuditEvents: (actor, query) =>

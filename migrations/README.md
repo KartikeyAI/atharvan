@@ -39,4 +39,8 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0012_customer_directory_projection.sql` adds disposable, environment-scoped projections of Arth users, workspaces, and memberships plus a monotonic source checkpoint. Projected permissions are copied from Arth rather than inferred, sensitive searches and inspections are audited without retaining search terms, and no customer code, chats, credentials, secrets, environment values, or integration tokens are stored.
 
+`0013_customer_access_restrictions.sql` adds immutable capability-scoped customer restriction intent and append-only Arth reconciliation observations. Atharvan never reports a restriction as applied until the source observation matches the desired revision.
+
+`0014_customer_operations.sql` adds explicit projected workspace ownership, controlled ownership-transfer requests and observations, append-only internal notes, and immutable risk-marker revisions. It stores operational metadata only and rejects secret-like note content before PostgreSQL.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

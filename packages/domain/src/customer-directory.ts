@@ -39,9 +39,77 @@ export interface CustomerWorkspaceSummary {
   readonly name: string;
   readonly slug: string | null;
   readonly lifecycle: CustomerWorkspaceLifecycle;
+  readonly ownerUserId: string | null;
   readonly createdAt: string;
   readonly observedAt: string;
   readonly sourceRevision: string;
+}
+
+export type CustomerOperationsTargetType = "user" | "workspace";
+
+export type CustomerInternalNoteCategory =
+  "support" | "operations" | "billing" | "security";
+
+export interface CustomerInternalNote {
+  readonly id: string;
+  readonly environment: PlatformConfigurationEnvironment;
+  readonly targetType: CustomerOperationsTargetType;
+  readonly targetId: string;
+  readonly category: CustomerInternalNoteCategory;
+  readonly body: string;
+  readonly reason: string;
+  readonly createdByOperatorId: string;
+  readonly createdAt: string;
+}
+
+export type CustomerRiskCategory =
+  "security" | "abuse" | "billing" | "identity" | "support";
+
+export type CustomerRiskSeverity = "low" | "medium" | "high" | "critical";
+export type CustomerRiskState = "active" | "resolved";
+
+export interface CustomerRiskMarker {
+  readonly id: string;
+  readonly environment: PlatformConfigurationEnvironment;
+  readonly targetType: CustomerOperationsTargetType;
+  readonly targetId: string;
+  readonly revisionNumber: number;
+  readonly category: CustomerRiskCategory;
+  readonly severity: CustomerRiskSeverity;
+  readonly state: CustomerRiskState;
+  readonly summary: string;
+  readonly reason: string;
+  readonly changedByOperatorId: string;
+  readonly changedAt: string;
+}
+
+export type CustomerOwnershipTransferObservedState = "observed" | "failed";
+export type CustomerOwnershipTransferReconciliationState =
+  "pending" | "applied" | "drifted" | "failed";
+
+export interface CustomerWorkspaceOwnershipTransfer {
+  readonly id: string;
+  readonly environment: PlatformConfigurationEnvironment;
+  readonly workspaceId: string;
+  readonly revisionNumber: number;
+  readonly currentOwnerUserId: string;
+  readonly successorUserId: string;
+  readonly approvalReference: string;
+  readonly reason: string;
+  readonly requestedByOperatorId: string;
+  readonly requestedAt: string;
+  readonly reconciliationState: CustomerOwnershipTransferReconciliationState;
+  readonly observedState: CustomerOwnershipTransferObservedState | null;
+  readonly observedOwnerUserId: string | null;
+  readonly observedSourceRevision: string | null;
+  readonly observedAt: string | null;
+  readonly reconciliationMessage: string | null;
+}
+
+export interface CustomerOperationsContext {
+  readonly notes: ReadonlyArray<CustomerInternalNote>;
+  readonly riskMarkers: ReadonlyArray<CustomerRiskMarker>;
+  readonly ownershipTransfers: ReadonlyArray<CustomerWorkspaceOwnershipTransfer>;
 }
 
 export interface CustomerWorkspaceMembership {
@@ -72,6 +140,7 @@ export interface CustomerUserInspection {
     readonly membership: CustomerWorkspaceMembership;
     readonly workspace: CustomerWorkspaceSummary;
   }>;
+  readonly operations: CustomerOperationsContext;
 }
 
 export interface CustomerWorkspaceInspection {
@@ -82,6 +151,7 @@ export interface CustomerWorkspaceInspection {
     readonly membership: CustomerWorkspaceMembership;
     readonly user: CustomerUserSummary;
   }>;
+  readonly operations: CustomerOperationsContext;
 }
 
 export type CustomerDirectoryInspection =

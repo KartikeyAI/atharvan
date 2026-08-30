@@ -6,6 +6,12 @@ import {
   type CustomerDirectorySearchResult,
   type CustomerDirectoryStatus,
   type CustomerMembershipLifecycle,
+  type CustomerInternalNoteCategory,
+  type CustomerOperationsTargetType,
+  type CustomerOwnershipTransferObservedState,
+  type CustomerRiskCategory,
+  type CustomerRiskSeverity,
+  type CustomerRiskState,
   type CustomerRestrictionCapability,
   type CustomerRestrictionDesiredState,
   type CustomerRestrictionObservedState,
@@ -34,6 +40,7 @@ export interface CustomerDirectorySnapshotWorkspace {
   readonly name: string;
   readonly slug?: string | null;
   readonly lifecycle: CustomerWorkspaceLifecycle;
+  readonly ownerUserId?: string | null;
   readonly createdAt: string;
 }
 
@@ -150,6 +157,73 @@ export interface CustomerDirectoryStore {
     | { readonly outcome: "unchanged"; readonly restrictionId: string }
     | { readonly outcome: "rejected"; readonly reason: string }
   >;
+  createInternalNote(input: {
+    readonly actorId: string;
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly targetType: CustomerOperationsTargetType;
+    readonly targetId: string;
+    readonly category: CustomerInternalNoteCategory;
+    readonly body: string;
+    readonly reason: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<
+    | { readonly outcome: "created"; readonly id: string }
+    | { readonly outcome: "rejected"; readonly reason: string }
+  >;
+  setRiskMarker(input: {
+    readonly actorId: string;
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly targetType: CustomerOperationsTargetType;
+    readonly targetId: string;
+    readonly markerId: string | null;
+    readonly category: CustomerRiskCategory;
+    readonly severity: CustomerRiskSeverity;
+    readonly state: CustomerRiskState;
+    readonly summary: string;
+    readonly reason: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<
+    | {
+        readonly outcome: "created" | "updated" | "unchanged";
+        readonly id: string;
+        readonly revisionNumber: number;
+      }
+    | { readonly outcome: "rejected"; readonly reason: string }
+  >;
+  requestOwnershipTransfer(input: {
+    readonly actorId: string;
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly workspaceId: string;
+    readonly successorUserId: string;
+    readonly approvalReference: string;
+    readonly reason: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<
+    | {
+        readonly outcome: "created";
+        readonly id: string;
+        readonly revisionNumber: number;
+      }
+    | { readonly outcome: "rejected"; readonly reason: string }
+  >;
+  recordOwnershipTransferObservation(input: {
+    readonly actorId: string;
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly transferId: string;
+    readonly sourceRevision: string;
+    readonly observedState: CustomerOwnershipTransferObservedState;
+    readonly observedOwnerUserId: string | null;
+    readonly message: string | null;
+    readonly observedAt: Date;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<
+    | { readonly outcome: "created" | "unchanged"; readonly id: string }
+    | { readonly outcome: "rejected"; readonly reason: string }
+  >;
 }
 
 export class CustomerDirectoryRejectedError extends Error {
@@ -262,6 +336,14 @@ export function createCustomerDirectoryService(input: {
         )
       ) {
         reject("membership_reference_missing");
+      }
+      if (
+        workspaces.some(
+          (value) =>
+            value.ownerUserId !== null && !userIds.has(value.ownerUserId),
+        )
+      ) {
+        reject("workspace_owner_reference_missing");
       }
 
       const result = await input.store.reconcileSnapshot({
@@ -390,6 +472,225 @@ export function createCustomerDirectoryService(input: {
       if (result.outcome === "rejected") reject(result.reason);
       return result;
     },
+
+    async createInternalNote(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly targetType: CustomerOperationsTargetType;
+      readonly targetId: string;
+      readonly category: CustomerInternalNoteCategory;
+      readonly body: string;
+      readonly reason: string;
+      readonly correlationId?: string;
+    }) {
+      const targetType = requireEntityType(command.targetType);
+      assertPlatformCommandAuthorized({
+        actor: command.actor,
+        requestedCapability: `platform:${targetType}s:notes:write`,
+      });
+      const result = await input.store.createInternalNote({
+        actorId: command.actor.operatorId,
+        environment: input.environment,
+        targetType,
+        targetId: requireIdentifier(command.targetId, "entity_id_invalid"),
+        category: requireEnum(
+          command.category,
+          ["support", "operations", "billing", "security"] as const,
+          "note_category_invalid",
+        ),
+        body: requireSafeInternalText(
+          command.body,
+          4,
+          2000,
+          "note_body_invalid",
+        ),
+        reason: requireText(command.reason, 8, 500, "note_reason_required"),
+        correlationId: command.correlationId ?? randomId(),
+        now: now(),
+      });
+      if (result.outcome === "rejected") reject(result.reason);
+      return result;
+    },
+
+    async setRiskMarker(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly targetType: CustomerOperationsTargetType;
+      readonly targetId: string;
+      readonly markerId?: string | null;
+      readonly category: CustomerRiskCategory;
+      readonly severity: CustomerRiskSeverity;
+      readonly state: CustomerRiskState;
+      readonly summary: string;
+      readonly reason: string;
+      readonly correlationId?: string;
+    }) {
+      const commandTime = now();
+      const targetType = requireEntityType(command.targetType);
+      assertPlatformCommandAuthorized({
+        actor: command.actor,
+        requestedCapability: `platform:${targetType}s:risk:write`,
+        requireRecentStepUp: true,
+        now: commandTime,
+      });
+      const markerId =
+        command.markerId === undefined || command.markerId === null
+          ? null
+          : requireUuid(command.markerId, "risk_marker_id_invalid");
+      if (command.state === "resolved" && markerId === null) {
+        reject("risk_marker_id_required");
+      }
+      const result = await input.store.setRiskMarker({
+        actorId: command.actor.operatorId,
+        environment: input.environment,
+        targetType,
+        targetId: requireIdentifier(command.targetId, "entity_id_invalid"),
+        markerId,
+        category: requireEnum(
+          command.category,
+          ["security", "abuse", "billing", "identity", "support"] as const,
+          "risk_category_invalid",
+        ),
+        severity: requireEnum(
+          command.severity,
+          ["low", "medium", "high", "critical"] as const,
+          "risk_severity_invalid",
+        ),
+        state: requireEnum(
+          command.state,
+          ["active", "resolved"] as const,
+          "risk_state_invalid",
+        ),
+        summary: requireSafeInternalText(
+          command.summary,
+          4,
+          500,
+          "risk_summary_invalid",
+        ),
+        reason: requireText(command.reason, 8, 500, "risk_reason_required"),
+        correlationId: command.correlationId ?? randomId(),
+        now: commandTime,
+      });
+      if (result.outcome === "rejected") reject(result.reason);
+      return result;
+    },
+
+    async requestOwnershipTransfer(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly workspaceId: string;
+      readonly successorUserId: string;
+      readonly approvalReference: string;
+      readonly confirmation: string;
+      readonly reason: string;
+      readonly correlationId?: string;
+    }) {
+      const commandTime = now();
+      const workspaceId = requireIdentifier(
+        command.workspaceId,
+        "workspace_id_invalid",
+      );
+      const successorUserId = requireIdentifier(
+        command.successorUserId,
+        "successor_user_id_invalid",
+      );
+      assertPlatformCommandAuthorized({
+        actor: command.actor,
+        requestedCapability: "platform:workspaces:transfer",
+        requireRecentStepUp: true,
+        now: commandTime,
+      });
+      if (
+        command.confirmation.trim() !==
+        `TRANSFER ${workspaceId} TO ${successorUserId}`
+      ) {
+        reject("ownership_transfer_confirmation_invalid");
+      }
+      const result = await input.store.requestOwnershipTransfer({
+        actorId: command.actor.operatorId,
+        environment: input.environment,
+        workspaceId,
+        successorUserId,
+        approvalReference: requireText(
+          command.approvalReference,
+          3,
+          200,
+          "ownership_transfer_approval_required",
+        ),
+        reason: requireText(
+          command.reason,
+          8,
+          500,
+          "ownership_transfer_reason_required",
+        ),
+        correlationId: command.correlationId ?? randomId(),
+        now: commandTime,
+      });
+      if (result.outcome === "rejected") reject(result.reason);
+      return result;
+    },
+
+    async recordOwnershipTransferObservation(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly transferId: string;
+      readonly sourceRevision: string;
+      readonly observedState: CustomerOwnershipTransferObservedState;
+      readonly observedOwnerUserId?: string | null;
+      readonly message?: string | null;
+      readonly observedAt: string;
+      readonly correlationId?: string;
+    }) {
+      const commandTime = now();
+      assertPlatformCommandAuthorized({
+        actor: command.actor,
+        requestedCapability: "platform:customer-ownership:sync",
+        requireSuperAdministrator: true,
+        requireRecentStepUp: true,
+        now: commandTime,
+      });
+      const observedState = requireEnum(
+        command.observedState,
+        ["observed", "failed"] as const,
+        "ownership_observation_state_invalid",
+      );
+      const observedOwnerUserId =
+        command.observedOwnerUserId === undefined ||
+        command.observedOwnerUserId === null
+          ? null
+          : requireIdentifier(
+              command.observedOwnerUserId,
+              "observed_owner_user_id_invalid",
+            );
+      const message =
+        command.message === undefined || command.message === null
+          ? null
+          : requireText(
+              command.message,
+              1,
+              500,
+              "ownership_observation_message_invalid",
+            );
+      if (
+        (observedState === "observed" && observedOwnerUserId === null) ||
+        (observedState === "failed" && message === null)
+      ) {
+        reject("ownership_observation_shape_invalid");
+      }
+      const result = await input.store.recordOwnershipTransferObservation({
+        actorId: command.actor.operatorId,
+        environment: input.environment,
+        transferId: requireUuid(
+          command.transferId,
+          "ownership_transfer_id_invalid",
+        ),
+        sourceRevision: requireSourceRevision(command.sourceRevision),
+        observedState,
+        observedOwnerUserId,
+        message,
+        observedAt: requireObservedAt(command.observedAt, commandTime),
+        correlationId: command.correlationId ?? randomId(),
+        now: commandTime,
+      });
+      if (result.outcome === "rejected") reject(result.reason);
+      return result;
+    },
   };
 }
 
@@ -487,6 +788,10 @@ function requireWorkspaces(
       ["active", "restricted", "suspended", "archived"] as const,
       "workspace_lifecycle_invalid",
     ),
+    ownerUserId:
+      value.ownerUserId === undefined || value.ownerUserId === null
+        ? null
+        : requireIdentifier(value.ownerUserId, "workspace_owner_id_invalid"),
     createdAt: requireDate(
       value.createdAt,
       "workspace_created_at_invalid",
@@ -629,6 +934,23 @@ function requireText(
   const normalized = value.trim();
   if (normalized.length < minimum || normalized.length > maximum)
     reject(reason);
+  return normalized;
+}
+
+function requireSafeInternalText(
+  value: string,
+  minimum: number,
+  maximum: number,
+  reason: string,
+) {
+  const normalized = requireText(value, minimum, maximum, reason);
+  if (
+    /(?:-----BEGIN [A-Z ]+PRIVATE KEY-----|\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password)\s*[:=])/iu.test(
+      normalized,
+    )
+  ) {
+    reject("customer_private_or_secret_content_rejected");
+  }
   return normalized;
 }
 

@@ -5,11 +5,16 @@ import {
   account,
   allowedEmailDomains,
   customerDirectorySources,
+  customerInternalNotes,
+  customerRiskMarkerRevisions,
+  customerRiskMarkers,
   customerAccessRestrictionObservations,
   customerAccessRestrictionRevisions,
   customerAccessRestrictions,
   customerUserProjections,
   customerWorkspaceMembershipProjections,
+  customerWorkspaceOwnershipTransferObservations,
+  customerWorkspaceOwnershipTransfers,
   customerWorkspaceProjections,
   operatorInvitations,
   operatorRoleAssignments,
@@ -453,6 +458,35 @@ describe("operator onboarding schema", () => {
         "credential_value",
         "customer_configuration",
       ]),
+    );
+  });
+
+  it("keeps customer notes, risks, and ownership evidence append-only and bounded", () => {
+    const notes = getTableConfig(customerInternalNotes);
+    const markers = getTableConfig(customerRiskMarkers);
+    const markerRevisions = getTableConfig(customerRiskMarkerRevisions);
+    const transfers = getTableConfig(customerWorkspaceOwnershipTransfers);
+    const observations = getTableConfig(
+      customerWorkspaceOwnershipTransferObservations,
+    );
+
+    expect(notes.indexes.map((entry) => entry.config.name)).toContain(
+      "customer_internal_notes_target_created_idx",
+    );
+    expect(markers.indexes.map((entry) => entry.config.name)).toContain(
+      "customer_risk_markers_target_idx",
+    );
+    expect(markerRevisions.indexes.map((entry) => entry.config.name)).toContain(
+      "customer_risk_marker_revisions_number_unique",
+    );
+    expect(transfers.checks.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "customer_ownership_transfers_distinct_users",
+        "customer_ownership_transfers_approval_bounded",
+      ]),
+    );
+    expect(observations.checks.map((entry) => entry.name)).toContain(
+      "customer_ownership_transfer_observations_shape",
     );
   });
 });

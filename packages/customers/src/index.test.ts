@@ -61,6 +61,24 @@ function createStore(): CustomerDirectoryStore {
       outcome: "created" as const,
       restrictionId: input.restrictionId,
     })),
+    createInternalNote: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000702",
+    })),
+    setRiskMarker: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000703",
+      revisionNumber: 1,
+    })),
+    requestOwnershipTransfer: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000704",
+      revisionNumber: 1,
+    })),
+    recordOwnershipTransferObservation: vi.fn(async (input) => ({
+      outcome: "created" as const,
+      id: input.transferId,
+    })),
   };
   return store;
 }
@@ -141,6 +159,7 @@ describe("customer directory service", () => {
           name: "Example",
           slug: "Example-Workspace",
           lifecycle: "active",
+          ownerUserId: "usr_1",
           createdAt: "2026-08-01T00:00:00.000Z",
         },
       ],
@@ -281,5 +300,103 @@ describe("customer directory service", () => {
         reason: "Contain the workspace while the incident is investigated.",
       }),
     ).rejects.toMatchObject({ reason: "workspace_login_restriction_invalid" });
+  });
+
+  it("rejects secret-like internal notes before storage", async () => {
+    const store = createStore();
+    const service = createCustomerDirectoryService({
+      store,
+      environment: "development",
+      now: () => now,
+    });
+
+    await expect(
+      service.createInternalNote({
+        actor: {
+          ...actor,
+          effectiveCapabilities: ["platform:users:notes:write"],
+        },
+        targetType: "user",
+        targetId: "usr_1",
+        category: "support",
+        body: "api_key = should-never-be-stored",
+        reason: "Document the support investigation context.",
+      }),
+    ).rejects.toMatchObject({
+      reason: "customer_private_or_secret_content_rejected",
+    });
+    expect(store.createInternalNote).not.toHaveBeenCalled();
+  });
+
+  it("requires recent step-up for immutable risk markers", async () => {
+    const store = createStore();
+    const service = createCustomerDirectoryService({
+      store,
+      environment: "development",
+      now: () => now,
+    });
+    const riskActor = {
+      ...actor,
+      effectiveCapabilities: ["platform:users:risk:write"],
+    };
+
+    await expect(
+      service.setRiskMarker({
+        actor: riskActor,
+        targetType: "user",
+        targetId: "usr_1",
+        category: "security",
+        severity: "high",
+        state: "active",
+        summary: "Confirmed account takeover signal.",
+        reason: "Escalate the confirmed authentication anomaly.",
+      }),
+    ).rejects.toThrow("recent_step_up_required");
+    expect(store.setRiskMarker).not.toHaveBeenCalled();
+  });
+
+  it("requires approval evidence and exact confirmation for ownership transfer", async () => {
+    const store = createStore();
+    const service = createCustomerDirectoryService({
+      store,
+      environment: "development",
+      now: () => now,
+    });
+    const transferActor = {
+      ...actor,
+      effectiveCapabilities: ["platform:workspaces:transfer"],
+      stepUpVerifiedAt: now,
+    };
+
+    await expect(
+      service.requestOwnershipTransfer({
+        actor: transferActor,
+        workspaceId: "wrk_1",
+        successorUserId: "usr_2",
+        approvalReference: "APR-42",
+        confirmation: "TRANSFER wrk_1 TO usr_2",
+        reason: "Recover ownership after verified owner departure.",
+      }),
+    ).resolves.toMatchObject({ outcome: "created", revisionNumber: 1 });
+    expect(store.requestOwnershipTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "wrk_1",
+        successorUserId: "usr_2",
+        approvalReference: "APR-42",
+      }),
+    );
+
+    await expect(
+      service.requestOwnershipTransfer({
+        actor: transferActor,
+        workspaceId: "wrk_1",
+        successorUserId: "usr_2",
+        approvalReference: "APR-43",
+        confirmation: "TRANSFER wrk_1 TO someone_else",
+        reason: "Recover ownership after verified owner departure.",
+      }),
+    ).rejects.toMatchObject({
+      reason: "ownership_transfer_confirmation_invalid",
+    });
   });
 });

@@ -99,6 +99,13 @@
       "when": 1788121236265,
       "tag": "0013_customer_access_restrictions",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788128941717,
+      "tag": "0014_customer_operations",
+      "breakpoints": true
     }
   ]
 }
