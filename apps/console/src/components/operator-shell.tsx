@@ -46,7 +46,7 @@ const navigation: ReadonlyArray<{
     label: "Integrations",
     href: "/integrations",
     icon: CableIcon,
-    available: false,
+    available: true,
   },
   { label: "Runners", href: "/runners", icon: BoxIcon, available: false },
   {

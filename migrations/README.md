@@ -29,4 +29,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0007_model_routing_operations.sql` adds immutable routing-policy revisions and ordered targets, deterministic rollout weights, and explicit provider/model operational controls. Maintenance windows expire safely, while kill switches remain disabled until an audited re-enable revision.
 
+`0008_platform_integration_registry.sql` adds environment-scoped platform integrations, immutable OAuth/application metadata revisions, secret-reference bindings, declared adapter capabilities and scopes, bounded maintenance controls, and append-only expiring health evidence. It contains no customer installation, access token, repository, code, environment, or secret material.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

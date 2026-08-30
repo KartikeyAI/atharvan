@@ -7,6 +7,7 @@ export { createPostgresOperatorOnboardingStore } from "./operator-onboarding-sto
 export { createPostgresOperatorRoleAdministrationStore } from "./operator-role-administration-store";
 export { createPostgresPlatformAdministrationReader } from "./platform-administration-reader";
 export { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
+export { createPostgresPlatformIntegrationRegistryStore } from "./platform-integration-store";
 export { createPostgresPlatformSecretStore } from "./platform-secret-store";
 export { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 export { createPostgresModelRoutingStore } from "./model-routing-store";

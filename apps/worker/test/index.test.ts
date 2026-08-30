@@ -57,6 +57,10 @@ function createRuntime(input?: {
       policies: [],
       controls: [],
     })),
+    listPlatformIntegrations: vi.fn(async () => ({
+      environment: "development" as const,
+      items: [],
+    })),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -121,6 +125,15 @@ function createRuntime(input?: {
       policyKey: "code_generation",
       policyRevisionNumber: null,
       evaluations: [],
+    })),
+    setPlatformIntegration: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000801",
+      revisionNumber: 1,
+    })),
+    recordPlatformIntegrationHealth: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000802",
     })),
   };
 }
@@ -622,6 +635,86 @@ describe("Atharvan control-plane worker", () => {
     );
     expect(response.status).toBe(201);
     expect(runtime.recordModelProviderHealth).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorId: "operator-1" }),
+      expect.objectContaining({ status: "degraded", httpStatusCode: 429 }),
+    );
+  });
+
+  it("returns the environment-scoped integration registry to integration readers", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/integrations",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      environment: "development",
+      items: [],
+    });
+  });
+
+  it("validates and delegates immutable OAuth application revisions", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/integrations/github",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "GitHub",
+          protocol: "oauth2",
+          connectionMode: "direct",
+          capabilities: ["source_control"],
+          adapterPackage: "@arth/github",
+          adapterVersion: "1.0.0",
+          documentationUrl: "https://docs.github.com/apps/oauth-apps",
+          authorizationUrl: "https://github.com/login/oauth/authorize",
+          tokenUrl: "https://github.com/login/oauth/access_token",
+          clientId: "public-client-id",
+          clientSecretReferenceId: "00000000-0000-4000-8000-000000000301",
+          webhookSecretReferenceId: null,
+          callbackUrls: ["https://dev.admin.arth.sh/api/oauth/github/callback"],
+          requiredScopes: ["read:user"],
+          optionalScopes: ["repo"],
+          lifecycle: "active",
+          operationalState: "enabled",
+          maintenanceExpiresAt: null,
+          reason: "Register the development GitHub OAuth application.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.setPlatformIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        key: "github",
+        protocol: "oauth2",
+        capabilities: ["source_control"],
+      }),
+    );
+  });
+
+  it("records expiring integration health evidence", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/integrations/00000000-0000-4000-8000-000000000801/health-observations",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: "degraded",
+          latencyMs: 900,
+          httpStatusCode: 429,
+          errorCode: "rate_limited",
+          reason: "Recorded from the authenticated OAuth probe.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.recordPlatformIntegrationHealth).toHaveBeenCalledWith(
       expect.objectContaining({ operatorId: "operator-1" }),
       expect.objectContaining({ status: "degraded", httpStatusCode: 429 }),
     );

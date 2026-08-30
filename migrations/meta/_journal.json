@@ -57,6 +57,13 @@
       "when": 1788080359084,
       "tag": "0007_model_routing_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788097962299,
+      "tag": "0008_platform_integration_registry",
+      "breakpoints": true
     }
   ]
 }

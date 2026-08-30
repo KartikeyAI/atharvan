@@ -18,6 +18,7 @@ import {
   createPostgresOperatorSessionPolicyStore,
   createPostgresPlatformAdministrationReader,
   createPostgresPlatformConfigurationStore,
+  createPostgresPlatformIntegrationRegistryStore,
   createPostgresPlatformSecretStore,
   createPostgresModelCatalogueStore,
   createPostgresModelRoutingStore,
@@ -26,6 +27,7 @@ import {
   createResendTransactionalEmailSender,
   unconfiguredTransactionalEmailSender,
 } from "@atharvan/email";
+import { createPlatformIntegrationRegistryService } from "@atharvan/integrations";
 import {
   createCloudflareSecretsStoreProvider,
   createPlatformSecretLifecycleService,
@@ -121,6 +123,12 @@ async function createProductionAuthenticationRuntime(input: {
     store: createPostgresModelRoutingStore(databaseHandle.database),
     environment: config.ATHARVAN_ENVIRONMENT,
   });
+  const integrationRegistryService = createPlatformIntegrationRegistryService({
+    store: createPostgresPlatformIntegrationRegistryStore(
+      databaseHandle.database,
+    ),
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -194,6 +202,7 @@ async function createProductionAuthenticationRuntime(input: {
     listPlatformSecretReferences: () => secretLifecycleService.listReferences(),
     listModelCatalogue: () => modelCatalogueService.listCatalogue(),
     listModelRoutingOperations: () => modelRoutingService.listOperations(),
+    listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
     async createOperatorInvitation(actor, command) {
       const registry = await configurationStore.listConfiguration(
         config.ATHARVAN_ENVIRONMENT,
@@ -285,5 +294,12 @@ async function createProductionAuthenticationRuntime(input: {
     setModelRoutingControl: (actor, command) =>
       modelRoutingService.setControl({ actor, ...command }),
     previewModelRoute: (command) => modelRoutingService.previewRoute(command),
+    setPlatformIntegration: (actor, command) =>
+      integrationRegistryService.setIntegration({ actor, ...command }),
+    recordPlatformIntegrationHealth: (actor, command) =>
+      integrationRegistryService.recordHealthObservation({
+        actor,
+        ...command,
+      }),
   };
 }

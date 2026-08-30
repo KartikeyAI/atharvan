@@ -232,6 +232,36 @@ export const modelRoutingControlTargetKind = pgEnum(
   ["provider", "model"],
 );
 
+export const platformIntegrationProtocol = pgEnum(
+  "platform_integration_protocol",
+  ["oauth2", "api_key", "service_account", "webhook"],
+);
+
+export const platformIntegrationConnectionMode = pgEnum(
+  "platform_integration_connection_mode",
+  ["direct", "managed", "claimable"],
+);
+
+export const platformIntegrationLifecycle = pgEnum(
+  "platform_integration_lifecycle",
+  ["draft", "active", "deprecated"],
+);
+
+export const platformIntegrationOperationalState = pgEnum(
+  "platform_integration_operational_state",
+  ["enabled", "maintenance", "disabled"],
+);
+
+export const platformIntegrationHealthStatus = pgEnum(
+  "platform_integration_health_status",
+  ["healthy", "degraded", "unavailable"],
+);
+
+export const platformIntegrationHealthSource = pgEnum(
+  "platform_integration_health_source",
+  ["operator_probe"],
+);
+
 export const operators = pgTable(
   "operators",
   {
@@ -1054,6 +1084,201 @@ export const modelProviderHealthObservations = pgTable(
     ),
     check(
       "model_provider_health_expiry_after_observation",
+      sql`${table.expiresAt} > ${table.observedAt}`,
+    ),
+  ],
+);
+
+export const platformIntegrations = pgTable(
+  "platform_integrations",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_integrations_key_environment_unique").on(
+      table.key,
+      table.environment,
+    ),
+    index("platform_integrations_environment_updated_idx").on(
+      table.environment,
+      table.updatedAt,
+    ),
+    check(
+      "platform_integrations_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_-]{1,63}$'`,
+    ),
+    check(
+      "platform_integrations_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const platformIntegrationRevisions = pgTable(
+  "platform_integration_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    integrationId: uuid("integration_id")
+      .notNull()
+      .references(() => platformIntegrations.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    displayName: text("display_name").notNull(),
+    protocol: platformIntegrationProtocol("protocol").notNull(),
+    connectionMode:
+      platformIntegrationConnectionMode("connection_mode").notNull(),
+    capabilities: text("capabilities").array().notNull(),
+    adapterPackage: text("adapter_package").notNull(),
+    adapterVersion: text("adapter_version").notNull(),
+    documentationUrl: text("documentation_url"),
+    authorizationUrl: text("authorization_url"),
+    tokenUrl: text("token_url"),
+    clientId: text("client_id"),
+    clientSecretReferenceId: uuid("client_secret_reference_id").references(
+      () => platformSecretReferences.id,
+      { onDelete: "restrict" },
+    ),
+    webhookSecretReferenceId: uuid("webhook_secret_reference_id").references(
+      () => platformSecretReferences.id,
+      { onDelete: "restrict" },
+    ),
+    callbackUrls: text("callback_urls").array().notNull(),
+    requiredScopes: text("required_scopes").array().notNull(),
+    optionalScopes: text("optional_scopes").array().notNull(),
+    lifecycle: platformIntegrationLifecycle("lifecycle").notNull(),
+    operationalState:
+      platformIntegrationOperationalState("operational_state").notNull(),
+    maintenanceExpiresAt: timestamp("maintenance_expires_at", {
+      withTimezone: true,
+    }),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_integration_revisions_number_unique").on(
+      table.integrationId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("platform_integration_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("platform_integration_revisions_integration_created_idx").on(
+      table.integrationId,
+      table.createdAt,
+    ),
+    index("platform_integration_revisions_client_secret_idx")
+      .on(table.clientSecretReferenceId)
+      .where(sql`${table.clientSecretReferenceId} IS NOT NULL`),
+    index("platform_integration_revisions_webhook_secret_idx")
+      .on(table.webhookSecretReferenceId)
+      .where(sql`${table.webhookSecretReferenceId} IS NOT NULL`),
+    check(
+      "platform_integration_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "platform_integration_revisions_name_nonempty",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120`,
+    ),
+    check(
+      "platform_integration_revisions_capabilities_nonempty",
+      sql`cardinality(${table.capabilities}) BETWEEN 1 AND 16`,
+    ),
+    check(
+      "platform_integration_revisions_callback_limit",
+      sql`cardinality(${table.callbackUrls}) <= 16`,
+    ),
+    check(
+      "platform_integration_revisions_scope_limit",
+      sql`cardinality(${table.requiredScopes}) <= 64 AND cardinality(${table.optionalScopes}) <= 64`,
+    ),
+    check(
+      "platform_integration_revisions_adapter_shape",
+      sql`${table.adapterPackage} ~ '^@[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9._-]*$' AND ${table.adapterVersion} ~ '^[0-9]+\.[0-9]+\.[0-9]+'`,
+    ),
+    check(
+      "platform_integration_revisions_https_urls",
+      sql`(${table.documentationUrl} IS NULL OR ${table.documentationUrl} ~ '^https://[^[:space:]@]+$') AND (${table.authorizationUrl} IS NULL OR ${table.authorizationUrl} ~ '^https://[^[:space:]@]+$') AND (${table.tokenUrl} IS NULL OR ${table.tokenUrl} ~ '^https://[^[:space:]@]+$')`,
+    ),
+    check(
+      "platform_integration_revisions_oauth_shape",
+      sql`(${table.protocol} = 'oauth2' AND ${table.authorizationUrl} IS NOT NULL AND ${table.tokenUrl} IS NOT NULL AND ${table.clientId} IS NOT NULL AND cardinality(${table.callbackUrls}) > 0) OR (${table.protocol} <> 'oauth2' AND ${table.authorizationUrl} IS NULL AND ${table.tokenUrl} IS NULL AND ${table.clientId} IS NULL AND cardinality(${table.callbackUrls}) = 0 AND cardinality(${table.requiredScopes}) = 0 AND cardinality(${table.optionalScopes}) = 0)`,
+    ),
+    check(
+      "platform_integration_revisions_active_oauth_secret",
+      sql`${table.protocol} <> 'oauth2' OR ${table.lifecycle} <> 'active' OR ${table.clientSecretReferenceId} IS NOT NULL`,
+    ),
+    check(
+      "platform_integration_revisions_maintenance_metadata",
+      sql`(${table.operationalState} = 'maintenance' AND ${table.maintenanceExpiresAt} IS NOT NULL) OR (${table.operationalState} <> 'maintenance' AND ${table.maintenanceExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+export const platformIntegrationHealthObservations = pgTable(
+  "platform_integration_health_observations",
+  {
+    id: uuid("id").primaryKey(),
+    integrationId: uuid("integration_id")
+      .notNull()
+      .references(() => platformIntegrations.id, { onDelete: "restrict" }),
+    status: platformIntegrationHealthStatus("status").notNull(),
+    source: platformIntegrationHealthSource("source").notNull(),
+    latencyMs: integer("latency_ms"),
+    httpStatusCode: integer("http_status_code"),
+    errorCode: text("error_code"),
+    recordedByOperatorId: uuid("recorded_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_integration_health_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("platform_integration_health_integration_observed_idx").on(
+      table.integrationId,
+      table.observedAt,
+    ),
+    index("platform_integration_health_expiry_idx").on(table.expiresAt),
+    check(
+      "platform_integration_health_latency_bounds",
+      sql`${table.latencyMs} IS NULL OR ${table.latencyMs} BETWEEN 0 AND 120000`,
+    ),
+    check(
+      "platform_integration_health_http_status_bounds",
+      sql`${table.httpStatusCode} IS NULL OR ${table.httpStatusCode} BETWEEN 100 AND 599`,
+    ),
+    check(
+      "platform_integration_health_error_code_shape",
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} ~ '^[a-z][a-z0-9_.-]{1,95}$'`,
+    ),
+    check(
+      "platform_integration_health_healthy_has_no_error",
+      sql`${table.status} <> 'healthy' OR ${table.errorCode} IS NULL`,
+    ),
+    check(
+      "platform_integration_health_expiry_after_observation",
       sql`${table.expiresAt} > ${table.observedAt}`,
     ),
   ],

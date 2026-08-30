@@ -1,6 +1,7 @@
 import { createOperatorOnboardingService } from "@atharvan/auth";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import type { AuthenticatedOperator } from "@atharvan/domain";
+import { createPlatformIntegrationRegistryService } from "@atharvan/integrations";
 import {
   createModelCatalogueService,
   createModelRoutingService,
@@ -16,6 +17,7 @@ import { createPostgresOperatorSessionPolicyStore } from "./operator-session-pol
 import { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 import { createPostgresModelRoutingStore } from "./model-routing-store";
 import { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
+import { createPostgresPlatformIntegrationRegistryStore } from "./platform-integration-store";
 import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
   auditEvents,
@@ -303,6 +305,60 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         outcome: "unavailable",
         reason: "no_eligible_target",
         evaluations: [{ accepted: false, reason: "provider_disabled" }],
+      });
+      let integrationIdSequence = 600;
+      const integrationRegistryService =
+        createPlatformIntegrationRegistryService({
+          store: createPostgresPlatformIntegrationRegistryStore(database),
+          environment: "development",
+          now: () => commandTime,
+          randomId: () =>
+            `00000000-0000-4000-8000-${String(++integrationIdSequence).padStart(12, "0")}`,
+        });
+      const integration = await integrationRegistryService.setIntegration({
+        actor,
+        key: "github",
+        displayName: "GitHub",
+        protocol: "oauth2",
+        connectionMode: "direct",
+        capabilities: ["source_control"],
+        adapterPackage: "@arth/github",
+        adapterVersion: "1.0.0",
+        documentationUrl: "https://docs.github.com/apps/oauth-apps",
+        authorizationUrl: "https://github.com/login/oauth/authorize",
+        tokenUrl: "https://github.com/login/oauth/access_token",
+        clientId: "integration-public-client-id",
+        clientSecretReferenceId: createdSecret.id,
+        callbackUrls: ["https://dev.admin.arth.sh/api/oauth/github/callback"],
+        requiredScopes: ["read:user"],
+        optionalScopes: ["repo"],
+        lifecycle: "active",
+        operationalState: "enabled",
+        reason: "Exercise the platform integration revision path.",
+        correlationId: "00000000-0000-4000-8000-000000000120",
+      });
+      await integrationRegistryService.recordHealthObservation({
+        actor,
+        integrationId: integration.id,
+        status: "healthy",
+        latencyMs: 140,
+        httpStatusCode: 200,
+        reason: "Exercise evidence-backed integration health.",
+        correlationId: "00000000-0000-4000-8000-000000000121",
+      });
+      await expect(
+        integrationRegistryService.listRegistry(),
+      ).resolves.toMatchObject({
+        environment: "development",
+        items: [
+          expect.objectContaining({
+            key: "github",
+            clientId: "integration-public-client-id",
+            clientSecretReferenceKey: "models.openai",
+            effectiveOperationalState: "enabled",
+            health: expect.objectContaining({ state: "healthy" }),
+          }),
+        ],
       });
       await secretService.revoke({
         actor,

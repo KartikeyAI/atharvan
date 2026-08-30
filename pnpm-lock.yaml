@@ -119,6 +119,9 @@ importers:
       "@atharvan/email":
         specifier: workspace:*
         version: link:../../packages/email
+      "@atharvan/integrations":
+        specifier: workspace:*
+        version: link:../../packages/integrations
       "@atharvan/models":
         specifier: workspace:*
         version: link:../../packages/models
@@ -194,6 +197,9 @@ importers:
       "@atharvan/domain":
         specifier: workspace:*
         version: link:../domain
+      "@atharvan/integrations":
+        specifier: workspace:*
+        version: link:../integrations
       "@atharvan/models":
         specifier: workspace:*
         version: link:../models
@@ -236,6 +242,19 @@ importers:
         version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12))
 
   packages/email:
+    devDependencies:
+      typescript:
+        specifier: "catalog:"
+        version: 7.0.2
+      vitest:
+        specifier: "catalog:"
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12))
+
+  packages/integrations:
+    dependencies:
+      "@atharvan/domain":
+        specifier: workspace:*
+        version: link:../domain
     devDependencies:
       typescript:
         specifier: "catalog:"

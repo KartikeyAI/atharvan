@@ -27,8 +27,16 @@ import {
   type OperatorRoleDefinitionEntry,
   type PlatformConfigurationRegistry,
   type PlatformConfigurationScope,
+  type PlatformIntegrationCapability,
+  type PlatformIntegrationConnectionMode,
+  type PlatformIntegrationLifecycle,
+  type PlatformIntegrationOperationalState,
+  type PlatformIntegrationProtocol,
+  type PlatformIntegrationRegistry,
+  type PlatformIntegrationReportedHealth,
   type PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
+import { PlatformIntegrationCommandRejectedError } from "@atharvan/integrations";
 import {
   ModelCatalogueCommandRejectedError,
   ModelRoutingCommandRejectedError,
@@ -76,6 +84,7 @@ export interface AuthenticationRuntime {
   >;
   listModelCatalogue(): Promise<ModelProviderCatalogue>;
   listModelRoutingOperations(): Promise<ModelRoutingOperations>;
+  listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -163,6 +172,52 @@ export interface AuthenticationRuntime {
   previewModelRoute(
     input: PreviewModelRouteCommand,
   ): Promise<ModelRoutingDecision>;
+  setPlatformIntegration(
+    actor: AuthenticatedOperator,
+    input: SetPlatformIntegrationCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  recordPlatformIntegrationHealth(
+    actor: AuthenticatedOperator,
+    input: RecordPlatformIntegrationHealthCommand,
+  ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+}
+
+export interface SetPlatformIntegrationCommand {
+  readonly key: string;
+  readonly displayName: string;
+  readonly protocol: PlatformIntegrationProtocol;
+  readonly connectionMode: PlatformIntegrationConnectionMode;
+  readonly capabilities: ReadonlyArray<PlatformIntegrationCapability>;
+  readonly adapterPackage: string;
+  readonly adapterVersion: string;
+  readonly documentationUrl: string | null;
+  readonly authorizationUrl: string | null;
+  readonly tokenUrl: string | null;
+  readonly clientId: string | null;
+  readonly clientSecretReferenceId?: string | null;
+  readonly webhookSecretReferenceId?: string | null;
+  readonly callbackUrls: ReadonlyArray<string>;
+  readonly requiredScopes: ReadonlyArray<string>;
+  readonly optionalScopes: ReadonlyArray<string>;
+  readonly lifecycle: PlatformIntegrationLifecycle;
+  readonly operationalState: PlatformIntegrationOperationalState;
+  readonly maintenanceExpiresAt: string | null;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface RecordPlatformIntegrationHealthCommand {
+  readonly integrationId: string;
+  readonly status: PlatformIntegrationReportedHealth;
+  readonly latencyMs: number | null;
+  readonly httpStatusCode: number | null;
+  readonly errorCode: string | null;
+  readonly reason: string;
+  readonly correlationId: string;
 }
 
 export interface SetModelRoutingPolicyCommand {
@@ -617,6 +672,48 @@ export function createApp(
     return context.json(await runtime.listModelCatalogue());
   });
 
+  app.get("/v1/platform/integrations", async (context) => {
+    if (
+      !operatorHasCapability(
+        context.get("operator"),
+        "platform:integrations:read",
+      )
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listPlatformIntegrations());
+  });
+
+  app.put("/v1/platform/integrations/:key", async (context) => {
+    const input = await readJson(context, parseSetPlatformIntegration);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.setPlatformIntegration(context.get("operator"), {
+        ...input,
+        key: context.req.param("key"),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.post(
+    "/v1/platform/integrations/:integrationId/health-observations",
+    async (context) => {
+      const input = await readJson(context, parsePlatformIntegrationHealth);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(context, () =>
+        runtime.recordPlatformIntegrationHealth(context.get("operator"), {
+          ...input,
+          integrationId: context.req.param("integrationId"),
+          correlationId: context.get("requestId"),
+        }),
+      );
+    },
+  );
+
   app.put("/v1/platform/model-providers/:key", async (context) => {
     const input = await readJson(context, parseSetModelProvider);
     if (input === null) return invalidRequest(context);
@@ -967,6 +1064,122 @@ function parseSetModelProvider(
     : null;
 }
 
+function parseSetPlatformIntegration(
+  value: unknown,
+): Omit<SetPlatformIntegrationCommand, "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const capabilities = readStringArray(value.capabilities, 8, 32);
+  const callbackUrls = readPossiblyEmptyStringArray(
+    value.callbackUrls,
+    16,
+    500,
+  );
+  const requiredScopes = readPossiblyEmptyStringArray(
+    value.requiredScopes,
+    64,
+    128,
+  );
+  const optionalScopes = readPossiblyEmptyStringArray(
+    value.optionalScopes,
+    64,
+    128,
+  );
+  const adapterPackage = readTrimmedString(value.adapterPackage, 214);
+  const adapterVersion = readTrimmedString(value.adapterVersion, 80);
+  const reason = readReason(value.reason);
+  const optionalText = (field: string, maximum: number) =>
+    value[field] === null || value[field] === undefined
+      ? null
+      : readTrimmedString(value[field], maximum);
+  const documentationUrl = optionalText("documentationUrl", 500);
+  const authorizationUrl = optionalText("authorizationUrl", 500);
+  const tokenUrl = optionalText("tokenUrl", 500);
+  const clientId = optionalText("clientId", 255);
+  const maintenanceExpiresAt = optionalText("maintenanceExpiresAt", 40);
+  const hasClientSecretReference = "clientSecretReferenceId" in value;
+  const clientSecretReferenceId = optionalText("clientSecretReferenceId", 36);
+  const hasWebhookSecretReference = "webhookSecretReferenceId" in value;
+  const webhookSecretReferenceId = optionalText("webhookSecretReferenceId", 36);
+  const protocol = value.protocol;
+  const connectionMode = value.connectionMode;
+  const lifecycle = value.lifecycle;
+  const operationalState = value.operationalState;
+  return displayName !== null &&
+    capabilities !== null &&
+    capabilities.every(isPlatformIntegrationCapability) &&
+    callbackUrls !== null &&
+    requiredScopes !== null &&
+    optionalScopes !== null &&
+    adapterPackage !== null &&
+    adapterVersion !== null &&
+    reason !== null &&
+    isPlatformIntegrationProtocol(protocol) &&
+    isPlatformIntegrationConnectionMode(connectionMode) &&
+    isPlatformIntegrationLifecycle(lifecycle) &&
+    isPlatformIntegrationOperationalState(operationalState) &&
+    (documentationUrl !== null || value.documentationUrl == null) &&
+    (authorizationUrl !== null || value.authorizationUrl == null) &&
+    (tokenUrl !== null || value.tokenUrl == null) &&
+    (clientId !== null || value.clientId == null) &&
+    (maintenanceExpiresAt !== null || value.maintenanceExpiresAt == null) &&
+    (!hasClientSecretReference ||
+      clientSecretReferenceId !== null ||
+      value.clientSecretReferenceId === null) &&
+    (!hasWebhookSecretReference ||
+      webhookSecretReferenceId !== null ||
+      value.webhookSecretReferenceId === null)
+    ? {
+        displayName,
+        protocol,
+        connectionMode,
+        capabilities:
+          capabilities as ReadonlyArray<PlatformIntegrationCapability>,
+        adapterPackage,
+        adapterVersion,
+        documentationUrl,
+        authorizationUrl,
+        tokenUrl,
+        clientId,
+        ...(hasClientSecretReference ? { clientSecretReferenceId } : {}),
+        ...(hasWebhookSecretReference ? { webhookSecretReferenceId } : {}),
+        callbackUrls,
+        requiredScopes,
+        optionalScopes,
+        lifecycle,
+        operationalState,
+        maintenanceExpiresAt,
+        reason,
+      }
+    : null;
+}
+
+function parsePlatformIntegrationHealth(
+  value: unknown,
+): Omit<
+  RecordPlatformIntegrationHealthCommand,
+  "integrationId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const latencyMs = value.latencyMs === null ? null : value.latencyMs;
+  const httpStatusCode =
+    value.httpStatusCode === null ? null : value.httpStatusCode;
+  const errorCode =
+    value.errorCode === null || value.errorCode === undefined
+      ? null
+      : readTrimmedString(value.errorCode, 96);
+  return reason !== null &&
+    (value.status === "healthy" ||
+      value.status === "degraded" ||
+      value.status === "unavailable") &&
+    (latencyMs === null || typeof latencyMs === "number") &&
+    (httpStatusCode === null || typeof httpStatusCode === "number") &&
+    (errorCode !== null || value.errorCode == null)
+    ? { status: value.status, latencyMs, httpStatusCode, errorCode, reason }
+    : null;
+}
+
 function parseSetModel(
   value: unknown,
 ): Omit<SetModelCommand, "providerId" | "key" | "correlationId"> | null {
@@ -1169,6 +1382,70 @@ function readStringArray(
   return value as ReadonlyArray<string>;
 }
 
+function readPossiblyEmptyStringArray(
+  value: unknown,
+  maximumItems: number,
+  maximumItemLength: number,
+): ReadonlyArray<string> | null {
+  if (
+    !Array.isArray(value) ||
+    value.length > maximumItems ||
+    value.some(
+      (item) =>
+        typeof item !== "string" ||
+        item.trim().length === 0 ||
+        item.trim().length > maximumItemLength,
+    )
+  ) {
+    return null;
+  }
+  return value as ReadonlyArray<string>;
+}
+
+function isPlatformIntegrationProtocol(
+  value: unknown,
+): value is PlatformIntegrationProtocol {
+  return (
+    value === "oauth2" ||
+    value === "api_key" ||
+    value === "service_account" ||
+    value === "webhook"
+  );
+}
+
+function isPlatformIntegrationConnectionMode(
+  value: unknown,
+): value is PlatformIntegrationConnectionMode {
+  return value === "direct" || value === "managed" || value === "claimable";
+}
+
+function isPlatformIntegrationLifecycle(
+  value: unknown,
+): value is PlatformIntegrationLifecycle {
+  return value === "draft" || value === "active" || value === "deprecated";
+}
+
+function isPlatformIntegrationOperationalState(
+  value: unknown,
+): value is PlatformIntegrationOperationalState {
+  return value === "enabled" || value === "maintenance" || value === "disabled";
+}
+
+function isPlatformIntegrationCapability(
+  value: string,
+): value is PlatformIntegrationCapability {
+  return (
+    value === "source_control" ||
+    value === "deployment" ||
+    value === "database" ||
+    value === "authentication" ||
+    value === "observability" ||
+    value === "billing" ||
+    value === "notifications" ||
+    value === "design"
+  );
+}
+
 function isModelProviderAdapterKind(
   value: unknown,
 ): value is ModelProviderAdapterKind {
@@ -1359,6 +1636,19 @@ async function executeCommand(
           code: "model_routing_change_rejected",
           reason: error.reason,
           message: "The requested model routing change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (error instanceof PlatformIntegrationCommandRejectedError) {
+      return context.json(
+        {
+          code: "integration_change_rejected",
+          reason: error.reason,
+          message:
+            "The requested integration registry change was not accepted.",
           requestId: context.get("requestId"),
         },
         409,

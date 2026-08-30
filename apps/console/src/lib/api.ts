@@ -7,6 +7,7 @@ import type {
   OperatorDirectoryEntry,
   OperatorRoleDefinitionEntry,
   PlatformConfigurationRegistry,
+  PlatformIntegrationRegistry,
   PlatformSecretReferenceRegistry,
 } from "@atharvan/domain";
 
@@ -99,6 +100,8 @@ export type PlatformSecretReferencesResponse = PlatformSecretReferenceRegistry;
 export type ModelProviderCatalogueResponse = ModelProviderCatalogue;
 
 export type ModelRoutingOperationsResponse = ModelRoutingOperations;
+
+export type PlatformIntegrationRegistryResponse = PlatformIntegrationRegistry;
 
 function isApiErrorBody(
   value: unknown,

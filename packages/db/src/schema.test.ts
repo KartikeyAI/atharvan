@@ -22,6 +22,9 @@ import {
   platformConfigurationBindings,
   platformConfigurationDefinitions,
   platformConfigurationRevisions,
+  platformIntegrationHealthObservations,
+  platformIntegrationRevisions,
+  platformIntegrations,
   platformSecretReferences,
   platformSecretVersions,
   rateLimit,
@@ -228,6 +231,43 @@ describe("operator onboarding schema", () => {
     );
     expect(controlRevisionConfig.checks.map((entry) => entry.name)).toContain(
       "model_operational_control_revisions_maintenance_metadata",
+    );
+  });
+
+  it("versions integration metadata without customer tokens or secret values", () => {
+    const integrationConfig = getTableConfig(platformIntegrations);
+    const revisionConfig = getTableConfig(platformIntegrationRevisions);
+    const healthConfig = getTableConfig(platformIntegrationHealthObservations);
+    const revisionColumns = revisionConfig.columns.map((column) => column.name);
+
+    expect(
+      integrationConfig.indexes.map((entry) => entry.config.name),
+    ).toContain("platform_integrations_key_environment_unique");
+    expect(revisionConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_integration_revisions_number_unique",
+        "platform_integration_revisions_client_secret_idx",
+        "platform_integration_revisions_webhook_secret_idx",
+      ]),
+    );
+    expect(revisionConfig.checks.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "platform_integration_revisions_oauth_shape",
+        "platform_integration_revisions_active_oauth_secret",
+        "platform_integration_revisions_maintenance_metadata",
+      ]),
+    );
+    expect(revisionColumns).not.toEqual(
+      expect.arrayContaining([
+        "access_token",
+        "refresh_token",
+        "client_secret",
+        "webhook_secret",
+        "secret_value",
+      ]),
+    );
+    expect(healthConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "platform_integration_health_integration_observed_idx",
     );
   });
 });
