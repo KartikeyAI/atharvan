@@ -772,6 +772,71 @@ button {
   font-size: 11px;
 }
 
+.capability-details {
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.capability-details summary,
+.role-catalog summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.capability-details .capability-list,
+.role-catalog .capability-list {
+  margin-top: 8px;
+}
+
+.operator-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.role-editor {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--muted), transparent 45%);
+  padding: 20px;
+}
+
+.role-editor h3,
+.role-editor p {
+  margin: 0;
+}
+
+.role-editor p,
+.field-help {
+  color: var(--muted-foreground);
+}
+
+.role-catalog {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.role-catalog article {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.role-catalog article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.role-catalog p {
+  margin: 7px 0 10px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
 .empty-card,
 .loading-card {
   display: flex;
@@ -929,7 +994,8 @@ button {
   }
 
   .admin-form,
-  .capability-fieldset {
+  .capability-fieldset,
+  .role-catalog {
     grid-template-columns: 1fr;
   }
 

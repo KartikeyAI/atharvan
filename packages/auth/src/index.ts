@@ -20,6 +20,8 @@ import {
 import { createAuthMiddleware } from "better-auth/api";
 import { emailOTP } from "better-auth/plugins";
 
+import { OnboardingCommandRejectedError } from "./errors";
+
 const defaultInvitationLifetimeMs = 24 * 60 * 60 * 1_000;
 const defaultVerificationLifetimeMs = 10 * 60 * 1_000;
 const defaultMaximumVerificationAttempts = 5;
@@ -83,6 +85,7 @@ export interface OperatorOnboardingStore {
     readonly emailDomain: string;
     readonly organizationId: string;
     readonly intendedCapabilities: ReadonlyArray<string>;
+    readonly intendedRoleDefinitionId?: string;
     readonly tokenFingerprint: string;
     readonly correlationId: string;
     readonly reason: string;
@@ -354,14 +357,6 @@ function readOtpRequest(body: unknown): { readonly email: string } | null {
   }
 }
 
-export class OnboardingCommandRejectedError extends Error {
-  override readonly name = "OnboardingCommandRejectedError";
-
-  constructor(readonly reason: string) {
-    super(reason);
-  }
-}
-
 export interface OperatorOnboardingServiceOptions {
   readonly store: OperatorOnboardingStore;
   readonly emailSender: TransactionalEmailSender;
@@ -444,6 +439,7 @@ export function createOperatorOnboardingService(
       readonly email: string;
       readonly organizationId: string;
       readonly intendedCapabilities: ReadonlyArray<string>;
+      readonly intendedRoleDefinitionId?: string;
       readonly reason: string;
       readonly approvalReference?: string;
       readonly expiresAt?: Date;
@@ -479,6 +475,9 @@ export function createOperatorOnboardingService(
           "organization_id_required",
         ),
         intendedCapabilities: [...input.intendedCapabilities],
+        ...(input.intendedRoleDefinitionId === undefined
+          ? {}
+          : { intendedRoleDefinitionId: input.intendedRoleDefinitionId }),
         tokenFingerprint: await digestOpaqueToken(invitationToken),
         correlationId: input.correlationId ?? crypto.randomUUID(),
         reason: requireReason(input.reason),
@@ -672,3 +671,5 @@ function encodeBase64Url(bytes: Uint8Array): string {
 }
 
 export { platformCapabilityWildcard };
+export * from "./errors";
+export * from "./operator-roles";

@@ -1,42 +1,68 @@
 import type { PlatformAdministrationReader } from "@atharvan/domain";
-import { asc, desc, inArray } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
-import { allowedEmailDomains, operatorInvitations, operators } from "./schema";
+import {
+  allowedEmailDomains,
+  operatorInvitations,
+  operatorRoleAssignments,
+  operatorRoleDefinitions,
+  operators,
+} from "./schema";
 
 export function createPostgresPlatformAdministrationReader(
   database: PgDatabase<PgQueryResultHKT, typeof schema>,
 ): PlatformAdministrationReader {
   return {
     async listOperators() {
-      const [operatorRows, invitationRows] = await Promise.all([
-        database
-          .select({
-            id: operators.id,
-            email: operators.email,
-            emailDomain: operators.emailDomain,
-            status: operators.status,
-            isSuperAdministrator: operators.isSuperAdministrator,
-            invitedAt: operators.invitedAt,
-            activatedAt: operators.activatedAt,
-          })
-          .from(operators)
-          .orderBy(asc(operators.email)),
-        database
-          .select({
-            operatorId: operatorInvitations.operatorId,
-            status: operatorInvitations.status,
-            intendedCapabilities: operatorInvitations.intendedCapabilities,
-          })
-          .from(operatorInvitations)
-          .where(inArray(operatorInvitations.status, ["pending", "accepted"]))
-          .orderBy(
-            desc(operatorInvitations.acceptedAt),
-            desc(operatorInvitations.createdAt),
-          ),
-      ]);
+      const [operatorRows, invitationRows, roleAssignmentRows] =
+        await Promise.all([
+          database
+            .select({
+              id: operators.id,
+              email: operators.email,
+              emailDomain: operators.emailDomain,
+              status: operators.status,
+              isSuperAdministrator: operators.isSuperAdministrator,
+              invitedAt: operators.invitedAt,
+              activatedAt: operators.activatedAt,
+            })
+            .from(operators)
+            .orderBy(asc(operators.email)),
+          database
+            .select({
+              operatorId: operatorInvitations.operatorId,
+              status: operatorInvitations.status,
+              intendedCapabilities: operatorInvitations.intendedCapabilities,
+            })
+            .from(operatorInvitations)
+            .where(inArray(operatorInvitations.status, ["pending", "accepted"]))
+            .orderBy(
+              desc(operatorInvitations.acceptedAt),
+              desc(operatorInvitations.createdAt),
+            ),
+          database
+            .select({
+              operatorId: operatorRoleAssignments.operatorId,
+              definitionId: operatorRoleDefinitions.id,
+              key: operatorRoleDefinitions.key,
+              name: operatorRoleDefinitions.name,
+              version: operatorRoleDefinitions.version,
+              capabilities: operatorRoleDefinitions.capabilities,
+            })
+            .from(operatorRoleAssignments)
+            .innerJoin(
+              operatorRoleDefinitions,
+              eq(
+                operatorRoleDefinitions.id,
+                operatorRoleAssignments.roleDefinitionId,
+              ),
+            )
+            .where(isNull(operatorRoleAssignments.revokedAt))
+            .orderBy(asc(operatorRoleDefinitions.name)),
+        ]);
       const latestInvitationByOperator = new Map<
         string,
         (typeof invitationRows)[number]
@@ -47,9 +73,23 @@ export function createPostgresPlatformAdministrationReader(
           latestInvitationByOperator.set(invitation.operatorId, invitation);
         }
       }
+      const rolesByOperator = new Map<
+        string,
+        Array<(typeof roleAssignmentRows)[number]>
+      >();
+
+      for (const role of roleAssignmentRows) {
+        const roles = rolesByOperator.get(role.operatorId) ?? [];
+        roles.push(role);
+        rolesByOperator.set(role.operatorId, roles);
+      }
 
       return operatorRows.map((operator) => {
         const invitation = latestInvitationByOperator.get(operator.id);
+        const assignedRoles = rolesByOperator.get(operator.id) ?? [];
+        const roleCapabilities = [
+          ...new Set(assignedRoles.flatMap((role) => role.capabilities)),
+        ].sort();
 
         return {
           id: operator.id,
@@ -59,7 +99,15 @@ export function createPostgresPlatformAdministrationReader(
           isSuperAdministrator: operator.isSuperAdministrator,
           effectiveCapabilities: operator.isSuperAdministrator
             ? ["platform:*"]
-            : (invitation?.intendedCapabilities ?? []),
+            : roleCapabilities.length > 0
+              ? roleCapabilities
+              : (invitation?.intendedCapabilities ?? []),
+          assignedRoles: assignedRoles.map((role) => ({
+            definitionId: role.definitionId,
+            key: role.key,
+            name: role.name,
+            version: role.version,
+          })),
           invitationStatus: invitation?.status ?? null,
           invitedAt: operator.invitedAt.toISOString(),
           activatedAt: operator.activatedAt?.toISOString() ?? null,
@@ -89,6 +137,46 @@ export function createPostgresPlatformAdministrationReader(
         createdAt: row.createdAt.toISOString(),
         disabledAt: row.disabledAt?.toISOString() ?? null,
       }));
+    },
+
+    async listOperatorRoleDefinitions() {
+      return database
+        .select({
+          definitionId: operatorRoleDefinitions.id,
+          key: operatorRoleDefinitions.key,
+          name: operatorRoleDefinitions.name,
+          version: operatorRoleDefinitions.version,
+          description: operatorRoleDefinitions.description,
+          capabilities: operatorRoleDefinitions.capabilities,
+          isActive: operatorRoleDefinitions.isActive,
+          isSystem: operatorRoleDefinitions.isSystem,
+        })
+        .from(operatorRoleDefinitions)
+        .orderBy(
+          desc(operatorRoleDefinitions.isActive),
+          asc(operatorRoleDefinitions.name),
+          desc(operatorRoleDefinitions.version),
+        );
+    },
+
+    async findActiveOperatorRoleDefinition(key) {
+      const [row] = await database
+        .select({
+          definitionId: operatorRoleDefinitions.id,
+          key: operatorRoleDefinitions.key,
+          name: operatorRoleDefinitions.name,
+          version: operatorRoleDefinitions.version,
+          description: operatorRoleDefinitions.description,
+          capabilities: operatorRoleDefinitions.capabilities,
+          isActive: operatorRoleDefinitions.isActive,
+          isSystem: operatorRoleDefinitions.isSystem,
+        })
+        .from(operatorRoleDefinitions)
+        .where(eq(operatorRoleDefinitions.key, key.trim().toLowerCase()))
+        .orderBy(desc(operatorRoleDefinitions.version))
+        .limit(1);
+
+      return row?.isActive ? row : null;
     },
   };
 }

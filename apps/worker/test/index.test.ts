@@ -40,6 +40,7 @@ function createRuntime(input?: {
     ),
     listOperators: vi.fn(async () => []),
     listMembershipDomains: vi.fn(async () => []),
+    listOperatorRoleDefinitions: vi.fn(async () => []),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -51,6 +52,10 @@ function createRuntime(input?: {
     disableMembershipDomain: vi.fn(async () => ({
       outcome: "created" as const,
       id: "domain-1",
+    })),
+    replaceOperatorRoles: vi.fn(async () => ({
+      outcome: "updated" as const,
+      operatorId: "operator-2",
     })),
   };
 }
@@ -155,6 +160,7 @@ describe("Atharvan control-plane worker", () => {
         status: "active",
         isSuperAdministrator: true,
         effectiveCapabilities: ["platform:*"],
+        assignedRoles: [],
         invitationStatus: null,
         invitedAt: "2026-08-30T00:00:00.000Z",
         activatedAt: "2026-08-30T00:00:00.000Z",
@@ -183,7 +189,7 @@ describe("Atharvan control-plane worker", () => {
         body: JSON.stringify({
           email: "operator@example.com",
           organizationId: "arth",
-          intendedCapabilities: ["platform:operators:read"],
+          roleKey: "platform_viewer",
           reason: "Platform operations responsibility.",
         }),
       },
@@ -195,7 +201,60 @@ describe("Atharvan control-plane worker", () => {
       expect.objectContaining({ operatorId: "operator-1" }),
       expect.objectContaining({
         email: "operator@example.com",
+        roleKey: "platform_viewer",
         correlationId: expect.any(String),
+      }),
+    );
+  });
+
+  it("lists immutable role definitions for directory readers", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.listOperatorRoleDefinitions).mockResolvedValue([
+      {
+        definitionId: "00000000-0000-4000-8000-000000000101",
+        key: "platform_viewer",
+        name: "Platform Viewer",
+        version: 1,
+        description: "Read non-sensitive platform state.",
+        capabilities: ["platform:overview:read"],
+        isActive: true,
+        isSystem: true,
+      },
+    ]);
+
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/operator-roles",
+      undefined,
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      items: [{ key: "platform_viewer", version: 1 }],
+    });
+  });
+
+  it("delegates role replacement with fresh-session proof", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/operators/00000000-0000-4000-8000-000000000201/roles",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          roleKeys: ["platform_viewer", "auditor"],
+          reason: "Approved responsibility change.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runtime.replaceOperatorRoles).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        targetOperatorId: "00000000-0000-4000-8000-000000000201",
+        roleKeys: ["platform_viewer", "auditor"],
       }),
     );
   });

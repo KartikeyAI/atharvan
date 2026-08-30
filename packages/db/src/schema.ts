@@ -249,6 +249,47 @@ export const allowedEmailDomains = pgTable(
   ],
 );
 
+export const operatorRoleDefinitions = pgTable(
+  "operator_role_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull(),
+    version: integer("version").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    capabilities: text("capabilities")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    isSystem: boolean("is_system").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_role_definitions_key_version_unique").on(
+      table.key,
+      table.version,
+    ),
+    uniqueIndex("operator_role_definitions_one_active_version")
+      .on(table.key)
+      .where(sql`${table.isActive} = true`),
+    check(
+      "operator_role_definitions_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_]{2,63}$'`,
+    ),
+    check(
+      "operator_role_definitions_version_positive",
+      sql`${table.version} > 0`,
+    ),
+    check(
+      "operator_role_definitions_capabilities_nonempty",
+      sql`cardinality(${table.capabilities}) > 0`,
+    ),
+  ],
+);
+
 export const operatorInvitations = pgTable(
   "operator_invitations",
   {
@@ -263,6 +304,10 @@ export const operatorInvitations = pgTable(
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`),
+    intendedRoleDefinitionId: uuid("intended_role_definition_id").references(
+      () => operatorRoleDefinitions.id,
+      { onDelete: "restrict" },
+    ),
     invitedByOperatorId: uuid("invited_by_operator_id")
       .notNull()
       .references(() => operators.id),
@@ -284,6 +329,9 @@ export const operatorInvitations = pgTable(
     ),
     index("operator_invitations_operator_idx").on(table.operatorId),
     index("operator_invitations_inviter_idx").on(table.invitedByOperatorId),
+    index("operator_invitations_role_definition_idx")
+      .on(table.intendedRoleDefinitionId)
+      .where(sql`${table.intendedRoleDefinitionId} IS NOT NULL`),
     index("operator_invitations_correlation_idx").on(table.correlationId),
     index("operator_invitations_pending_email_idx")
       .on(table.email, table.expiresAt)
@@ -310,6 +358,50 @@ export const operatorInvitations = pgTable(
     check(
       "operator_invitations_terminal_metadata",
       sql`(${table.status} <> 'accepted' OR ${table.acceptedAt} IS NOT NULL) AND (${table.status} <> 'revoked' OR ${table.revokedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const operatorRoleAssignments = pgTable(
+  "operator_role_assignments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    roleDefinitionId: uuid("role_definition_id")
+      .notNull()
+      .references(() => operatorRoleDefinitions.id, { onDelete: "restrict" }),
+    assignedByOperatorId: uuid("assigned_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    assignedAt: timestamp("assigned_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedByOperatorId: uuid("revoked_by_operator_id").references(
+      () => operators.id,
+      { onDelete: "restrict" },
+    ),
+    revokedReason: text("revoked_reason"),
+    revokedCorrelationId: uuid("revoked_correlation_id"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("operator_role_assignments_active_unique")
+      .on(table.operatorId, table.roleDefinitionId)
+      .where(sql`${table.revokedAt} IS NULL`),
+    index("operator_role_assignments_operator_active_idx")
+      .on(table.operatorId)
+      .where(sql`${table.revokedAt} IS NULL`),
+    index("operator_role_assignments_role_definition_idx").on(
+      table.roleDefinitionId,
+    ),
+    index("operator_role_assignments_correlation_idx").on(table.correlationId),
+    check(
+      "operator_role_assignments_revocation_metadata",
+      sql`(${table.revokedAt} IS NULL AND ${table.revokedByOperatorId} IS NULL AND ${table.revokedReason} IS NULL AND ${table.revokedCorrelationId} IS NULL) OR (${table.revokedAt} IS NOT NULL AND ${table.revokedByOperatorId} IS NOT NULL AND ${table.revokedReason} IS NOT NULL AND ${table.revokedCorrelationId} IS NOT NULL)`,
     ),
   ],
 );

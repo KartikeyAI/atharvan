@@ -5,6 +5,8 @@ import {
   account,
   allowedEmailDomains,
   operatorInvitations,
+  operatorRoleAssignments,
+  operatorRoleDefinitions,
   operators,
   operatorVerificationChallenges,
   rateLimit,
@@ -65,5 +67,23 @@ describe("operator onboarding schema", () => {
     expect(
       getTableConfig(verification).columns.map((column) => column.name),
     ).toContain("value");
+  });
+
+  it("versions role definitions and prevents duplicate active assignments", () => {
+    const roleConfig = getTableConfig(operatorRoleDefinitions);
+    const assignmentConfig = getTableConfig(operatorRoleAssignments);
+
+    expect(roleConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "operator_role_definitions_one_active_version",
+    );
+    expect(roleConfig.checks.map((constraint) => constraint.name)).toContain(
+      "operator_role_definitions_capabilities_nonempty",
+    );
+    expect(
+      assignmentConfig.indexes.map((entry) => entry.config.name),
+    ).toContain("operator_role_assignments_active_unique");
+    expect(
+      assignmentConfig.checks.map((constraint) => constraint.name),
+    ).toContain("operator_role_assignments_revocation_metadata");
   });
 });

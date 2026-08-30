@@ -3,12 +3,15 @@ import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import {
   createAtharvanAuth,
   createOperatorOnboardingService,
+  createOperatorRoleAdministrationService,
+  OnboardingCommandRejectedError,
 } from "@atharvan/auth";
 import { parseAuthenticationRuntimeConfig } from "@atharvan/config";
 import {
   authDatabaseSchema,
   createNeonDatabase,
   createPostgresOperatorOnboardingStore,
+  createPostgresOperatorRoleAdministrationStore,
   createPostgresOperatorSessionPolicyStore,
   createPostgresPlatformAdministrationReader,
 } from "@atharvan/db";
@@ -63,6 +66,11 @@ async function createProductionAuthenticationRuntime(input: {
   const administrationReader = createPostgresPlatformAdministrationReader(
     databaseHandle.database,
   );
+  const roleAdministrationService = createOperatorRoleAdministrationService({
+    store: createPostgresOperatorRoleAdministrationStore(
+      databaseHandle.database,
+    ),
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -128,12 +136,23 @@ async function createProductionAuthenticationRuntime(input: {
       policyStore.resolveActiveOperator(authUserId),
     listOperators: () => administrationReader.listOperators(),
     listMembershipDomains: () => administrationReader.listMembershipDomains(),
+    listOperatorRoleDefinitions: () =>
+      administrationReader.listOperatorRoleDefinitions(),
     async createOperatorInvitation(actor, command) {
+      const role = await administrationReader.findActiveOperatorRoleDefinition(
+        command.roleKey,
+      );
+
+      if (role === null) {
+        throw new OnboardingCommandRejectedError("role_not_found");
+      }
+
       const result = await onboardingService.createInvitation({
         actor,
         email: command.email,
         organizationId: command.organizationId,
-        intendedCapabilities: command.intendedCapabilities,
+        intendedCapabilities: role.capabilities,
+        intendedRoleDefinitionId: role.definitionId,
         reason: command.reason,
         ...(command.approvalReference === undefined
           ? {}
@@ -157,6 +176,14 @@ async function createProductionAuthenticationRuntime(input: {
         actor,
         domain: command.domain,
         membershipLockdown: command.membershipLockdown,
+        reason: command.reason,
+        correlationId: command.correlationId,
+      }),
+    replaceOperatorRoles: (actor, command) =>
+      roleAdministrationService.replaceOperatorRoles({
+        actor,
+        targetOperatorId: command.targetOperatorId,
+        roleKeys: command.roleKeys,
         reason: command.reason,
         correlationId: command.correlationId,
       }),

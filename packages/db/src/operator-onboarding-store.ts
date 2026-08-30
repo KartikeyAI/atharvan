@@ -315,6 +315,11 @@ export function createPostgresOperatorOnboardingStore(
           emailDomain: input.emailDomain,
           organizationId: input.organizationId,
           intendedCapabilities: [...input.intendedCapabilities],
+          ...(input.intendedRoleDefinitionId === undefined
+            ? {}
+            : {
+                intendedRoleDefinitionId: input.intendedRoleDefinitionId,
+              }),
           invitedByOperatorId: input.actorId,
           tokenFingerprint: input.tokenFingerprint,
           correlationId: input.correlationId,
@@ -336,6 +341,7 @@ export function createPostgresOperatorOnboardingStore(
             organizationId: input.organizationId,
             emailDomain: input.emailDomain,
             intendedCapabilities: input.intendedCapabilities,
+            intendedRoleDefinitionId: input.intendedRoleDefinitionId ?? null,
             approvalReference: input.approvalReference ?? null,
           },
           occurredAt: input.now,

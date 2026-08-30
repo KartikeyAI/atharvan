@@ -5,12 +5,12 @@ import { secureHeaders } from "hono/secure-headers";
 import { OnboardingCommandRejectedError } from "@atharvan/auth";
 import { parseRuntimeConfig } from "@atharvan/config";
 import {
-  delegablePlatformCapabilities,
   operatorHasCapability,
   unknownPlatformOverview,
   type AuthenticatedOperator,
   type MembershipDomainEntry,
   type OperatorDirectoryEntry,
+  type OperatorRoleDefinitionEntry,
 } from "@atharvan/domain";
 
 import { resolveProductionAuthenticationRuntime } from "./auth-runtime";
@@ -38,6 +38,9 @@ export interface AuthenticationRuntime {
   ): Promise<AuthenticatedOperator | null>;
   listOperators(): Promise<ReadonlyArray<OperatorDirectoryEntry>>;
   listMembershipDomains(): Promise<ReadonlyArray<MembershipDomainEntry>>;
+  listOperatorRoleDefinitions(): Promise<
+    ReadonlyArray<OperatorRoleDefinitionEntry>
+  >;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -59,14 +62,28 @@ export interface AuthenticationRuntime {
     readonly outcome: "created" | "already_exists";
     readonly id: string;
   }>;
+  replaceOperatorRoles(
+    actor: AuthenticatedOperator,
+    input: ReplaceOperatorRolesCommand,
+  ): Promise<{
+    readonly outcome: "updated" | "unchanged";
+    readonly operatorId: string;
+  }>;
 }
 
 export interface OperatorInvitationCommand {
   readonly email: string;
   readonly organizationId: string;
-  readonly intendedCapabilities: ReadonlyArray<string>;
+  readonly roleKey: string;
   readonly reason: string;
   readonly approvalReference?: string;
+  readonly correlationId: string;
+}
+
+export interface ReplaceOperatorRolesCommand {
+  readonly targetOperatorId: string;
+  readonly roleKeys: ReadonlyArray<string>;
+  readonly reason: string;
   readonly correlationId: string;
 }
 
@@ -245,11 +262,41 @@ export function createApp(
       runtime.createOperatorInvitation(operator, {
         email: input.email,
         organizationId: input.organizationId,
-        intendedCapabilities: input.intendedCapabilities,
+        roleKey: input.roleKey,
         reason: input.reason,
         ...(input.approvalReference === undefined
           ? {}
           : { approvalReference: input.approvalReference }),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.get("/v1/platform/operator-roles", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:operators:read")
+    ) {
+      return capabilityRequired(context);
+    }
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json({
+      items: await runtime.listOperatorRoleDefinitions(),
+    });
+  });
+
+  app.put("/v1/platform/operators/:operatorId/roles", async (context) => {
+    const input = await readJson(context, parseReplaceOperatorRoles);
+
+    if (input === null) {
+      return invalidRequest(context);
+    }
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.replaceOperatorRoles(context.get("operator"), {
+        ...input,
+        targetOperatorId: context.req.param("operatorId"),
         correlationId: context.get("requestId"),
       }),
     );
@@ -354,8 +401,8 @@ function parseOperatorInvitation(
   if (!isRecord(value)) return null;
   const email = readTrimmedString(value.email, 254);
   const organizationId = readTrimmedString(value.organizationId, 100);
+  const roleKey = readTrimmedString(value.roleKey, 64);
   const reason = readReason(value.reason);
-  const capabilities = value.intendedCapabilities;
   const approvalReference =
     value.approvalReference === undefined
       ? undefined
@@ -365,19 +412,9 @@ function parseOperatorInvitation(
     email === null ||
     !email.includes("@") ||
     organizationId === null ||
+    roleKey === null ||
     reason === null ||
-    approvalReference === null ||
-    !Array.isArray(capabilities) ||
-    capabilities.length === 0 ||
-    capabilities.length > delegablePlatformCapabilities.length ||
-    capabilities.some(
-      (capability) =>
-        typeof capability !== "string" ||
-        !delegablePlatformCapabilities.includes(
-          capability as (typeof delegablePlatformCapabilities)[number],
-        ),
-    ) ||
-    new Set(capabilities).size !== capabilities.length
+    approvalReference === null
   ) {
     return null;
   }
@@ -385,10 +422,37 @@ function parseOperatorInvitation(
   return {
     email,
     organizationId,
-    intendedCapabilities: capabilities as ReadonlyArray<string>,
+    roleKey,
     reason,
     ...(approvalReference === undefined ? {} : { approvalReference }),
   };
+}
+
+function parseReplaceOperatorRoles(
+  value: unknown,
+): Omit<
+  ReplaceOperatorRolesCommand,
+  "targetOperatorId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const roleKeys = value.roleKeys;
+
+  if (
+    reason === null ||
+    !Array.isArray(roleKeys) ||
+    roleKeys.length === 0 ||
+    roleKeys.length > 10 ||
+    roleKeys.some(
+      (roleKey) =>
+        typeof roleKey !== "string" || !/^[a-z][a-z0-9_]{2,63}$/.test(roleKey),
+    ) ||
+    new Set(roleKeys).size !== roleKeys.length
+  ) {
+    return null;
+  }
+
+  return { roleKeys: roleKeys as ReadonlyArray<string>, reason };
 }
 
 function parseMembershipDomain(
@@ -461,8 +525,9 @@ function capabilityRequired(context: Context<AppEnvironment>) {
 async function executeCommand(
   context: Context<AppEnvironment>,
   command: () => Promise<{
-    readonly outcome: "created" | "already_exists";
-    readonly id: string;
+    readonly outcome: "created" | "already_exists" | "updated" | "unchanged";
+    readonly id?: string;
+    readonly operatorId?: string;
   }>,
 ) {
   try {

@@ -3,15 +3,19 @@ import type {
   OperatorLifecycleStatus,
 } from "./operator-onboarding";
 
-export const delegablePlatformCapabilities = [
-  "platform:overview:read",
-  "platform:operators:read",
-  "platform:operators:invite",
-  "platform:membership-domains:read",
-] as const;
+export interface OperatorRoleSummary {
+  readonly definitionId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly version: number;
+}
 
-export type DelegablePlatformCapability =
-  (typeof delegablePlatformCapabilities)[number];
+export interface OperatorRoleDefinitionEntry extends OperatorRoleSummary {
+  readonly description: string;
+  readonly capabilities: ReadonlyArray<string>;
+  readonly isActive: boolean;
+  readonly isSystem: boolean;
+}
 
 export interface OperatorDirectoryEntry {
   readonly id: string;
@@ -20,6 +24,7 @@ export interface OperatorDirectoryEntry {
   readonly status: OperatorLifecycleStatus;
   readonly isSuperAdministrator: boolean;
   readonly effectiveCapabilities: ReadonlyArray<string>;
+  readonly assignedRoles: ReadonlyArray<OperatorRoleSummary>;
   readonly invitationStatus: OperatorInvitationStatus | null;
   readonly invitedAt: string;
   readonly activatedAt: string | null;
@@ -38,4 +43,10 @@ export interface MembershipDomainEntry {
 export interface PlatformAdministrationReader {
   listOperators(): Promise<ReadonlyArray<OperatorDirectoryEntry>>;
   listMembershipDomains(): Promise<ReadonlyArray<MembershipDomainEntry>>;
+  listOperatorRoleDefinitions(): Promise<
+    ReadonlyArray<OperatorRoleDefinitionEntry>
+  >;
+  findActiveOperatorRoleDefinition(
+    key: string,
+  ): Promise<OperatorRoleDefinitionEntry | null>;
 }

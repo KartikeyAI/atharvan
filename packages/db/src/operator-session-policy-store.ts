@@ -4,7 +4,7 @@ import {
   platformCapabilityWildcard,
   type AuthenticatedOperator,
 } from "@atharvan/domain";
-import { and, desc, eq, gt, lt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
@@ -13,6 +13,8 @@ import {
   allowedEmailDomains,
   auditEvents,
   operatorInvitations,
+  operatorRoleAssignments,
+  operatorRoleDefinitions,
   operators,
   operatorVerificationChallenges,
   user,
@@ -166,6 +168,11 @@ export function createPostgresOperatorSessionPolicyStore(
           .select({
             id: operatorInvitations.id,
             intendedCapabilities: operatorInvitations.intendedCapabilities,
+            intendedRoleDefinitionId:
+              operatorInvitations.intendedRoleDefinitionId,
+            invitedByOperatorId: operatorInvitations.invitedByOperatorId,
+            reason: operatorInvitations.reason,
+            correlationId: operatorInvitations.correlationId,
           })
           .from(operatorInvitations)
           .where(
@@ -242,11 +249,24 @@ export function createPostgresOperatorSessionPolicyStore(
           occurredAt: input.now,
         });
 
-        return {
+        if (invitation.intendedRoleDefinitionId !== null) {
+          await transaction
+            .insert(operatorRoleAssignments)
+            .values({
+              operatorId: operator.id,
+              roleDefinitionId: invitation.intendedRoleDefinitionId,
+              assignedByOperatorId: invitation.invitedByOperatorId,
+              reason: invitation.reason,
+              correlationId: invitation.correlationId,
+              assignedAt: input.now,
+            })
+            .onConflictDoNothing();
+        }
+
+        return resolveOperatorAuthority(transaction, {
           operatorId: operator.id,
           isSuperAdministrator: false,
-          effectiveCapabilities: invitation.intendedCapabilities,
-        };
+        });
       });
     },
 
@@ -324,10 +344,30 @@ async function resolveOperatorAuthority(
     .orderBy(desc(operatorInvitations.acceptedAt))
     .limit(1);
 
+  const roleCapabilities = await database
+    .select({ capabilities: operatorRoleDefinitions.capabilities })
+    .from(operatorRoleAssignments)
+    .innerJoin(
+      operatorRoleDefinitions,
+      eq(operatorRoleDefinitions.id, operatorRoleAssignments.roleDefinitionId),
+    )
+    .where(
+      and(
+        eq(operatorRoleAssignments.operatorId, operator.operatorId),
+        isNull(operatorRoleAssignments.revokedAt),
+      ),
+    );
+  const effectiveCapabilities = [
+    ...new Set(roleCapabilities.flatMap((role) => role.capabilities)),
+  ].sort();
+
   return {
     operatorId: operator.operatorId,
     isSuperAdministrator: false,
-    effectiveCapabilities: acceptedInvitation?.intendedCapabilities ?? [],
+    effectiveCapabilities:
+      effectiveCapabilities.length > 0
+        ? effectiveCapabilities
+        : (acceptedInvitation?.intendedCapabilities ?? []),
   };
 }
 

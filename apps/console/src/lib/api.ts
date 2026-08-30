@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   MembershipDomainEntry,
   OperatorDirectoryEntry,
+  OperatorRoleDefinitionEntry,
 } from "@atharvan/domain";
 
 export class ApiError extends Error {
@@ -81,6 +82,10 @@ export type OperatorDirectoryResponse = {
 
 export type MembershipDomainResponse = {
   readonly items: ReadonlyArray<MembershipDomainEntry>;
+};
+
+export type OperatorRolesResponse = {
+  readonly items: ReadonlyArray<OperatorRoleDefinitionEntry>;
 };
 
 function isApiErrorBody(
