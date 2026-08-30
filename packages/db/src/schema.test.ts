@@ -22,6 +22,8 @@ import {
   platformConfigurationBindings,
   platformConfigurationDefinitions,
   platformConfigurationRevisions,
+  platformCommandResults,
+  platformCommands,
   platformFeatureFlagRevisions,
   platformFeatureFlags,
   platformAdapterReleaseRevisions,
@@ -35,6 +37,7 @@ import {
   session,
   user,
   verification,
+  auditEvents,
 } from "./schema";
 
 describe("operator onboarding schema", () => {
@@ -153,6 +156,42 @@ describe("operator onboarding schema", () => {
         "platform_feature_flag_revisions_rules_array",
         "platform_feature_flag_revisions_expiry_after_review",
       ]),
+    );
+  });
+
+  it("stores immutable command envelopes without raw payloads or idempotency keys", () => {
+    const commandConfig = getTableConfig(platformCommands);
+    const resultConfig = getTableConfig(platformCommandResults);
+    const auditConfig = getTableConfig(auditEvents);
+    const commandColumns = commandConfig.columns.map((column) => column.name);
+
+    expect(commandColumns).toEqual(
+      expect.arrayContaining([
+        "payload_fingerprint",
+        "idempotency_fingerprint",
+        "approval_reference",
+        "evidence_references",
+      ]),
+    );
+    expect(commandColumns).not.toEqual(
+      expect.arrayContaining([
+        "payload",
+        "request_body",
+        "idempotency_key",
+        "secret_value",
+      ]),
+    );
+    expect(commandConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_commands_idempotency_unique",
+        "platform_commands_correlation_unique",
+      ]),
+    );
+    expect(resultConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "platform_command_results_command_unique",
+    );
+    expect(auditConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "audit_events_command_idx",
     );
   });
 

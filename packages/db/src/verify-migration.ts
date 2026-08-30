@@ -22,6 +22,8 @@ const expectedTables = [
   "operator_invitations",
   "operator_verification_challenges",
   "operators",
+  "platform_command_results",
+  "platform_commands",
   "platform_configuration_bindings",
   "platform_configuration_definitions",
   "platform_configuration_revisions",
@@ -61,6 +63,9 @@ const expectedIndexes = [
   "platform_configuration_revisions_number_unique",
   "platform_feature_flag_revisions_number_unique",
   "platform_feature_flags_key_environment_unique",
+  "platform_command_results_command_unique",
+  "platform_commands_correlation_unique",
+  "platform_commands_idempotency_unique",
   "platform_adapter_release_revisions_number_unique",
   "platform_adapter_releases_identity_unique",
   "platform_integration_health_integration_observed_idx",
@@ -95,6 +100,10 @@ const expectedConstraints = [
   "platform_adapter_release_revisions_activation_evidence",
   "platform_adapter_release_revisions_deprecation_metadata",
   "platform_feature_flag_revisions_expiry_after_review",
+  "platform_command_results_body_object",
+  "platform_command_results_http_status",
+  "platform_commands_idempotency_fingerprint_sha256",
+  "platform_commands_payload_fingerprint_sha256",
   "platform_integration_health_expiry_after_observation",
   "platform_integration_revisions_active_oauth_secret",
   "platform_integration_revisions_maintenance_metadata",
@@ -111,6 +120,9 @@ const forbiddenSecretMaterialColumns = new Set([
   "token",
   "value_hash",
   "value_preview",
+  "payload",
+  "request_body",
+  "idempotency_key",
 ]);
 
 const expectedTriggers = [
@@ -124,6 +136,9 @@ const expectedTriggers = [
   "platform_adapter_release_revisions_artifact_identity",
   "platform_adapter_release_revisions_immutable",
   "platform_feature_flag_revisions_immutable",
+  "audit_events_immutable",
+  "platform_command_results_immutable",
+  "platform_commands_immutable",
   "platform_integration_health_observations_immutable",
   "platform_integration_revisions_immutable",
   "platform_secret_references_no_delete",
@@ -161,7 +176,7 @@ try {
     table_name: string;
     column_name: string;
   }>(
-    "select table_name, column_name from information_schema.columns where table_schema = 'public' and table_name in ('platform_secret_references', 'platform_secret_versions', 'model_provider_revisions', 'platform_integration_revisions', 'platform_adapter_release_revisions')",
+    "select table_name, column_name from information_schema.columns where table_schema = 'public' and table_name in ('platform_secret_references', 'platform_secret_versions', 'model_provider_revisions', 'platform_integration_revisions', 'platform_adapter_release_revisions', 'platform_commands', 'platform_command_results')",
   );
   const tableNames = new Set(tableResult.rows.map((row) => row.table_name));
   const indexNames = new Set(indexResult.rows.map((row) => row.indexname));

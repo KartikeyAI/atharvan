@@ -88,7 +88,7 @@ export function createPlatformFeatureFlagService(input: {
       const commandTime = now();
       assertPlatformCommandAuthorized({
         actor: command.actor,
-        requestedCapability: "platform:flags:write",
+        requestedCapability: "platform:feature-flags:write",
         requireRecentStepUp: true,
         now: commandTime,
       });

@@ -35,8 +35,8 @@ routing identities.
 
 Evaluation fails closed when a flag is missing, inactive, expired, or emergency
 disabled. The kill switch precedes all targeting. Changes require the
-`platform:flags:write` capability and recent step-up authentication; previews
-and registry reads require `platform:flags:read`.
+`platform:feature-flags:write` capability and recent step-up authentication;
+previews and registry reads require `platform:feature-flags:read`.
 
 PostgreSQL enforces unique environment-scoped keys, revision uniqueness,
 ownership references, expiry ordering, bounded JSON rule arrays, and immutable

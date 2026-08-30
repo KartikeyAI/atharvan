@@ -33,4 +33,8 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0009_platform_adapter_registry.sql` adds environment-scoped adapter releases and immutable review/control revisions. Every release declares the complete eight-capability maturity matrix, permissions, typed configuration fields, commands, supported environments, compatibility, required secret purposes, health checks, package digest, signing evidence, security review, channel, lifecycle, and deprecation/block state. A trigger prevents a package name or digest from changing under an existing semantic version.
 
+`0010_platform_feature_flags.sql` adds owned, environment-scoped feature flags with immutable revisions, bounded typed targeting rules, review and expiry metadata, and emergency containment state.
+
+`0011_platform_command_audit.sql` adds named/versioned command envelopes, secret-safe payload and idempotency fingerprints, optional approval/evidence references, append-only terminal results, and command linkage on audit events. PostgreSQL triggers reject updates and deletion across command, result, and audit history. The migration is additive: historical audit rows remain valid with a null command reference.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

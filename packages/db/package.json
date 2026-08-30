@@ -19,6 +19,7 @@
   "dependencies": {
     "@atharvan/adapters": "workspace:*",
     "@atharvan/auth": "workspace:*",
+    "@atharvan/commands": "workspace:*",
     "@atharvan/config": "workspace:*",
     "@atharvan/domain": "workspace:*",
     "@atharvan/flags": "workspace:*",

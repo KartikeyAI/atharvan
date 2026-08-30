@@ -7,6 +7,7 @@ import {
   createOperatorRoleAdministrationService,
   OnboardingCommandRejectedError,
 } from "@atharvan/auth";
+import { createPlatformCommandService } from "@atharvan/commands";
 import {
   createPlatformConfigurationAdministrationService,
   parseAuthenticationRuntimeConfig,
@@ -18,6 +19,7 @@ import {
   createPostgresOperatorRoleAdministrationStore,
   createPostgresOperatorSessionPolicyStore,
   createPostgresPlatformAdministrationReader,
+  createPostgresPlatformCommandAuditStore,
   createPostgresPlatformAdapterRegistryStore,
   createPostgresPlatformConfigurationStore,
   createPostgresPlatformIntegrationRegistryStore,
@@ -141,6 +143,10 @@ async function createProductionAuthenticationRuntime(input: {
     store: createPostgresPlatformFeatureFlagStore(databaseHandle.database),
     environment: config.ATHARVAN_ENVIRONMENT,
   });
+  const commandService = createPlatformCommandService({
+    store: createPostgresPlatformCommandAuditStore(databaseHandle.database),
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -217,6 +223,12 @@ async function createProductionAuthenticationRuntime(input: {
     listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
     listPlatformAdapters: () => adapterRegistryService.listRegistry(),
     listPlatformFeatureFlags: () => featureFlagService.listFlags(),
+    beginPlatformCommand: (command) => commandService.begin(command),
+    completePlatformCommand: (command) => commandService.complete(command),
+    listPlatformAuditEvents: (actor, query) =>
+      commandService.listAuditEvents(actor, query),
+    exportPlatformAuditEvents: (actor, query) =>
+      commandService.exportAuditEvents(actor, query),
     async createOperatorInvitation(actor, command) {
       const registry = await configurationStore.listConfiguration(
         config.ATHARVAN_ENVIRONMENT,

@@ -9,6 +9,7 @@ import type {
   PlatformConfigurationRegistry,
   PlatformIntegrationRegistry,
   PlatformAdapterRegistry,
+  PlatformAuditEventPage,
   PlatformFeatureFlagRegistry,
   PlatformSecretReferenceRegistry,
 } from "@atharvan/domain";
@@ -27,15 +28,22 @@ export async function apiRequest<Result>(
   path: string,
   init?: RequestInit,
 ): Promise<Result> {
+  const headers = new Headers(init?.headers);
+  const method = init?.method?.toUpperCase() ?? "GET";
+  if (init?.body !== undefined && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  if (
+    method !== "GET" &&
+    method !== "HEAD" &&
+    !headers.has("idempotency-key")
+  ) {
+    headers.set("idempotency-key", crypto.randomUUID());
+  }
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
-    headers: {
-      ...(init?.body === undefined
-        ? {}
-        : { "content-type": "application/json" }),
-      ...init?.headers,
-    },
+    headers,
   });
   const body: unknown = await response.json().catch(() => null);
 
@@ -108,6 +116,8 @@ export type PlatformIntegrationRegistryResponse = PlatformIntegrationRegistry;
 export type PlatformAdapterRegistryResponse = PlatformAdapterRegistry;
 
 export type PlatformFeatureFlagRegistryResponse = PlatformFeatureFlagRegistry;
+
+export type PlatformAuditEventPageResponse = PlatformAuditEventPage;
 
 function isApiErrorBody(
   value: unknown,

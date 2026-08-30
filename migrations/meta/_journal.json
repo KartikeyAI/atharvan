@@ -78,6 +78,13 @@
       "when": 1788103914815,
       "tag": "0010_platform_feature_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788110452889,
+      "tag": "0011_platform_command_audit",
+      "breakpoints": true
     }
   ]
 }

@@ -127,6 +127,7 @@ export function assertDelegableOperatorCapabilities(
 export * from "./operator-onboarding";
 export * from "./platform-administration";
 export * from "./platform-adapters";
+export * from "./platform-audit";
 export * from "./platform-configuration";
 export * from "./platform-feature-flags";
 export * from "./platform-integrations";

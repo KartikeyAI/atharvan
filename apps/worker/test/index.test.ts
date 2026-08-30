@@ -69,6 +69,24 @@ function createRuntime(input?: {
       environment: "development" as const,
       items: [],
     })),
+    beginPlatformCommand: vi.fn(async () => ({
+      state: "started" as const,
+      commandId: "00000000-0000-4000-8000-000000000990",
+    })),
+    completePlatformCommand: vi.fn(async () => ({
+      state: "completed" as const,
+    })),
+    listPlatformAuditEvents: vi.fn(async () => ({
+      items: [],
+      nextCursor: null,
+    })),
+    exportPlatformAuditEvents: vi.fn(async () => ({
+      generatedAt: "2026-08-30T16:00:00.000Z",
+      format: "ndjson" as const,
+      itemCount: 0,
+      truncated: false,
+      content: "",
+    })),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -254,6 +272,54 @@ describe("Atharvan control-plane worker", () => {
       observedAt: null,
       evidence: [],
     });
+  });
+
+  it("searches and exports immutable audit evidence with separate capabilities", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.listPlatformAuditEvents).mockResolvedValue({
+      items: [
+        {
+          id: "00000000-0000-4000-8000-000000000991",
+          actorId: "00000000-0000-4000-8000-000000000001",
+          actorEmail: "owner@example.com",
+          eventType: "platform.command.succeeded",
+          targetType: "platform_configuration",
+          targetId: "platform.release.channel",
+          correlationId: "00000000-0000-4000-8000-000000000992",
+          reason: "Promote the development release channel.",
+          evidence: { outcome: "succeeded" },
+          occurredAt: "2026-08-30T16:00:00.000Z",
+          command: null,
+        },
+      ],
+      nextCursor: null,
+    });
+    const search = await createTestApp(runtime).request(
+      "/v1/platform/audit-events?eventType=platform.command&outcome=succeeded",
+      undefined,
+      bindings,
+    );
+    expect(search.status).toBe(200);
+    await expect(search.json()).resolves.toMatchObject({
+      items: [{ eventType: "platform.command.succeeded" }],
+    });
+    expect(runtime.listPlatformAuditEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorId: "operator-1" }),
+      expect.objectContaining({
+        eventType: "platform.command",
+        outcome: "succeeded",
+      }),
+    );
+
+    const exported = await createTestApp(runtime).request(
+      "/v1/platform/audit-events/export?from=2026-08-29T00%3A00%3A00.000Z&to=2026-08-30T00%3A00%3A00.000Z",
+      undefined,
+      bindings,
+    );
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get("content-type")).toContain(
+      "application/x-ndjson",
+    );
   });
 
   it("returns the operator directory only with its read capability", async () => {
@@ -498,7 +564,59 @@ describe("Atharvan control-plane worker", () => {
       expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
       expect.objectContaining({ key: "models.openai", value: secretValue }),
     );
+    expect(runtime.beginPlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "platform.secret.create",
+        safePayload: expect.objectContaining({ value: "[redacted]" }),
+      }),
+    );
+    expect(
+      JSON.stringify(vi.mocked(runtime.beginPlatformCommand).mock.calls),
+    ).not.toContain(secretValue);
+    expect(runtime.completePlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "succeeded", responseStatus: 201 }),
+    );
     expect(await response.text()).not.toContain(secretValue);
+  });
+
+  it("replays a completed command without executing the domain mutation", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.beginPlatformCommand).mockResolvedValue({
+      state: "replayed",
+      commandId: "00000000-0000-4000-8000-000000000990",
+      result: {
+        outcome: "succeeded",
+        responseStatus: 200,
+        responseBody: {
+          outcome: "updated",
+          key: "platform.release.channel",
+          revisionNumber: 2,
+        },
+      },
+    });
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/configuration/platform.release.channel",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "release-channel-command-1",
+        },
+        body: JSON.stringify({
+          scope: "environment",
+          value: "stable",
+          reason: "Promote the development release channel.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      outcome: "updated",
+      revisionNumber: 2,
+    });
+    expect(runtime.setPlatformConfiguration).not.toHaveBeenCalled();
+    expect(runtime.completePlatformCommand).not.toHaveBeenCalled();
   });
 
   it("requires explicit confirmation before secret revocation", async () => {

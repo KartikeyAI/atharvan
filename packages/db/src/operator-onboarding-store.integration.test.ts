@@ -1,6 +1,7 @@
 import { createOperatorOnboardingService } from "@atharvan/auth";
 import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
+import { createPlatformCommandService } from "@atharvan/commands";
 import type { AuthenticatedOperator } from "@atharvan/domain";
 import { createPlatformFeatureFlagService } from "@atharvan/flags";
 import { createPlatformIntegrationRegistryService } from "@atharvan/integrations";
@@ -15,6 +16,7 @@ import { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
+import { createPostgresPlatformCommandAuditStore } from "./platform-command-audit-store";
 import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 import { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 import { createPostgresModelRoutingStore } from "./model-routing-store";
@@ -30,6 +32,7 @@ import {
   operatorVerificationChallenges,
   platformSecretReferences,
   platformSecretVersions,
+  platformCommands,
   user,
 } from "./schema";
 import * as schema from "./schema";
@@ -569,6 +572,78 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
           }),
         ],
       });
+      let commandIdSequence = 950;
+      const commandService = createPlatformCommandService({
+        store: createPostgresPlatformCommandAuditStore(database),
+        environment: "development",
+        now: () => commandTime,
+        randomId: () =>
+          `00000000-0000-4000-8000-${String(++commandIdSequence).padStart(12, "0")}`,
+      });
+      const commandInput = {
+        actor,
+        requiredCapability: "platform:configuration:write",
+        name: "platform.configuration.set",
+        version: 1,
+        targetType: "platform_configuration",
+        targetId: "platform.release.channel",
+        safePayload: {
+          scope: "environment",
+          value: "stable",
+        } as const,
+        idempotencyKey: "integration-command-idempotency-1",
+        correlationId: "00000000-0000-4000-8000-000000000126",
+        reason: "Exercise the shared command envelope.",
+      };
+      const begun = await commandService.begin(commandInput);
+      expect(begun).toMatchObject({ state: "started" });
+      if (begun.state !== "started") throw new Error("command_not_started");
+      await commandService.complete({
+        commandId: begun.commandId,
+        actor,
+        targetType: commandInput.targetType,
+        targetId: commandInput.targetId,
+        correlationId: commandInput.correlationId,
+        reason: commandInput.reason,
+        outcome: "succeeded",
+        responseStatus: 200,
+        responseBody: { outcome: "updated", revisionNumber: 2 },
+      });
+      await expect(
+        commandService.begin({
+          ...commandInput,
+          correlationId: "00000000-0000-4000-8000-000000000127",
+        }),
+      ).resolves.toMatchObject({
+        state: "replayed",
+        result: {
+          outcome: "succeeded",
+          responseStatus: 200,
+          responseBody: { outcome: "updated", revisionNumber: 2 },
+        },
+      });
+      await expect(
+        commandService.listAuditEvents(actor, {
+          commandName: "platform.configuration.set",
+          outcome: "succeeded",
+        }),
+      ).resolves.toMatchObject({
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            eventType: "platform.command.succeeded",
+            command: expect.objectContaining({
+              name: "platform.configuration.set",
+              outcome: "succeeded",
+            }),
+          }),
+        ]),
+      });
+      await expect(
+        database
+          .update(platformCommands)
+          .set({ reason: "Attempt to rewrite immutable command history." })
+          .where(eq(platformCommands.id, begun.commandId)),
+      ).rejects.toThrow(/command history cannot be mutated/u);
       await secretService.revoke({
         actor,
         referenceId: createdSecret.id,

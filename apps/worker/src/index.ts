@@ -3,6 +3,11 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 
 import { OnboardingCommandRejectedError } from "@atharvan/auth";
+import {
+  PlatformCommandRejectedError,
+  type BeginPlatformCommand,
+  type PlatformCommandBeginResult,
+} from "@atharvan/commands";
 import { PlatformAdapterCommandRejectedError } from "@atharvan/adapters";
 import {
   parseRuntimeConfig,
@@ -20,6 +25,9 @@ import {
   type PlatformAdapterHealthCheckDeclaration,
   type PlatformAdapterLifecycle,
   type PlatformAdapterRegistry,
+  type PlatformAuditEventPage,
+  type PlatformAuditExport,
+  type PlatformAuditQuery,
   type PlatformAdapterReleaseChannel,
   type PlatformAdapterSecurityReviewStatus,
   type PlatformAdapterSignatureStatus,
@@ -50,6 +58,7 @@ import {
   type PlatformIntegrationProtocol,
   type PlatformIntegrationRegistry,
   type PlatformIntegrationReportedHealth,
+  type PlatformJsonValue,
   type PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
 import { PlatformFeatureFlagCommandRejectedError } from "@atharvan/flags";
@@ -104,6 +113,28 @@ export interface AuthenticationRuntime {
   listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
   listPlatformAdapters(): Promise<PlatformAdapterRegistry>;
   listPlatformFeatureFlags(): Promise<PlatformFeatureFlagRegistry>;
+  beginPlatformCommand(
+    input: BeginPlatformCommand,
+  ): Promise<PlatformCommandBeginResult>;
+  completePlatformCommand(input: {
+    readonly commandId: string;
+    readonly actor: AuthenticatedOperator;
+    readonly targetType: string;
+    readonly targetId: string;
+    readonly correlationId: string;
+    readonly reason: string;
+    readonly outcome: "succeeded" | "rejected" | "failed";
+    readonly responseStatus: number;
+    readonly responseBody: PlatformJsonValue;
+  }): Promise<{ readonly state: "completed" | "already_completed" }>;
+  listPlatformAuditEvents(
+    actor: AuthenticatedOperator,
+    query: PlatformAuditQuery,
+  ): Promise<PlatformAuditEventPage>;
+  exportPlatformAuditEvents(
+    actor: AuthenticatedOperator,
+    query: PlatformAuditQuery,
+  ): Promise<PlatformAuditExport>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -565,6 +596,68 @@ export function createApp(
     return context.json(unknownPlatformOverview);
   });
 
+  app.get("/v1/platform/audit-events", async (context) => {
+    const operator = context.get("operator");
+    if (!operatorHasCapability(operator, "platform:audit:read")) {
+      return capabilityRequired(context);
+    }
+    const query = parsePlatformAuditQuery(context);
+    if (query === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listPlatformAuditEvents(operator, query));
+  });
+
+  app.get("/v1/platform/audit-events/export", async (context) => {
+    const operator = context.get("operator");
+    if (!operatorHasCapability(operator, "platform:audit:export")) {
+      return capabilityRequired(context);
+    }
+    const query = parsePlatformAuditQuery(context);
+    if (query === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    try {
+      const exported = await runtime.exportPlatformAuditEvents(operator, query);
+      return new Response(exported.content, {
+        status: 200,
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "content-disposition": `attachment; filename="atharvan-audit-${new Date().toISOString().slice(0, 10)}.ndjson"`,
+          "x-atharvan-audit-item-count": String(exported.itemCount),
+          "x-atharvan-audit-truncated": String(exported.truncated),
+        },
+      });
+    } catch (error) {
+      const reason =
+        error instanceof PlatformCommandRejectedError
+          ? error.reason
+          : error instanceof Error
+            ? error.message
+            : "";
+      if (error instanceof PlatformCommandRejectedError) {
+        return context.json(
+          {
+            code: "audit_export_rejected",
+            reason,
+            message: "The requested audit export was not accepted.",
+            requestId: context.get("requestId"),
+          },
+          reason === "recent_step_up_required" ? 403 : 400,
+        );
+      }
+      if (reason === "recent_step_up_required") {
+        return context.json(
+          {
+            code: reason,
+            message: "Sign in again before exporting audit evidence.",
+            requestId: context.get("requestId"),
+          },
+          403,
+        );
+      }
+      throw error;
+    }
+  });
+
   app.get("/v1/platform/operators", async (context) => {
     const operator = context.get("operator");
 
@@ -590,17 +683,30 @@ export function createApp(
     }
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.createOperatorInvitation(operator, {
-        email: input.email,
-        organizationId: input.organizationId,
-        roleKey: input.roleKey,
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:operators:invite",
+        name: "operator.invitation.create",
+        version: 1,
+        targetType: "operator_invitation",
+        targetId: input.email,
+        payload: input,
         reason: input.reason,
-        ...(input.approvalReference === undefined
-          ? {}
-          : { approvalReference: input.approvalReference }),
-        correlationId: context.get("requestId"),
-      }),
+        approvalReference: input.approvalReference ?? null,
+      },
+      () =>
+        runtime.createOperatorInvitation(operator, {
+          email: input.email,
+          organizationId: input.organizationId,
+          roleKey: input.roleKey,
+          reason: input.reason,
+          ...(input.approvalReference === undefined
+            ? {}
+            : { approvalReference: input.approvalReference }),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -636,12 +742,24 @@ export function createApp(
     if (input === null) return invalidRequest(context);
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.setPlatformConfiguration(context.get("operator"), {
-        ...input,
-        key: context.req.param("key"),
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:configuration:write",
+        name: "platform.configuration.set",
+        version: 1,
+        targetType: "platform_configuration",
+        targetId: context.req.param("key"),
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.setPlatformConfiguration(context.get("operator"), {
+          ...input,
+          key: context.req.param("key"),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -662,11 +780,24 @@ export function createApp(
     const input = await readJson(context, parseCreatePlatformSecret);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.createPlatformSecret(context.get("operator"), {
-        ...input,
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:secrets:write",
+        name: "platform.secret.create",
+        version: 1,
+        targetType: "platform_secret",
+        targetId: input.key,
+        payload: input,
+        sensitivePayloadKeys: ["value"],
+        reason: input.reason,
+      },
+      () =>
+        runtime.createPlatformSecret(context.get("operator"), {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -676,12 +807,25 @@ export function createApp(
       const input = await readJson(context, parseRotatePlatformSecret);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
-      return executeCommand(context, () =>
-        runtime.rotatePlatformSecret(context.get("operator"), {
-          ...input,
-          referenceId: context.req.param("referenceId"),
-          correlationId: context.get("requestId"),
-        }),
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:secrets:write",
+          name: "platform.secret.rotate",
+          version: 1,
+          targetType: "platform_secret",
+          targetId: context.req.param("referenceId"),
+          payload: input,
+          sensitivePayloadKeys: ["value"],
+          reason: input.reason,
+        },
+        () =>
+          runtime.rotatePlatformSecret(context.get("operator"), {
+            ...input,
+            referenceId: context.req.param("referenceId"),
+            correlationId: context.get("requestId"),
+          }),
       );
     },
   );
@@ -700,12 +844,24 @@ export function createApp(
     const input = await readJson(context, parseSetModelRoutingPolicy);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.setModelRoutingPolicy(context.get("operator"), {
-        ...input,
-        key: context.req.param("key"),
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:models:write",
+        name: "platform.model-routing.policy.set",
+        version: 1,
+        targetType: "model_routing_policy",
+        targetId: context.req.param("key"),
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.setModelRoutingPolicy(context.get("operator"), {
+          ...input,
+          key: context.req.param("key"),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -721,13 +877,25 @@ export function createApp(
         return invalidRequest(context);
       }
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
-      return executeCommand(context, () =>
-        runtime.setModelRoutingControl(context.get("operator"), {
-          ...input,
-          targetKind,
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:models:write",
+          name: "platform.model-routing.control.set",
+          version: 1,
+          targetType: `model_routing_${targetKind}`,
           targetId: context.req.param("targetId"),
-          correlationId: context.get("requestId"),
-        }),
+          payload: input,
+          reason: input.reason,
+        },
+        () =>
+          runtime.setModelRoutingControl(context.get("operator"), {
+            ...input,
+            targetKind,
+            targetId: context.req.param("targetId"),
+            correlationId: context.get("requestId"),
+          }),
       );
     },
   );
@@ -779,7 +947,10 @@ export function createApp(
 
   app.get("/v1/platform/feature-flags", async (context) => {
     if (
-      !operatorHasCapability(context.get("operator"), "platform:flags:read")
+      !operatorHasCapability(
+        context.get("operator"),
+        "platform:feature-flags:read",
+      )
     ) {
       return capabilityRequired(context);
     }
@@ -791,18 +962,33 @@ export function createApp(
     const input = await readJson(context, parseSetPlatformFeatureFlag);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.setPlatformFeatureFlag(context.get("operator"), {
-        ...input,
-        key: context.req.param("key"),
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:feature-flags:write",
+        name: "platform.feature-flag.set",
+        version: 1,
+        targetType: "platform_feature_flag",
+        targetId: context.req.param("key"),
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.setPlatformFeatureFlag(context.get("operator"), {
+          ...input,
+          key: context.req.param("key"),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
   app.post("/v1/platform/feature-flags/:key/evaluate", async (context) => {
     if (
-      !operatorHasCapability(context.get("operator"), "platform:flags:read")
+      !operatorHasCapability(
+        context.get("operator"),
+        "platform:feature-flags:read",
+      )
     ) {
       return capabilityRequired(context);
     }
@@ -821,13 +1007,29 @@ export function createApp(
     const input = await readJson(context, parseSetPlatformAdapterRelease);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.setPlatformAdapterRelease(context.get("operator"), {
-        ...input,
-        key: context.req.param("key"),
-        version: context.req.param("version"),
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:adapters:write",
+        name: "platform.adapter-release.set",
+        version: 1,
+        targetType: "platform_adapter_release",
+        targetId: `${context.req.param("key")}@${context.req.param("version")}`,
+        payload: input,
+        reason: input.reason,
+        evidenceReferences:
+          input.securityReviewReference === null
+            ? []
+            : [input.securityReviewReference],
+      },
+      () =>
+        runtime.setPlatformAdapterRelease(context.get("operator"), {
+          ...input,
+          key: context.req.param("key"),
+          version: context.req.param("version"),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -835,12 +1037,24 @@ export function createApp(
     const input = await readJson(context, parseSetPlatformIntegration);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.setPlatformIntegration(context.get("operator"), {
-        ...input,
-        key: context.req.param("key"),
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:integrations:write",
+        name: "platform.integration.set",
+        version: 1,
+        targetType: "platform_integration",
+        targetId: context.req.param("key"),
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.setPlatformIntegration(context.get("operator"), {
+          ...input,
+          key: context.req.param("key"),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -850,12 +1064,24 @@ export function createApp(
       const input = await readJson(context, parsePlatformIntegrationHealth);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
-      return executeCommand(context, () =>
-        runtime.recordPlatformIntegrationHealth(context.get("operator"), {
-          ...input,
-          integrationId: context.req.param("integrationId"),
-          correlationId: context.get("requestId"),
-        }),
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:integrations:write",
+          name: "platform.integration-health.record",
+          version: 1,
+          targetType: "platform_integration",
+          targetId: context.req.param("integrationId"),
+          payload: input,
+          reason: input.reason,
+        },
+        () =>
+          runtime.recordPlatformIntegrationHealth(context.get("operator"), {
+            ...input,
+            integrationId: context.req.param("integrationId"),
+            correlationId: context.get("requestId"),
+          }),
       );
     },
   );
@@ -864,12 +1090,24 @@ export function createApp(
     const input = await readJson(context, parseSetModelProvider);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.setModelProvider(context.get("operator"), {
-        ...input,
-        key: context.req.param("key"),
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:models:write",
+        name: "platform.model-provider.set",
+        version: 1,
+        targetType: "model_provider",
+        targetId: context.req.param("key"),
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.setModelProvider(context.get("operator"), {
+          ...input,
+          key: context.req.param("key"),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -879,13 +1117,25 @@ export function createApp(
       const input = await readJson(context, parseSetModel);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
-      return executeCommand(context, () =>
-        runtime.setModel(context.get("operator"), {
-          ...input,
-          providerId: context.req.param("providerId"),
-          key: context.req.param("key"),
-          correlationId: context.get("requestId"),
-        }),
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:models:write",
+          name: "platform.model.set",
+          version: 1,
+          targetType: "model",
+          targetId: `${context.req.param("providerId")}/${context.req.param("key")}`,
+          payload: input,
+          reason: input.reason,
+        },
+        () =>
+          runtime.setModel(context.get("operator"), {
+            ...input,
+            providerId: context.req.param("providerId"),
+            key: context.req.param("key"),
+            correlationId: context.get("requestId"),
+          }),
       );
     },
   );
@@ -896,12 +1146,24 @@ export function createApp(
       const input = await readJson(context, parseModelProviderHealth);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
-      return executeCommand(context, () =>
-        runtime.recordModelProviderHealth(context.get("operator"), {
-          ...input,
-          providerId: context.req.param("providerId"),
-          correlationId: context.get("requestId"),
-        }),
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:models:write",
+          name: "platform.model-provider-health.record",
+          version: 1,
+          targetType: "model_provider",
+          targetId: context.req.param("providerId"),
+          payload: input,
+          reason: input.reason,
+        },
+        () =>
+          runtime.recordModelProviderHealth(context.get("operator"), {
+            ...input,
+            providerId: context.req.param("providerId"),
+            correlationId: context.get("requestId"),
+          }),
       );
     },
   );
@@ -912,12 +1174,24 @@ export function createApp(
       const input = await readJson(context, parseRevokePlatformSecret);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
-      return executeCommand(context, () =>
-        runtime.revokePlatformSecret(context.get("operator"), {
-          referenceId: context.req.param("referenceId"),
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:secrets:write",
+          name: "platform.secret.revoke",
+          version: 1,
+          targetType: "platform_secret",
+          targetId: context.req.param("referenceId"),
+          payload: input,
           reason: input.reason,
-          correlationId: context.get("requestId"),
-        }),
+        },
+        () =>
+          runtime.revokePlatformSecret(context.get("operator"), {
+            referenceId: context.req.param("referenceId"),
+            reason: input.reason,
+            correlationId: context.get("requestId"),
+          }),
       );
     },
   );
@@ -930,12 +1204,24 @@ export function createApp(
     }
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.replaceOperatorRoles(context.get("operator"), {
-        ...input,
-        targetOperatorId: context.req.param("operatorId"),
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:operators:roles:write",
+        name: "operator.roles.replace",
+        version: 1,
+        targetType: "operator",
+        targetId: context.req.param("operatorId"),
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.replaceOperatorRoles(context.get("operator"), {
+          ...input,
+          targetOperatorId: context.req.param("operatorId"),
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -958,11 +1244,23 @@ export function createApp(
     }
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return executeCommand(context, () =>
-      runtime.addMembershipDomain(context.get("operator"), {
-        ...input,
-        correlationId: context.get("requestId"),
-      }),
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:membership-domains:write",
+        name: "membership-domain.add",
+        version: 1,
+        targetType: "membership_domain",
+        targetId: input.domain,
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.addMembershipDomain(context.get("operator"), {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
     );
   });
 
@@ -976,12 +1274,24 @@ export function createApp(
       }
 
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
-      return executeCommand(context, () =>
-        runtime.disableMembershipDomain(context.get("operator"), {
-          ...input,
-          domain: context.req.param("domain"),
-          correlationId: context.get("requestId"),
-        }),
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:membership-domains:write",
+          name: "membership-domain.disable",
+          version: 1,
+          targetType: "membership_domain",
+          targetId: context.req.param("domain"),
+          payload: input,
+          reason: input.reason,
+        },
+        () =>
+          runtime.disableMembershipDomain(context.get("operator"), {
+            ...input,
+            domain: context.req.param("domain"),
+            correlationId: context.get("requestId"),
+          }),
       );
     },
   );
@@ -2037,6 +2347,67 @@ function readReason(value: unknown): string | null {
   return reason !== null && reason.length >= 8 ? reason : null;
 }
 
+function parsePlatformAuditQuery(
+  context: Context<AppEnvironment>,
+): PlatformAuditQuery | null {
+  const query = context.req.query();
+  const actorId = readOptionalQueryValue(query.actorId, 36);
+  const eventType = readOptionalQueryValue(query.eventType, 128);
+  const targetType = readOptionalQueryValue(query.targetType, 128);
+  const targetId = readOptionalQueryValue(query.targetId, 256);
+  const correlationId = readOptionalQueryValue(query.correlationId, 36);
+  const commandName = readOptionalQueryValue(query.commandName, 128);
+  const from = readOptionalQueryValue(query.from, 40);
+  const to = readOptionalQueryValue(query.to, 40);
+  const cursor = readOptionalQueryValue(query.cursor, 256);
+  const outcome = query.outcome;
+  const limit = query.limit;
+  if (
+    [
+      actorId,
+      eventType,
+      targetType,
+      targetId,
+      correlationId,
+      commandName,
+      from,
+      to,
+      cursor,
+    ].some((value) => value === false) ||
+    (outcome !== undefined &&
+      outcome !== "succeeded" &&
+      outcome !== "rejected" &&
+      outcome !== "failed") ||
+    (limit !== undefined && !/^[1-9][0-9]{0,2}$/u.test(limit))
+  ) {
+    return null;
+  }
+  return {
+    ...(typeof actorId === "string" ? { actorId } : {}),
+    ...(typeof eventType === "string" ? { eventType } : {}),
+    ...(typeof targetType === "string" ? { targetType } : {}),
+    ...(typeof targetId === "string" ? { targetId } : {}),
+    ...(typeof correlationId === "string" ? { correlationId } : {}),
+    ...(typeof commandName === "string" ? { commandName } : {}),
+    ...(outcome === undefined ? {} : { outcome }),
+    ...(typeof from === "string" ? { from } : {}),
+    ...(typeof to === "string" ? { to } : {}),
+    ...(typeof cursor === "string" ? { cursor } : {}),
+    ...(limit === undefined ? {} : { limit: Number(limit) }),
+  };
+}
+
+function readOptionalQueryValue(
+  value: string | undefined,
+  maximumLength: number,
+): string | undefined | false {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= maximumLength
+    ? normalized
+    : false;
+}
+
 function readTrimmedString(value: unknown, maximumLength: number) {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -2076,8 +2447,24 @@ function capabilityRequired(context: Context<AppEnvironment>) {
   );
 }
 
+interface PlatformCommandRequest {
+  readonly requiredCapability: string;
+  readonly name: string;
+  readonly version: number;
+  readonly targetType: string;
+  readonly targetId: string;
+  readonly expectedTargetVersion?: number | null;
+  readonly payload: unknown;
+  readonly sensitivePayloadKeys?: ReadonlyArray<string>;
+  readonly reason: string;
+  readonly approvalReference?: string | null;
+  readonly evidenceReferences?: ReadonlyArray<string>;
+}
+
 async function executeCommand(
   context: Context<AppEnvironment>,
+  runtime: AuthenticationRuntime,
+  request: PlatformCommandRequest,
   command: () => Promise<{
     readonly outcome: "created" | "already_exists" | "updated" | "unchanged";
     readonly id?: string;
@@ -2086,149 +2473,288 @@ async function executeCommand(
     readonly revisionNumber?: number;
   }>,
 ) {
+  const actor = context.get("operator");
+  const correlationId = context.get("requestId");
+  let begun: PlatformCommandBeginResult;
+
   try {
-    const result = await command();
-    return context.json(result, result.outcome === "created" ? 201 : 200);
+    begun = await runtime.beginPlatformCommand({
+      actor,
+      requiredCapability: request.requiredCapability,
+      name: request.name,
+      version: request.version,
+      targetType: request.targetType,
+      targetId: request.targetId,
+      ...(request.expectedTargetVersion === undefined
+        ? {}
+        : { expectedTargetVersion: request.expectedTargetVersion }),
+      safePayload: toSafeCommandPayload(
+        request.payload,
+        new Set(request.sensitivePayloadKeys ?? []),
+      ),
+      idempotencyKey: context.req.header("idempotency-key") ?? correlationId,
+      correlationId,
+      reason: request.reason,
+      ...(request.approvalReference === undefined
+        ? {}
+        : { approvalReference: request.approvalReference }),
+      ...(request.evidenceReferences === undefined
+        ? {}
+        : { evidenceReferences: request.evidenceReferences }),
+    });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "";
-
-    if (reason === "recent_step_up_required") {
+    if (error instanceof PlatformCommandRejectedError) {
       return context.json(
         {
-          code: reason,
-          message: "Sign in again before making this sensitive change.",
-          requestId: context.get("requestId"),
-        },
-        403,
-      );
-    }
-
-    if (reason === "operator_command_forbidden") {
-      return capabilityRequired(context);
-    }
-
-    if (error instanceof OnboardingCommandRejectedError) {
-      return context.json(
-        {
-          code: "command_rejected",
+          code: "command_envelope_rejected",
           reason: error.reason,
-          message: "The requested administrative change was not accepted.",
-          requestId: context.get("requestId"),
+          message: "The command envelope is invalid or unauthorized.",
+          requestId: correlationId,
         },
-        409,
+        error.reason === "operator_command_forbidden" ? 403 : 400,
       );
     }
-
-    if (error instanceof PlatformConfigurationRejectedError) {
-      return context.json(
-        {
-          code: "configuration_change_rejected",
-          reason: error.reason,
-          message: "The requested configuration change was not accepted.",
-          requestId: context.get("requestId"),
-        },
-        409,
-      );
-    }
-
-    if (error instanceof PlatformSecretProviderError) {
-      return context.json(
-        {
-          code: "secret_provider_unavailable",
-          reason: error.reason,
-          message:
-            error.reason === "unconfigured"
-              ? "The platform secret provider is not configured."
-              : "The platform secret provider did not complete the request.",
-          requestId: context.get("requestId"),
-        },
-        error.reason === "unconfigured" ? 503 : 502,
-      );
-    }
-
-    if (error instanceof PlatformSecretCommandRejectedError) {
-      return context.json(
-        {
-          code: "secret_change_rejected",
-          reason: error.reason,
-          message: "The requested secret lifecycle change was not accepted.",
-          requestId: context.get("requestId"),
-        },
-        409,
-      );
-    }
-
-    if (error instanceof ModelCatalogueCommandRejectedError) {
-      return context.json(
-        {
-          code: "model_catalogue_change_rejected",
-          reason: error.reason,
-          message: "The requested model catalogue change was not accepted.",
-          requestId: context.get("requestId"),
-        },
-        409,
-      );
-    }
-
-    if (error instanceof ModelRoutingCommandRejectedError) {
-      return context.json(
-        {
-          code: "model_routing_change_rejected",
-          reason: error.reason,
-          message: "The requested model routing change was not accepted.",
-          requestId: context.get("requestId"),
-        },
-        409,
-      );
-    }
-
-    if (error instanceof PlatformIntegrationCommandRejectedError) {
-      return context.json(
-        {
-          code: "integration_change_rejected",
-          reason: error.reason,
-          message:
-            "The requested integration registry change was not accepted.",
-          requestId: context.get("requestId"),
-        },
-        409,
-      );
-    }
-
-    if (error instanceof PlatformAdapterCommandRejectedError) {
-      return context.json(
-        {
-          code: "adapter_change_rejected",
-          reason: error.reason,
-          message: "The requested adapter release change was not accepted.",
-          requestId: context.get("requestId"),
-        },
-        409,
-      );
-    }
-
-    if (error instanceof PlatformFeatureFlagCommandRejectedError) {
-      return context.json(
-        {
-          code: "feature_flag_change_rejected",
-          reason: error.reason,
-          message: "The requested feature flag change was not accepted.",
-          requestId: context.get("requestId"),
-        },
-        409,
-      );
-    }
-
-    if (
-      reason.startsWith("invalid_") ||
-      reason.endsWith("_required") ||
-      reason === "verification_secret_too_short"
-    ) {
-      return invalidRequest(context);
-    }
-
     throw error;
   }
+
+  if (begun.state === "replayed") {
+    return jsonResponse(
+      requireJsonObject(begun.result.responseBody),
+      begun.result.responseStatus,
+    );
+  }
+  if (begun.state === "in_progress") {
+    return context.json(
+      {
+        code: "command_in_progress",
+        message: "An identical command is still being processed.",
+        commandId: begun.commandId,
+        requestId: correlationId,
+      },
+      409,
+    );
+  }
+  if (begun.state === "conflict") {
+    return context.json(
+      {
+        code: "idempotency_key_conflict",
+        message: "This idempotency key is already bound to different input.",
+        commandId: begun.commandId,
+        requestId: correlationId,
+      },
+      409,
+    );
+  }
+
+  try {
+    const result = await command();
+    const responseStatus = result.outcome === "created" ? 201 : 200;
+    await runtime.completePlatformCommand({
+      commandId: begun.commandId,
+      actor,
+      targetType: request.targetType,
+      targetId: request.targetId,
+      correlationId,
+      reason: request.reason,
+      outcome: "succeeded",
+      responseStatus,
+      responseBody: result,
+    });
+    return context.json(result, responseStatus);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "";
+    const mapped = mapCommandError(error, reason, correlationId);
+    await runtime.completePlatformCommand({
+      commandId: begun.commandId,
+      actor,
+      targetType: request.targetType,
+      targetId: request.targetId,
+      correlationId,
+      reason: request.reason,
+      outcome: mapped?.outcome ?? "failed",
+      responseStatus: mapped?.status ?? 500,
+      responseBody: mapped?.body ?? {
+        code: "command_failed",
+        message: "The command failed unexpectedly.",
+        requestId: correlationId,
+      },
+    });
+    if (mapped === null) throw error;
+    return jsonResponse(mapped.body, mapped.status);
+  }
+}
+
+function mapCommandError(error: unknown, reason: string, requestId: string) {
+  if (reason === "recent_step_up_required")
+    return commandError(
+      403,
+      "rejected",
+      reason,
+      "Sign in again before making this sensitive change.",
+      requestId,
+    );
+  if (reason === "operator_command_forbidden")
+    return commandError(
+      403,
+      "rejected",
+      "operator_capability_required",
+      "The operator lacks the required platform capability.",
+      requestId,
+    );
+  if (error instanceof OnboardingCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "command_rejected",
+      "The requested administrative change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof PlatformConfigurationRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "configuration_change_rejected",
+      "The requested configuration change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof PlatformSecretProviderError)
+    return commandError(
+      error.reason === "unconfigured" ? 503 : 502,
+      "failed",
+      "secret_provider_unavailable",
+      error.reason === "unconfigured"
+        ? "The platform secret provider is not configured."
+        : "The platform secret provider did not complete the request.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof PlatformSecretCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "secret_change_rejected",
+      "The requested secret lifecycle change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof ModelCatalogueCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "model_catalogue_change_rejected",
+      "The requested model catalogue change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof ModelRoutingCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "model_routing_change_rejected",
+      "The requested model routing change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof PlatformIntegrationCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "integration_change_rejected",
+      "The requested integration registry change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof PlatformAdapterCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "adapter_change_rejected",
+      "The requested adapter release change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof PlatformFeatureFlagCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "feature_flag_change_rejected",
+      "The requested feature flag change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (
+    reason.startsWith("invalid_") ||
+    reason.endsWith("_required") ||
+    reason === "verification_secret_too_short"
+  )
+    return commandError(
+      400,
+      "rejected",
+      "invalid_request",
+      "The request body is invalid.",
+      requestId,
+    );
+  return null;
+}
+
+function commandError(
+  status: number,
+  outcome: "rejected" | "failed",
+  code: string,
+  message: string,
+  requestId: string,
+  reason?: string,
+) {
+  return {
+    status,
+    outcome,
+    body: {
+      code,
+      ...(reason === undefined ? {} : { reason }),
+      message,
+      requestId,
+    },
+  };
+}
+
+function requireJsonObject(value: PlatformJsonValue) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("platform_command_result_invalid");
+  }
+  return value;
+}
+
+function jsonResponse(body: PlatformJsonValue, status: number) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
+}
+
+function toSafeCommandPayload(
+  value: unknown,
+  sensitiveKeys: ReadonlySet<string>,
+): PlatformJsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value))
+      throw new PlatformCommandRejectedError("command_payload_invalid");
+    return value;
+  }
+  if (Array.isArray(value))
+    return value.map((item) => toSafeCommandPayload(item, sensitiveKeys));
+  if (!isRecord(value))
+    throw new PlatformCommandRejectedError("command_payload_invalid");
+  const output: Record<string, PlatformJsonValue> = {};
+  for (const [key, item] of Object.entries(value)) {
+    output[key] = sensitiveKeys.has(key)
+      ? "[redacted]"
+      : toSafeCommandPayload(item, sensitiveKeys);
+  }
+  return output;
 }
 
 export const app = createApp();

@@ -23,6 +23,7 @@ import type {
   PlatformConfigurationValidation,
   PlatformConfigurationValue,
   PlatformFeatureFlagRule,
+  PlatformJsonValue,
 } from "@atharvan/domain";
 
 export const authSchema = pgSchema("auth");
@@ -168,6 +169,12 @@ export const platformConfigurationEnvironment = pgEnum(
   "platform_configuration_environment",
   ["development", "production", "test"],
 );
+
+export const platformCommandOutcome = pgEnum("platform_command_outcome", [
+  "succeeded",
+  "rejected",
+  "failed",
+]);
 
 export const platformSecretReferenceStatus = pgEnum(
   "platform_secret_reference_status",
@@ -1804,11 +1811,125 @@ export const platformFeatureFlagRevisions = pgTable(
   ],
 );
 
+export const platformCommands = pgTable(
+  "platform_commands",
+  {
+    id: uuid("id").primaryKey(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    name: text("name").notNull(),
+    version: integer("version").notNull(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    targetType: text("target_type").notNull(),
+    targetId: text("target_id").notNull(),
+    expectedTargetVersion: integer("expected_target_version"),
+    payloadFingerprint: text("payload_fingerprint").notNull(),
+    idempotencyFingerprint: text("idempotency_fingerprint").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    reason: text("reason").notNull(),
+    approvalReference: text("approval_reference"),
+    evidenceReferences: text("evidence_references")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_commands_idempotency_unique").on(
+      table.environment,
+      table.actorId,
+      table.name,
+      table.version,
+      table.idempotencyFingerprint,
+    ),
+    uniqueIndex("platform_commands_correlation_unique").on(table.correlationId),
+    index("platform_commands_actor_requested_idx").on(
+      table.actorId,
+      table.requestedAt,
+    ),
+    index("platform_commands_target_requested_idx").on(
+      table.targetType,
+      table.targetId,
+      table.requestedAt,
+    ),
+    index("platform_commands_name_requested_idx").on(
+      table.name,
+      table.requestedAt,
+    ),
+    check(
+      "platform_commands_name_normalized",
+      sql`${table.name} = lower(${table.name}) AND ${table.name} ~ '^[a-z][a-z0-9_.-]{2,127}$'`,
+    ),
+    check(
+      "platform_commands_target_type_normalized",
+      sql`${table.targetType} = lower(${table.targetType}) AND ${table.targetType} ~ '^[a-z][a-z0-9_.-]{2,127}$'`,
+    ),
+    check("platform_commands_version_positive", sql`${table.version} > 0`),
+    check(
+      "platform_commands_expected_version_positive",
+      sql`${table.expectedTargetVersion} IS NULL OR ${table.expectedTargetVersion} > 0`,
+    ),
+    check(
+      "platform_commands_payload_fingerprint_sha256",
+      sql`${table.payloadFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "platform_commands_idempotency_fingerprint_sha256",
+      sql`${table.idempotencyFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "platform_commands_reason_nonempty",
+      sql`length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+    check(
+      "platform_commands_evidence_bounded",
+      sql`cardinality(${table.evidenceReferences}) <= 20`,
+    ),
+  ],
+);
+
+export const platformCommandResults = pgTable(
+  "platform_command_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    commandId: uuid("command_id")
+      .notNull()
+      .references(() => platformCommands.id, { onDelete: "restrict" }),
+    outcome: platformCommandOutcome("outcome").notNull(),
+    responseStatus: integer("response_status").notNull(),
+    responseBody: jsonb("response_body").$type<PlatformJsonValue>().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_command_results_command_unique").on(table.commandId),
+    index("platform_command_results_outcome_completed_idx").on(
+      table.outcome,
+      table.completedAt,
+    ),
+    check(
+      "platform_command_results_http_status",
+      sql`${table.responseStatus} BETWEEN 100 AND 599`,
+    ),
+    check(
+      "platform_command_results_body_object",
+      sql`jsonb_typeof(${table.responseBody}) = 'object'`,
+    ),
+  ],
+);
+
 export const auditEvents = pgTable(
   "audit_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     actorId: uuid("actor_id").references(() => operators.id),
+    commandId: uuid("command_id").references(() => platformCommands.id, {
+      onDelete: "restrict",
+    }),
     eventType: text("event_type").notNull(),
     targetType: text("target_type").notNull(),
     targetId: text("target_id").notNull(),
@@ -1826,6 +1947,9 @@ export const auditEvents = pgTable(
       .on(table.actorId)
       .where(sql`${table.actorId} IS NOT NULL`),
     index("audit_events_target_idx").on(table.targetType, table.targetId),
+    index("audit_events_command_idx")
+      .on(table.commandId)
+      .where(sql`${table.commandId} IS NOT NULL`),
     index("audit_events_correlation_idx").on(table.correlationId),
     index("audit_events_occurred_at_idx").on(table.occurredAt),
   ],

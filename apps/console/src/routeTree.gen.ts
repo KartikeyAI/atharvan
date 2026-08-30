@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdaptersRouteImport } from './routes/adapters'
+import { Route as AuditRouteImport } from './routes/audit'
 import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
@@ -30,6 +31,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdaptersRoute = AdaptersRouteImport.update({
   id: '/adapters',
   path: '/adapters',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuditRoute = AuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
@@ -86,6 +92,7 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/adapters': typeof AdaptersRoute
+  '/audit': typeof AuditRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -100,6 +107,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/adapters': typeof AdaptersRoute
+  '/audit': typeof AuditRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -115,6 +123,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/adapters': typeof AdaptersRoute
+  '/audit': typeof AuditRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/adapters'
+    | '/audit'
     | '/feature-flags'
     | '/integrations'
     | '/login'
@@ -145,6 +155,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/adapters'
+    | '/audit'
     | '/feature-flags'
     | '/integrations'
     | '/login'
@@ -159,6 +170,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/adapters'
+    | '/audit'
     | '/feature-flags'
     | '/integrations'
     | '/login'
@@ -174,6 +186,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdaptersRoute: typeof AdaptersRoute
+  AuditRoute: typeof AuditRoute
   FeatureFlagsRoute: typeof FeatureFlagsRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
@@ -200,6 +213,13 @@ declare module '@tanstack/react-router' {
       path: '/adapters'
       fullPath: '/adapters'
       preLoaderRoute: typeof AdaptersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audit': {
+      id: '/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/feature-flags': {
@@ -278,6 +298,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdaptersRoute: AdaptersRoute,
+  AuditRoute: AuditRoute,
   FeatureFlagsRoute: FeatureFlagsRoute,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,

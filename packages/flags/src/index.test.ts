@@ -8,7 +8,7 @@ const now = new Date("2026-08-30T16:00:00.000Z");
 const actor = {
   operatorId: "00000000-0000-4000-8000-000000000101",
   isSuperAdministrator: false,
-  effectiveCapabilities: ["platform:flags:write"],
+  effectiveCapabilities: ["platform:feature-flags:write"],
   stepUpVerifiedAt: now,
 };
 

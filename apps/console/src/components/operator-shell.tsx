@@ -83,7 +83,7 @@ const navigation: ReadonlyArray<{
     available: false,
   },
   { label: "Incidents", href: "/incidents", icon: SirenIcon, available: false },
-  { label: "Audit", href: "/audit", icon: FileClockIcon, available: false },
+  { label: "Audit", href: "/audit", icon: FileClockIcon, available: true },
   {
     label: "Settings",
     href: "/settings",
