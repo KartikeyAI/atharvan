@@ -44,7 +44,7 @@ import type {
   CustomerWorkspaceSummary,
 } from "@atharvan/domain";
 
-export const Route = createFileRoute("/customers")({
+export const Route = createFileRoute("/_authenticated/customers")({
   component: CustomersPage,
 });
 

@@ -25,7 +25,7 @@ import type {
   PlatformConfigurationValue,
 } from "@atharvan/domain";
 
-export const Route = createFileRoute("/settings")({
+export const Route = createFileRoute("/_authenticated/settings")({
   component: PlatformSettingsPage,
 });
 

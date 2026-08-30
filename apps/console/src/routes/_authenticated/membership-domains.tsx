@@ -21,7 +21,7 @@ import {
   useApiResource,
 } from "@/lib/api";
 
-export const Route = createFileRoute("/membership-domains")({
+export const Route = createFileRoute("/_authenticated/membership-domains")({
   component: MembershipDomainsPage,
 });
 

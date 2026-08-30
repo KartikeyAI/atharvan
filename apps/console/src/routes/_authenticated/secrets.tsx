@@ -23,7 +23,7 @@ import {
 } from "@/lib/api";
 import type { PlatformSecretReferenceEntry } from "@atharvan/domain";
 
-export const Route = createFileRoute("/secrets")({
+export const Route = createFileRoute("/_authenticated/secrets")({
   component: PlatformSecretsPage,
 });
 

@@ -13,7 +13,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { OperatorShell } from "@/components/operator-shell";
 import { unknownPlatformOverview } from "@atharvan/domain";
 
-export const Route = createFileRoute("/")({ component: PlatformOverview });
+export const Route = createFileRoute("/_authenticated/")({
+  component: PlatformOverview,
+});
 
 const metrics: ReadonlyArray<{
   readonly label: string;

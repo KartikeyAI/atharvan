@@ -24,7 +24,7 @@ import {
 } from "@/lib/api";
 import type { OperatorRoleDefinitionEntry } from "@atharvan/domain";
 
-export const Route = createFileRoute("/operators")({
+export const Route = createFileRoute("/_authenticated/operators")({
   component: OperatorsPage,
 });
 

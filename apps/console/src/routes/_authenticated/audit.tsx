@@ -40,7 +40,9 @@ import type {
   PlatformCommandOutcome,
 } from "@atharvan/domain";
 
-export const Route = createFileRoute("/audit")({ component: AuditPage });
+export const Route = createFileRoute("/_authenticated/audit")({
+  component: AuditPage,
+});
 
 interface AuditFilters {
   readonly actorId: string;

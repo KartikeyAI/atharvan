@@ -40,7 +40,7 @@ import type {
   PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
 
-export const Route = createFileRoute("/integrations")({
+export const Route = createFileRoute("/_authenticated/integrations")({
   component: IntegrationsPage,
 });
 

@@ -9,49 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AdaptersRouteImport } from './routes/adapters'
-import { Route as AuditRouteImport } from './routes/audit'
-import { Route as CustomersRouteImport } from './routes/customers'
-import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
-import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as MembershipDomainsRouteImport } from './routes/membership-domains'
-import { Route as ModelRoutingRouteImport } from './routes/model-routing'
-import { Route as ModelsRouteImport } from './routes/models'
-import { Route as OperatorsRouteImport } from './routes/operators'
-import { Route as SecretsRouteImport } from './routes/secrets'
-import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedAdaptersRouteImport } from './routes/_authenticated/adapters'
+import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
+import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
+import { Route as AuthenticatedFeatureFlagsRouteImport } from './routes/_authenticated/feature-flags'
+import { Route as AuthenticatedIntegrationsRouteImport } from './routes/_authenticated/integrations'
+import { Route as AuthenticatedMembershipDomainsRouteImport } from './routes/_authenticated/membership-domains'
+import { Route as AuthenticatedModelRoutingRouteImport } from './routes/_authenticated/model-routing'
+import { Route as AuthenticatedModelsRouteImport } from './routes/_authenticated/models'
+import { Route as AuthenticatedOperatorsRouteImport } from './routes/_authenticated/operators'
+import { Route as AuthenticatedSecretsRouteImport } from './routes/_authenticated/secrets'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AdaptersRoute = AdaptersRouteImport.update({
-  id: '/adapters',
-  path: '/adapters',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuditRoute = AuditRouteImport.update({
-  id: '/audit',
-  path: '/audit',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CustomersRoute = CustomersRouteImport.update({
-  id: '/customers',
-  path: '/customers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
-  id: '/feature-flags',
-  path: '/feature-flags',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IntegrationsRoute = IntegrationsRouteImport.update({
-  id: '/integrations',
-  path: '/integrations',
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -59,35 +34,69 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MembershipDomainsRoute = MembershipDomainsRouteImport.update({
-  id: '/membership-domains',
-  path: '/membership-domains',
-  getParentRoute: () => rootRouteImport,
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const ModelRoutingRoute = ModelRoutingRouteImport.update({
-  id: '/model-routing',
-  path: '/model-routing',
-  getParentRoute: () => rootRouteImport,
+const AuthenticatedAdaptersRoute = AuthenticatedAdaptersRouteImport.update({
+  id: '/adapters',
+  path: '/adapters',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const ModelsRoute = ModelsRouteImport.update({
+const AuthenticatedAuditRoute = AuthenticatedAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedCustomersRoute = AuthenticatedCustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedFeatureFlagsRoute =
+  AuthenticatedFeatureFlagsRouteImport.update({
+    id: '/feature-flags',
+    path: '/feature-flags',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedIntegrationsRoute =
+  AuthenticatedIntegrationsRouteImport.update({
+    id: '/integrations',
+    path: '/integrations',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedMembershipDomainsRoute =
+  AuthenticatedMembershipDomainsRouteImport.update({
+    id: '/membership-domains',
+    path: '/membership-domains',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedModelRoutingRoute =
+  AuthenticatedModelRoutingRouteImport.update({
+    id: '/model-routing',
+    path: '/model-routing',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedModelsRoute = AuthenticatedModelsRouteImport.update({
   id: '/models',
   path: '/models',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const OperatorsRoute = OperatorsRouteImport.update({
+const AuthenticatedOperatorsRoute = AuthenticatedOperatorsRouteImport.update({
   id: '/operators',
   path: '/operators',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const SecretsRoute = SecretsRouteImport.update({
+const AuthenticatedSecretsRoute = AuthenticatedSecretsRouteImport.update({
   id: '/secrets',
   path: '/secrets',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const SettingsRoute = SettingsRouteImport.update({
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
@@ -96,64 +105,65 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/adapters': typeof AdaptersRoute
-  '/audit': typeof AuditRoute
-  '/customers': typeof CustomersRoute
-  '/feature-flags': typeof FeatureFlagsRoute
-  '/integrations': typeof IntegrationsRoute
+  '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
-  '/membership-domains': typeof MembershipDomainsRoute
-  '/model-routing': typeof ModelRoutingRoute
-  '/models': typeof ModelsRoute
-  '/operators': typeof OperatorsRoute
-  '/secrets': typeof SecretsRoute
-  '/settings': typeof SettingsRoute
+  '/adapters': typeof AuthenticatedAdaptersRoute
+  '/audit': typeof AuthenticatedAuditRoute
+  '/customers': typeof AuthenticatedCustomersRoute
+  '/feature-flags': typeof AuthenticatedFeatureFlagsRoute
+  '/integrations': typeof AuthenticatedIntegrationsRoute
+  '/membership-domains': typeof AuthenticatedMembershipDomainsRoute
+  '/model-routing': typeof AuthenticatedModelRoutingRoute
+  '/models': typeof AuthenticatedModelsRoute
+  '/operators': typeof AuthenticatedOperatorsRoute
+  '/secrets': typeof AuthenticatedSecretsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/adapters': typeof AdaptersRoute
-  '/audit': typeof AuditRoute
-  '/customers': typeof CustomersRoute
-  '/feature-flags': typeof FeatureFlagsRoute
-  '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
-  '/membership-domains': typeof MembershipDomainsRoute
-  '/model-routing': typeof ModelRoutingRoute
-  '/models': typeof ModelsRoute
-  '/operators': typeof OperatorsRoute
-  '/secrets': typeof SecretsRoute
-  '/settings': typeof SettingsRoute
+  '/adapters': typeof AuthenticatedAdaptersRoute
+  '/audit': typeof AuthenticatedAuditRoute
+  '/customers': typeof AuthenticatedCustomersRoute
+  '/feature-flags': typeof AuthenticatedFeatureFlagsRoute
+  '/integrations': typeof AuthenticatedIntegrationsRoute
+  '/membership-domains': typeof AuthenticatedMembershipDomainsRoute
+  '/model-routing': typeof AuthenticatedModelRoutingRoute
+  '/models': typeof AuthenticatedModelsRoute
+  '/operators': typeof AuthenticatedOperatorsRoute
+  '/secrets': typeof AuthenticatedSecretsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
+  '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/adapters': typeof AdaptersRoute
-  '/audit': typeof AuditRoute
-  '/customers': typeof CustomersRoute
-  '/feature-flags': typeof FeatureFlagsRoute
-  '/integrations': typeof IntegrationsRoute
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
-  '/membership-domains': typeof MembershipDomainsRoute
-  '/model-routing': typeof ModelRoutingRoute
-  '/models': typeof ModelsRoute
-  '/operators': typeof OperatorsRoute
-  '/secrets': typeof SecretsRoute
-  '/settings': typeof SettingsRoute
+  '/_authenticated/adapters': typeof AuthenticatedAdaptersRoute
+  '/_authenticated/audit': typeof AuthenticatedAuditRoute
+  '/_authenticated/customers': typeof AuthenticatedCustomersRoute
+  '/_authenticated/feature-flags': typeof AuthenticatedFeatureFlagsRoute
+  '/_authenticated/integrations': typeof AuthenticatedIntegrationsRoute
+  '/_authenticated/membership-domains': typeof AuthenticatedMembershipDomainsRoute
+  '/_authenticated/model-routing': typeof AuthenticatedModelRoutingRoute
+  '/_authenticated/models': typeof AuthenticatedModelsRoute
+  '/_authenticated/operators': typeof AuthenticatedOperatorsRoute
+  '/_authenticated/secrets': typeof AuthenticatedSecretsRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
     | '/adapters'
     | '/audit'
     | '/customers'
     | '/feature-flags'
     | '/integrations'
-    | '/login'
     | '/membership-domains'
     | '/model-routing'
     | '/models'
@@ -163,13 +173,12 @@ export interface FileRouteTypes {
     | '/api/$'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/login'
     | '/adapters'
     | '/audit'
     | '/customers'
     | '/feature-flags'
     | '/integrations'
-    | '/login'
     | '/membership-domains'
     | '/model-routing'
     | '/models'
@@ -177,83 +186,39 @@ export interface FileRouteTypes {
     | '/secrets'
     | '/settings'
     | '/api/$'
+    | '/'
   id:
     | '__root__'
-    | '/'
-    | '/adapters'
-    | '/audit'
-    | '/customers'
-    | '/feature-flags'
-    | '/integrations'
+    | '/_authenticated'
     | '/login'
-    | '/membership-domains'
-    | '/model-routing'
-    | '/models'
-    | '/operators'
-    | '/secrets'
-    | '/settings'
+    | '/_authenticated/adapters'
+    | '/_authenticated/audit'
+    | '/_authenticated/customers'
+    | '/_authenticated/feature-flags'
+    | '/_authenticated/integrations'
+    | '/_authenticated/membership-domains'
+    | '/_authenticated/model-routing'
+    | '/_authenticated/models'
+    | '/_authenticated/operators'
+    | '/_authenticated/secrets'
+    | '/_authenticated/settings'
     | '/api/$'
+    | '/_authenticated/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  AdaptersRoute: typeof AdaptersRoute
-  AuditRoute: typeof AuditRoute
-  CustomersRoute: typeof CustomersRoute
-  FeatureFlagsRoute: typeof FeatureFlagsRoute
-  IntegrationsRoute: typeof IntegrationsRoute
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
-  MembershipDomainsRoute: typeof MembershipDomainsRoute
-  ModelRoutingRoute: typeof ModelRoutingRoute
-  ModelsRoute: typeof ModelsRoute
-  OperatorsRoute: typeof OperatorsRoute
-  SecretsRoute: typeof SecretsRoute
-  SettingsRoute: typeof SettingsRoute
   ApiSplatRoute: typeof ApiSplatRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/adapters': {
-      id: '/adapters'
-      path: '/adapters'
-      fullPath: '/adapters'
-      preLoaderRoute: typeof AdaptersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/audit': {
-      id: '/audit'
-      path: '/audit'
-      fullPath: '/audit'
-      preLoaderRoute: typeof AuditRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/customers': {
-      id: '/customers'
-      path: '/customers'
-      fullPath: '/customers'
-      preLoaderRoute: typeof CustomersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/feature-flags': {
-      id: '/feature-flags'
-      path: '/feature-flags'
-      fullPath: '/feature-flags'
-      preLoaderRoute: typeof FeatureFlagsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/integrations': {
-      id: '/integrations'
-      path: '/integrations'
-      fullPath: '/integrations'
-      preLoaderRoute: typeof IntegrationsRouteImport
+      preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -263,47 +228,89 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/membership-domains': {
-      id: '/membership-domains'
+    '/_authenticated/': {
+      id: '/_authenticated/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/adapters': {
+      id: '/_authenticated/adapters'
+      path: '/adapters'
+      fullPath: '/adapters'
+      preLoaderRoute: typeof AuthenticatedAdaptersRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/audit': {
+      id: '/_authenticated/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuthenticatedAuditRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/customers': {
+      id: '/_authenticated/customers'
+      path: '/customers'
+      fullPath: '/customers'
+      preLoaderRoute: typeof AuthenticatedCustomersRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/feature-flags': {
+      id: '/_authenticated/feature-flags'
+      path: '/feature-flags'
+      fullPath: '/feature-flags'
+      preLoaderRoute: typeof AuthenticatedFeatureFlagsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/integrations': {
+      id: '/_authenticated/integrations'
+      path: '/integrations'
+      fullPath: '/integrations'
+      preLoaderRoute: typeof AuthenticatedIntegrationsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/membership-domains': {
+      id: '/_authenticated/membership-domains'
       path: '/membership-domains'
       fullPath: '/membership-domains'
-      preLoaderRoute: typeof MembershipDomainsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedMembershipDomainsRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/model-routing': {
-      id: '/model-routing'
+    '/_authenticated/model-routing': {
+      id: '/_authenticated/model-routing'
       path: '/model-routing'
       fullPath: '/model-routing'
-      preLoaderRoute: typeof ModelRoutingRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedModelRoutingRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/models': {
-      id: '/models'
+    '/_authenticated/models': {
+      id: '/_authenticated/models'
       path: '/models'
       fullPath: '/models'
-      preLoaderRoute: typeof ModelsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedModelsRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/operators': {
-      id: '/operators'
+    '/_authenticated/operators': {
+      id: '/_authenticated/operators'
       path: '/operators'
       fullPath: '/operators'
-      preLoaderRoute: typeof OperatorsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedOperatorsRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/secrets': {
-      id: '/secrets'
+    '/_authenticated/secrets': {
+      id: '/_authenticated/secrets'
       path: '/secrets'
       fullPath: '/secrets'
-      preLoaderRoute: typeof SecretsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedSecretsRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/settings': {
-      id: '/settings'
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
       path: '/settings'
       fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/api/$': {
       id: '/api/$'
@@ -315,20 +322,43 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedRouteChildren {
+  AuthenticatedAdaptersRoute: typeof AuthenticatedAdaptersRoute
+  AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
+  AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
+  AuthenticatedFeatureFlagsRoute: typeof AuthenticatedFeatureFlagsRoute
+  AuthenticatedIntegrationsRoute: typeof AuthenticatedIntegrationsRoute
+  AuthenticatedMembershipDomainsRoute: typeof AuthenticatedMembershipDomainsRoute
+  AuthenticatedModelRoutingRoute: typeof AuthenticatedModelRoutingRoute
+  AuthenticatedModelsRoute: typeof AuthenticatedModelsRoute
+  AuthenticatedOperatorsRoute: typeof AuthenticatedOperatorsRoute
+  AuthenticatedSecretsRoute: typeof AuthenticatedSecretsRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+}
+
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedAdaptersRoute: AuthenticatedAdaptersRoute,
+  AuthenticatedAuditRoute: AuthenticatedAuditRoute,
+  AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
+  AuthenticatedFeatureFlagsRoute: AuthenticatedFeatureFlagsRoute,
+  AuthenticatedIntegrationsRoute: AuthenticatedIntegrationsRoute,
+  AuthenticatedMembershipDomainsRoute: AuthenticatedMembershipDomainsRoute,
+  AuthenticatedModelRoutingRoute: AuthenticatedModelRoutingRoute,
+  AuthenticatedModelsRoute: AuthenticatedModelsRoute,
+  AuthenticatedOperatorsRoute: AuthenticatedOperatorsRoute,
+  AuthenticatedSecretsRoute: AuthenticatedSecretsRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  AdaptersRoute: AdaptersRoute,
-  AuditRoute: AuditRoute,
-  CustomersRoute: CustomersRoute,
-  FeatureFlagsRoute: FeatureFlagsRoute,
-  IntegrationsRoute: IntegrationsRoute,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
-  MembershipDomainsRoute: MembershipDomainsRoute,
-  ModelRoutingRoute: ModelRoutingRoute,
-  ModelsRoute: ModelsRoute,
-  OperatorsRoute: OperatorsRoute,
-  SecretsRoute: SecretsRoute,
-  SettingsRoute: SettingsRoute,
   ApiSplatRoute: ApiSplatRoute,
 }
 export const routeTree = rootRouteImport

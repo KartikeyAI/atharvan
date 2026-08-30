@@ -41,7 +41,7 @@ import type {
   PlatformFeatureFlagRule,
 } from "@atharvan/domain";
 
-export const Route = createFileRoute("/feature-flags")({
+export const Route = createFileRoute("/_authenticated/feature-flags")({
   component: FeatureFlagsPage,
 });
 

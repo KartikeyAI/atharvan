@@ -44,7 +44,7 @@ import type {
   ModelRoutingPolicyEntry,
 } from "@atharvan/domain";
 
-export const Route = createFileRoute("/model-routing")({
+export const Route = createFileRoute("/_authenticated/model-routing")({
   component: ModelRoutingPage,
 });
 

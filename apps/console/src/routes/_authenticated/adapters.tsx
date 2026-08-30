@@ -38,7 +38,7 @@ import type {
   PlatformAdapterReleaseEntry,
 } from "@atharvan/domain";
 
-export const Route = createFileRoute("/adapters")({
+export const Route = createFileRoute("/_authenticated/adapters")({
   component: AdaptersPage,
 });
 
