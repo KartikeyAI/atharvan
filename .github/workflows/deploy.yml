@@ -83,6 +83,14 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      ATHARVAN_VERIFICATION_HMAC_SECRET: ${{ secrets.ATHARVAN_VERIFICATION_HMAC_SECRET }}
+      ATHARVAN_SUPER_ADMIN_EMAIL: ${{ secrets.ATHARVAN_SUPER_ADMIN_EMAIL }}
+      ATHARVAN_EMAIL_FROM: ${{ secrets.ATHARVAN_EMAIL_FROM }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID }}
+      CLOUDFLARE_SECRETS_STORE_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ID }}
+      CLOUDFLARE_SECRETS_STORE_API_TOKEN: ${{ secrets.CLOUDFLARE_SECRETS_STORE_API_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -102,6 +110,51 @@ jobs:
       - name: Apply development database migrations
         run: pnpm db:migrate
 
+      - name: Synchronize development Worker runtime secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_secrets=(
+            DATABASE_URL
+            BETTER_AUTH_SECRET
+            ATHARVAN_VERIFICATION_HMAC_SECRET
+            ATHARVAN_SUPER_ADMIN_EMAIL
+            ATHARVAN_EMAIL_FROM
+          )
+          optional_secrets=(
+            RESEND_API_KEY
+            CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID
+            CLOUDFLARE_SECRETS_STORE_ID
+            CLOUDFLARE_SECRETS_STORE_API_TOKEN
+          )
+          secret_store_values=0
+          for secret_name in \
+            CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID \
+            CLOUDFLARE_SECRETS_STORE_ID \
+            CLOUDFLARE_SECRETS_STORE_API_TOKEN; do
+            if [[ -n "${!secret_name:-}" ]]; then
+              secret_store_values=$((secret_store_values + 1))
+            fi
+          done
+          if [[ "$secret_store_values" -ne 0 && "$secret_store_values" -ne 3 ]]; then
+            echo "::error::Cloudflare Secrets Store configuration must contain all three values."
+            exit 1
+          fi
+          for secret_name in "${required_secrets[@]}"; do
+            secret_value="${!secret_name:-}"
+            if [[ -z "$secret_value" ]]; then
+              echo "::error::$secret_name is required in the development environment."
+              exit 1
+            fi
+            printf '%s' "$secret_value" | pnpm --filter @atharvan/worker exec wrangler secret put "$secret_name" --env dev
+          done
+          for secret_name in "${optional_secrets[@]}"; do
+            secret_value="${!secret_name:-}"
+            if [[ -n "$secret_value" ]]; then
+              printf '%s' "$secret_value" | pnpm --filter @atharvan/worker exec wrangler secret put "$secret_name" --env dev
+            fi
+          done
+
       - name: Deploy development control-plane worker
         run: pnpm --filter @atharvan/worker deploy:dev
 
@@ -118,6 +171,14 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      ATHARVAN_VERIFICATION_HMAC_SECRET: ${{ secrets.ATHARVAN_VERIFICATION_HMAC_SECRET }}
+      ATHARVAN_SUPER_ADMIN_EMAIL: ${{ secrets.ATHARVAN_SUPER_ADMIN_EMAIL }}
+      ATHARVAN_EMAIL_FROM: ${{ secrets.ATHARVAN_EMAIL_FROM }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID }}
+      CLOUDFLARE_SECRETS_STORE_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ID }}
+      CLOUDFLARE_SECRETS_STORE_API_TOKEN: ${{ secrets.CLOUDFLARE_SECRETS_STORE_API_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -136,6 +197,51 @@ jobs:
 
       - name: Apply production database migrations
         run: pnpm db:migrate
+
+      - name: Synchronize production Worker runtime secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_secrets=(
+            DATABASE_URL
+            BETTER_AUTH_SECRET
+            ATHARVAN_VERIFICATION_HMAC_SECRET
+            ATHARVAN_SUPER_ADMIN_EMAIL
+            ATHARVAN_EMAIL_FROM
+          )
+          optional_secrets=(
+            RESEND_API_KEY
+            CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID
+            CLOUDFLARE_SECRETS_STORE_ID
+            CLOUDFLARE_SECRETS_STORE_API_TOKEN
+          )
+          secret_store_values=0
+          for secret_name in \
+            CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID \
+            CLOUDFLARE_SECRETS_STORE_ID \
+            CLOUDFLARE_SECRETS_STORE_API_TOKEN; do
+            if [[ -n "${!secret_name:-}" ]]; then
+              secret_store_values=$((secret_store_values + 1))
+            fi
+          done
+          if [[ "$secret_store_values" -ne 0 && "$secret_store_values" -ne 3 ]]; then
+            echo "::error::Cloudflare Secrets Store configuration must contain all three values."
+            exit 1
+          fi
+          for secret_name in "${required_secrets[@]}"; do
+            secret_value="${!secret_name:-}"
+            if [[ -z "$secret_value" ]]; then
+              echo "::error::$secret_name is required in the production environment."
+              exit 1
+            fi
+            printf '%s' "$secret_value" | pnpm --filter @atharvan/worker exec wrangler secret put "$secret_name" --env production
+          done
+          for secret_name in "${optional_secrets[@]}"; do
+            secret_value="${!secret_name:-}"
+            if [[ -n "$secret_value" ]]; then
+              printf '%s' "$secret_value" | pnpm --filter @atharvan/worker exec wrangler secret put "$secret_name" --env production
+            fi
+          done
 
       - name: Deploy production control-plane worker
         run: pnpm --filter @atharvan/worker deploy:production

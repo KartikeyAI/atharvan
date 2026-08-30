@@ -13,7 +13,7 @@
       "name": "atharvan-control-plane-dev",
       "vars": {
         "ATHARVAN_ENVIRONMENT": "development",
-        "ATHARVAN_PUBLIC_ORIGIN": "https://dev.atharvan.invalid",
+        "ATHARVAN_PUBLIC_ORIGIN": "https://atharvan-console-dev.rokad.workers.dev",
       },
     },
     "production": {
