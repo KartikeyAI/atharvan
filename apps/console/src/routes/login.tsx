@@ -1,6 +1,6 @@
 import { BlocksIcon, KeyRoundIcon, MailIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/api";
-import { resolveConsoleSession, sanitizeReturnTo } from "@/lib/session";
+import { sanitizeReturnTo } from "@/lib/session";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -17,12 +17,6 @@ export const Route = createFileRoute("/login")({
         ? undefined
         : sanitizeReturnTo(search.returnTo),
   }),
-  beforeLoad: async ({ search }) => {
-    const session = await resolveConsoleSession();
-    if (session.authenticated) {
-      throw redirect({ href: sanitizeReturnTo(search.returnTo) });
-    }
-  },
   component: OperatorLogin,
 });
 
