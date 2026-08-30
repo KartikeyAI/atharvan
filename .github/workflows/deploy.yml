@@ -102,11 +102,11 @@ jobs:
       - name: Apply development database migrations
         run: pnpm db:migrate
 
-      - name: Deploy development console
-        run: pnpm --filter @atharvan/console deploy:dev
-
       - name: Deploy development control-plane worker
         run: pnpm --filter @atharvan/worker deploy:dev
+
+      - name: Deploy development console
+        run: pnpm --filter @atharvan/console deploy:dev
 
   deploy-production:
     if: github.ref == 'refs/heads/main'
@@ -137,8 +137,8 @@ jobs:
       - name: Apply production database migrations
         run: pnpm db:migrate
 
-      - name: Deploy production console
-        run: pnpm --filter @atharvan/console deploy:production
-
       - name: Deploy production control-plane worker
         run: pnpm --filter @atharvan/worker deploy:production
+
+      - name: Deploy production console
+        run: pnpm --filter @atharvan/console deploy:production

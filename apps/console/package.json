@@ -6,8 +6,8 @@
   "scripts": {
     "build": "vite build",
     "cf-typegen": "wrangler types",
-    "deploy:dev": "pnpm build && wrangler deploy --env dev",
-    "deploy:production": "pnpm build && wrangler deploy --env production",
+    "deploy:dev": "CLOUDFLARE_ENV=dev vite build && wrangler deploy",
+    "deploy:production": "CLOUDFLARE_ENV=production vite build && wrangler deploy",
     "dev": "vite dev --port 3000",
     "preview": "vite preview",
     "test": "vitest run --config vitest.config.ts --passWithNoTests",
