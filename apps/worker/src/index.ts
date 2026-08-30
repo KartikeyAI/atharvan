@@ -285,7 +285,7 @@ export function createApp(
   app.post(
     "/v1/platform/membership-domains/:domain/disable",
     async (context) => {
-    const input = await readJson(context, parseDisableMembershipDomain);
+      const input = await readJson(context, parseDisableMembershipDomain);
 
       if (input === null) {
         return invalidRequest(context);
