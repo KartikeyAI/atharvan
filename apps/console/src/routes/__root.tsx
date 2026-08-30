@@ -12,7 +12,14 @@ import styles from "../styles.css?url";
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
-    if (location.pathname.startsWith("/api/")) return;
+    // Internal server-function requests must bypass page authentication. The
+    // function resolves the session itself; guarding its transport route would
+    // recursively invoke the same function and deadlock SSR.
+    if (
+      location.pathname.startsWith("/api/") ||
+      location.pathname.startsWith("/_serverFn/")
+    )
+      return;
     const session = await resolveConsoleSession();
     if (location.pathname === "/login") {
       if (session.authenticated) {
