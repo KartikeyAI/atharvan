@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AuthenticatedOperator } from "@atharvan/domain";
+import { PlatformSecretProviderError } from "@atharvan/secrets";
 
 import {
   createApp,
@@ -20,6 +21,7 @@ function createRuntime(input?: {
 }): AuthenticationRuntime {
   return {
     emailDeliveryConfigured: input?.emailDeliveryConfigured ?? true,
+    secretProviderConfigured: true,
     handle: vi.fn(async () => new Response("auth-handler", { status: 202 })),
     getSession: vi.fn(async () =>
       input?.userId === null
@@ -45,6 +47,7 @@ function createRuntime(input?: {
       environment: "development" as const,
       items: [],
     })),
+    listPlatformSecretReferences: vi.fn(async () => []),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -65,6 +68,18 @@ function createRuntime(input?: {
       outcome: "updated" as const,
       key: "platform.release.channel",
       revisionNumber: 1,
+    })),
+    createPlatformSecret: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000301",
+    })),
+    rotatePlatformSecret: vi.fn(async () => ({
+      outcome: "updated" as const,
+      id: "00000000-0000-4000-8000-000000000301",
+    })),
+    revokePlatformSecret: vi.fn(async () => ({
+      outcome: "updated" as const,
+      id: "00000000-0000-4000-8000-000000000301",
     })),
   };
 }
@@ -346,6 +361,100 @@ describe("Atharvan control-plane worker", () => {
 
     expect(response.status).toBe(400);
     expect(runtime.setPlatformConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("lists secret metadata without exposing provider locators or values", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.listPlatformSecretReferences).mockResolvedValue([
+      {
+        id: "00000000-0000-4000-8000-000000000301",
+        key: "models.openai",
+        purpose: "Platform model routing",
+        environment: "development",
+        provider: "cloudflare_secrets_store",
+        status: "active",
+        currentVersionNumber: 1,
+        createdByOperatorId: "operator-1",
+        createdAt: "2026-08-30T00:00:00.000Z",
+        updatedAt: "2026-08-30T00:00:00.000Z",
+        revokedAt: null,
+        recentVersions: [],
+      },
+    ]);
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/secret-references",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    const serialized = JSON.stringify(await response.json());
+    expect(serialized).toContain("models.openai");
+    expect(serialized).not.toContain("providerSecretId");
+    expect(serialized).not.toContain("providerName");
+    expect(serialized).not.toContain("value");
+  });
+
+  it("delegates secret creation without returning submitted material", async () => {
+    const runtime = createRuntime();
+    const secretValue = "development-provider-key";
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/secret-references",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          key: "models.openai",
+          purpose: "Platform model routing",
+          value: secretValue,
+          reason: "Provision development model access.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(201);
+    expect(runtime.createPlatformSecret).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({ key: "models.openai", value: secretValue }),
+    );
+    expect(await response.text()).not.toContain(secretValue);
+  });
+
+  it("requires explicit confirmation before secret revocation", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/secret-references/00000000-0000-4000-8000-000000000301/revoke",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "Credential is no longer required." }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(400);
+    expect(runtime.revokePlatformSecret).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the secret provider is not configured", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.createPlatformSecret).mockRejectedValue(
+      new PlatformSecretProviderError("unconfigured"),
+    );
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/secret-references",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          key: "models.openai",
+          purpose: "Platform model routing",
+          value: "never-return-this",
+          reason: "Provision development model access.",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("never-return-this");
   });
 
   it("rejects malformed administrative commands before storage", async () => {

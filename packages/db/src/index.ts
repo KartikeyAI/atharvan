@@ -7,6 +7,7 @@ export { createPostgresOperatorOnboardingStore } from "./operator-onboarding-sto
 export { createPostgresOperatorRoleAdministrationStore } from "./operator-role-administration-store";
 export { createPostgresPlatformAdministrationReader } from "./platform-administration-reader";
 export { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
+export { createPostgresPlatformSecretStore } from "./platform-secret-store";
 export { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 export * as authDatabaseSchema from "./schema";
 

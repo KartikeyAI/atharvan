@@ -5,6 +5,7 @@ import type {
   OperatorDirectoryEntry,
   OperatorRoleDefinitionEntry,
   PlatformConfigurationRegistry,
+  PlatformSecretReferenceRegistry,
 } from "@atharvan/domain";
 
 export class ApiError extends Error {
@@ -90,6 +91,8 @@ export type OperatorRolesResponse = {
 };
 
 export type PlatformConfigurationResponse = PlatformConfigurationRegistry;
+
+export type PlatformSecretReferencesResponse = PlatformSecretReferenceRegistry;
 
 function isApiErrorBody(
   value: unknown,

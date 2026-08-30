@@ -1,6 +1,7 @@
 import { createOperatorOnboardingService } from "@atharvan/auth";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import type { AuthenticatedOperator } from "@atharvan/domain";
+import { createPlatformSecretLifecycleService } from "@atharvan/secrets";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -9,11 +10,14 @@ import { describe, expect, it, vi } from "vitest";
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
 import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 import { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
+import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
   auditEvents,
   operatorInvitations,
   operators,
   operatorVerificationChallenges,
+  platformSecretReferences,
+  platformSecretVersions,
   user,
 } from "./schema";
 import * as schema from "./schema";
@@ -124,6 +128,67 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
           }),
         ]),
       });
+
+      const secretMaterialProvider = {
+        configured: true,
+        create: vi.fn(async () => ({ externalId: "provider-secret-id" })),
+        rotate: vi.fn(async () => undefined),
+        revoke: vi.fn(async () => undefined),
+      };
+      let secretIdSequence = 200;
+      const secretService = createPlatformSecretLifecycleService({
+        store: createPostgresPlatformSecretStore(database),
+        provider: secretMaterialProvider,
+        environment: "development",
+        now: () => commandTime,
+        randomId: () =>
+          `00000000-0000-4000-8000-${String(++secretIdSequence).padStart(12, "0")}`,
+      });
+      const createdSecret = await secretService.create({
+        actor,
+        key: "models.openai",
+        purpose: "Platform model routing",
+        value: "integration-provider-key-v1",
+        reason: "Exercise metadata-only secret creation.",
+        correlationId: "00000000-0000-4000-8000-000000000110",
+      });
+      await secretService.rotate({
+        actor,
+        referenceId: createdSecret.id,
+        value: "integration-provider-key-v2",
+        reason: "Exercise metadata-only secret rotation.",
+        correlationId: "00000000-0000-4000-8000-000000000111",
+      });
+      await secretService.revoke({
+        actor,
+        referenceId: createdSecret.id,
+        reason: "Exercise irreversible secret revocation.",
+        correlationId: "00000000-0000-4000-8000-000000000112",
+      });
+      const secretRows = await database.select().from(platformSecretReferences);
+      const versionRows = await database.select().from(platformSecretVersions);
+      const serializedSecretMetadata = JSON.stringify({
+        secretRows,
+        versionRows,
+      });
+      expect(serializedSecretMetadata).not.toContain(
+        "integration-provider-key-v1",
+      );
+      expect(serializedSecretMetadata).not.toContain(
+        "integration-provider-key-v2",
+      );
+      expect(secretRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "models.openai",
+            status: "revoked",
+            currentVersionNumber: 2,
+          }),
+        ]),
+      );
+      expect(versionRows.map((version) => version.status)).toEqual(
+        expect.arrayContaining(["retired", "retired"]),
+      );
 
       await expect(
         service.createInvitation({

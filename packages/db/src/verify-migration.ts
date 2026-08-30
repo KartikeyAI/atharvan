@@ -15,6 +15,8 @@ const expectedTables = [
   "platform_configuration_bindings",
   "platform_configuration_definitions",
   "platform_configuration_revisions",
+  "platform_secret_references",
+  "platform_secret_versions",
 ] as const;
 
 const expectedIndexes = [
@@ -27,6 +29,9 @@ const expectedIndexes = [
   "platform_configuration_bindings_platform_unique",
   "platform_configuration_definitions_key_unique",
   "platform_configuration_revisions_number_unique",
+  "platform_secret_references_key_environment_unique",
+  "platform_secret_versions_one_active",
+  "platform_secret_versions_one_pending",
 ] as const;
 
 const expectedAuthTables = [
@@ -46,10 +51,22 @@ const expectedAuthIndexes = [
 
 const expectedConstraints = [
   "operators_super_administrator_must_be_active",
+  "platform_secret_references_active_metadata",
+  "platform_secret_versions_terminal_metadata",
 ] as const;
+
+const forbiddenSecretMaterialColumns = new Set([
+  "value",
+  "secret_value",
+  "ciphertext",
+  "value_hash",
+  "value_preview",
+]);
 
 const expectedTriggers = [
   "platform_configuration_revisions_immutable",
+  "platform_secret_references_no_delete",
+  "platform_secret_versions_no_delete",
 ] as const;
 
 const pool = new Pool({
@@ -78,6 +95,12 @@ try {
   );
   const triggerResult = await pool.query<{ trigger_name: string }>(
     "select trigger_name from information_schema.triggers where trigger_schema = 'public'",
+  );
+  const secretColumnResult = await pool.query<{
+    table_name: string;
+    column_name: string;
+  }>(
+    "select table_name, column_name from information_schema.columns where table_schema = 'public' and table_name in ('platform_secret_references', 'platform_secret_versions')",
   );
   const tableNames = new Set(tableResult.rows.map((row) => row.table_name));
   const indexNames = new Set(indexResult.rows.map((row) => row.indexname));
@@ -127,6 +150,14 @@ try {
   for (const indexName of expectedAuthIndexes) {
     if (!authIndexNames.has(indexName)) {
       throw new Error(`Missing migrated auth index: ${indexName}`);
+    }
+  }
+
+  for (const column of secretColumnResult.rows) {
+    if (forbiddenSecretMaterialColumns.has(column.column_name)) {
+      throw new Error(
+        `Secret material column must not exist: ${column.table_name}.${column.column_name}`,
+      );
     }
   }
 } finally {

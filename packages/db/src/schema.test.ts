@@ -12,6 +12,8 @@ import {
   platformConfigurationBindings,
   platformConfigurationDefinitions,
   platformConfigurationRevisions,
+  platformSecretReferences,
+  platformSecretVersions,
   rateLimit,
   session,
   user,
@@ -111,6 +113,38 @@ describe("operator onboarding schema", () => {
         "platform_configuration_bindings_platform_unique",
         "platform_configuration_bindings_environment_unique",
         "platform_configuration_bindings_revision_unique",
+      ]),
+    );
+  });
+
+  it("stores secret references and version metadata without secret material", () => {
+    const referenceConfig = getTableConfig(platformSecretReferences);
+    const versionConfig = getTableConfig(platformSecretVersions);
+    const columnNames = [
+      ...referenceConfig.columns,
+      ...versionConfig.columns,
+    ].map((column) => column.name);
+
+    expect(columnNames).not.toEqual(
+      expect.arrayContaining([
+        "value",
+        "secret_value",
+        "ciphertext",
+        "value_hash",
+        "value_preview",
+      ]),
+    );
+    expect(referenceConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_secret_references_key_environment_unique",
+        "platform_secret_references_provider_id_unique",
+      ]),
+    );
+    expect(versionConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_secret_versions_one_active",
+        "platform_secret_versions_one_pending",
+        "platform_secret_versions_correlation_unique",
       ]),
     );
   });

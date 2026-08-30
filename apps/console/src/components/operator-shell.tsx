@@ -10,6 +10,7 @@ import {
   GaugeIcon,
   GitPullRequestArrowIcon,
   MenuIcon,
+  KeyRoundIcon,
   SettingsIcon,
   ShieldCheckIcon,
   SirenIcon,
@@ -71,6 +72,12 @@ const navigation: ReadonlyArray<{
     label: "Settings",
     href: "/settings",
     icon: SettingsIcon,
+    available: true,
+  },
+  {
+    label: "Secrets",
+    href: "/secrets",
+    icon: KeyRoundIcon,
     available: true,
   },
 ];

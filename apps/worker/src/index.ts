@@ -16,7 +16,12 @@ import {
   type OperatorRoleDefinitionEntry,
   type PlatformConfigurationRegistry,
   type PlatformConfigurationScope,
+  type PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
+import {
+  PlatformSecretCommandRejectedError,
+  PlatformSecretProviderError,
+} from "@atharvan/secrets";
 
 import { resolveProductionAuthenticationRuntime } from "./auth-runtime";
 
@@ -29,6 +34,9 @@ export interface RuntimeBindings {
   readonly ATHARVAN_SUPER_ADMIN_EMAIL?: string;
   readonly ATHARVAN_EMAIL_FROM?: string;
   readonly RESEND_API_KEY?: string;
+  readonly CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID?: string;
+  readonly CLOUDFLARE_SECRETS_STORE_ID?: string;
+  readonly CLOUDFLARE_SECRETS_STORE_API_TOKEN?: string;
 }
 
 export interface AuthenticationRuntime {
@@ -47,6 +55,10 @@ export interface AuthenticationRuntime {
     ReadonlyArray<OperatorRoleDefinitionEntry>
   >;
   listPlatformConfiguration(): Promise<PlatformConfigurationRegistry>;
+  readonly secretProviderConfigured: boolean;
+  listPlatformSecretReferences(): Promise<
+    ReadonlyArray<PlatformSecretReferenceEntry>
+  >;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -83,6 +95,39 @@ export interface AuthenticationRuntime {
     readonly key: string;
     readonly revisionNumber?: number;
   }>;
+  createPlatformSecret(
+    actor: AuthenticatedOperator,
+    input: CreatePlatformSecretCommand,
+  ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+  rotatePlatformSecret(
+    actor: AuthenticatedOperator,
+    input: RotatePlatformSecretCommand,
+  ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
+  revokePlatformSecret(
+    actor: AuthenticatedOperator,
+    input: RevokePlatformSecretCommand,
+  ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
+}
+
+export interface CreatePlatformSecretCommand {
+  readonly key: string;
+  readonly purpose: string;
+  readonly value: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface RotatePlatformSecretCommand {
+  readonly referenceId: string;
+  readonly value: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface RevokePlatformSecretCommand {
+  readonly referenceId: string;
+  readonly reason: string;
+  readonly correlationId: string;
 }
 
 export interface OperatorInvitationCommand {
@@ -335,6 +380,63 @@ export function createApp(
     );
   });
 
+  app.get("/v1/platform/secret-references", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:secrets:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json({
+      providerConfigured: runtime.secretProviderConfigured,
+      items: await runtime.listPlatformSecretReferences(),
+    });
+  });
+
+  app.post("/v1/platform/secret-references", async (context) => {
+    const input = await readJson(context, parseCreatePlatformSecret);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.createPlatformSecret(context.get("operator"), {
+        ...input,
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.post(
+    "/v1/platform/secret-references/:referenceId/rotate",
+    async (context) => {
+      const input = await readJson(context, parseRotatePlatformSecret);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(context, () =>
+        runtime.rotatePlatformSecret(context.get("operator"), {
+          ...input,
+          referenceId: context.req.param("referenceId"),
+          correlationId: context.get("requestId"),
+        }),
+      );
+    },
+  );
+
+  app.post(
+    "/v1/platform/secret-references/:referenceId/revoke",
+    async (context) => {
+      const input = await readJson(context, parseRevokePlatformSecret);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(context, () =>
+        runtime.revokePlatformSecret(context.get("operator"), {
+          referenceId: context.req.param("referenceId"),
+          reason: input.reason,
+          correlationId: context.get("requestId"),
+        }),
+      );
+    },
+  );
+
   app.put("/v1/platform/operators/:operatorId/roles", async (context) => {
     const input = await readJson(context, parseReplaceOperatorRoles);
 
@@ -535,6 +637,42 @@ function parseMembershipDomain(
     : null;
 }
 
+function parseCreatePlatformSecret(
+  value: unknown,
+): Omit<CreatePlatformSecretCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const key = readTrimmedString(value.key, 96);
+  const purpose = readTrimmedString(value.purpose, 300);
+  const reason = readReason(value.reason);
+  const secretValue = readSecretMaterial(value.value);
+  return key !== null &&
+    purpose !== null &&
+    purpose.length >= 8 &&
+    reason !== null &&
+    secretValue !== null
+    ? { key, purpose, reason, value: secretValue }
+    : null;
+}
+
+function parseRotatePlatformSecret(
+  value: unknown,
+): Omit<RotatePlatformSecretCommand, "referenceId" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const secretValue = readSecretMaterial(value.value);
+  return reason !== null && secretValue !== null
+    ? { reason, value: secretValue }
+    : null;
+}
+
+function parseRevokePlatformSecret(
+  value: unknown,
+): { readonly reason: string } | null {
+  if (!isRecord(value) || value.confirmation !== "REVOKE") return null;
+  const reason = readReason(value.reason);
+  return reason === null ? null : { reason };
+}
+
 function parseDisableMembershipDomain(
   value: unknown,
 ): Omit<DisableMembershipDomainCommand, "domain" | "correlationId"> | null {
@@ -558,6 +696,11 @@ function readTrimmedString(value: unknown, maximumLength: number) {
   return normalized.length > 0 && normalized.length <= maximumLength
     ? normalized
     : null;
+}
+
+function readSecretMaterial(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  return new TextEncoder().encode(value).byteLength <= 1024 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -635,6 +778,33 @@ async function executeCommand(
           code: "configuration_change_rejected",
           reason: error.reason,
           message: "The requested configuration change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (error instanceof PlatformSecretProviderError) {
+      return context.json(
+        {
+          code: "secret_provider_unavailable",
+          reason: error.reason,
+          message:
+            error.reason === "unconfigured"
+              ? "The platform secret provider is not configured."
+              : "The platform secret provider did not complete the request.",
+          requestId: context.get("requestId"),
+        },
+        error.reason === "unconfigured" ? 503 : 502,
+      );
+    }
+
+    if (error instanceof PlatformSecretCommandRejectedError) {
+      return context.json(
+        {
+          code: "secret_change_rejected",
+          reason: error.reason,
+          message: "The requested secret lifecycle change was not accepted.",
           requestId: context.get("requestId"),
         },
         409,

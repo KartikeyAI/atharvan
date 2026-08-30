@@ -17,6 +17,7 @@
     "@atharvan/db": "workspace:*",
     "@atharvan/domain": "workspace:*",
     "@atharvan/email": "workspace:*",
+    "@atharvan/secrets": "workspace:*",
     "@better-auth/drizzle-adapter": "1.7.2",
     "hono": "4.13.5"
   },

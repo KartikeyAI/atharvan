@@ -18,11 +18,17 @@ import {
   createPostgresOperatorSessionPolicyStore,
   createPostgresPlatformAdministrationReader,
   createPostgresPlatformConfigurationStore,
+  createPostgresPlatformSecretStore,
 } from "@atharvan/db";
 import {
   createResendTransactionalEmailSender,
   unconfiguredTransactionalEmailSender,
 } from "@atharvan/email";
+import {
+  createCloudflareSecretsStoreProvider,
+  createPlatformSecretLifecycleService,
+  unconfiguredPlatformSecretMaterialProvider,
+} from "@atharvan/secrets";
 
 import type { AuthenticationRuntime, RuntimeBindings } from "./index";
 
@@ -83,6 +89,24 @@ async function createProductionAuthenticationRuntime(input: {
       store: configurationStore,
       environment: config.ATHARVAN_ENVIRONMENT,
     });
+  const secretStore = createPostgresPlatformSecretStore(
+    databaseHandle.database,
+  );
+  const secretMaterialProvider =
+    config.CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID !== undefined &&
+    config.CLOUDFLARE_SECRETS_STORE_ID !== undefined &&
+    config.CLOUDFLARE_SECRETS_STORE_API_TOKEN !== undefined
+      ? createCloudflareSecretsStoreProvider({
+          accountId: config.CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID,
+          storeId: config.CLOUDFLARE_SECRETS_STORE_ID,
+          apiToken: config.CLOUDFLARE_SECRETS_STORE_API_TOKEN,
+        })
+      : unconfiguredPlatformSecretMaterialProvider;
+  const secretLifecycleService = createPlatformSecretLifecycleService({
+    store: secretStore,
+    provider: secretMaterialProvider,
+    environment: config.ATHARVAN_ENVIRONMENT,
+  });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -133,6 +157,7 @@ async function createProductionAuthenticationRuntime(input: {
 
   return {
     emailDeliveryConfigured,
+    secretProviderConfigured: secretMaterialProvider.configured,
     handle: (request) => auth.handler(request),
     async getSession(headers) {
       const session = await auth.api.getSession({
@@ -152,6 +177,7 @@ async function createProductionAuthenticationRuntime(input: {
       administrationReader.listOperatorRoleDefinitions(),
     listPlatformConfiguration: () =>
       configurationStore.listConfiguration(config.ATHARVAN_ENVIRONMENT),
+    listPlatformSecretReferences: () => secretLifecycleService.listReferences(),
     async createOperatorInvitation(actor, command) {
       const registry = await configurationStore.listConfiguration(
         config.ATHARVAN_ENVIRONMENT,
@@ -226,5 +252,11 @@ async function createProductionAuthenticationRuntime(input: {
         reason: command.reason,
         correlationId: command.correlationId,
       }),
+    createPlatformSecret: (actor, command) =>
+      secretLifecycleService.create({ actor, ...command }),
+    rotatePlatformSecret: (actor, command) =>
+      secretLifecycleService.rotate({ actor, ...command }),
+    revokePlatformSecret: (actor, command) =>
+      secretLifecycleService.revoke({ actor, ...command }),
   };
 }

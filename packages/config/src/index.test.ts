@@ -45,6 +45,24 @@ describe("authentication runtime configuration", () => {
     expect(parsed).not.toHaveProperty("RESEND_API_KEY");
   });
 
+  it("requires all secret-provider boot values together", () => {
+    expect(() =>
+      parseAuthenticationRuntimeConfig({
+        ...configured,
+        CLOUDFLARE_SECRETS_STORE_ID: "store-id",
+      }),
+    ).toThrow("Cloudflare Secrets Store configuration must be complete.");
+
+    expect(
+      parseAuthenticationRuntimeConfig({
+        ...configured,
+        CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID: "account-id",
+        CLOUDFLARE_SECRETS_STORE_ID: "store-id",
+        CLOUDFLARE_SECRETS_STORE_API_TOKEN: "write-token",
+      }),
+    ).toMatchObject({ CLOUDFLARE_SECRETS_STORE_ID: "store-id" });
+  });
+
   it("rejects weak authentication secrets and non-PostgreSQL databases", () => {
     expect(() =>
       parseAuthenticationRuntimeConfig({

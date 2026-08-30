@@ -164,6 +164,29 @@ export const platformConfigurationEnvironment = pgEnum(
   ["development", "production", "test"],
 );
 
+export const platformSecretReferenceStatus = pgEnum(
+  "platform_secret_reference_status",
+  [
+    "provisioning",
+    "active",
+    "provisioning_failed",
+    "rotating",
+    "rotation_failed",
+    "revoking",
+    "revocation_failed",
+    "revoked",
+  ],
+);
+
+export const platformSecretVersionStatus = pgEnum(
+  "platform_secret_version_status",
+  ["pending", "active", "retired", "failed"],
+);
+
+export const platformSecretProvider = pgEnum("platform_secret_provider", [
+  "cloudflare_secrets_store",
+]);
+
 export const operators = pgTable(
   "operators",
   {
@@ -621,6 +644,122 @@ export const platformConfigurationBindings = pgTable(
     check(
       "platform_configuration_bindings_scope_environment",
       sql`(${table.scope} = 'platform' AND ${table.environment} IS NULL) OR (${table.scope} = 'environment' AND ${table.environment} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const platformSecretReferences = pgTable(
+  "platform_secret_references",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    purpose: text("purpose").notNull(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    provider: platformSecretProvider("provider").notNull(),
+    providerName: text("provider_name").notNull(),
+    providerSecretId: text("provider_secret_id"),
+    status: platformSecretReferenceStatus("status")
+      .notNull()
+      .default("provisioning"),
+    currentVersionNumber: integer("current_version_number"),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    revokedByOperatorId: uuid("revoked_by_operator_id").references(
+      () => operators.id,
+      { onDelete: "restrict" },
+    ),
+    revokedReason: text("revoked_reason"),
+    revokedCorrelationId: uuid("revoked_correlation_id"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_secret_references_key_environment_unique").on(
+      table.key,
+      table.environment,
+    ),
+    uniqueIndex("platform_secret_references_provider_name_unique").on(
+      table.provider,
+      table.providerName,
+    ),
+    uniqueIndex("platform_secret_references_provider_id_unique")
+      .on(table.provider, table.providerSecretId)
+      .where(sql`${table.providerSecretId} IS NOT NULL`),
+    index("platform_secret_references_status_idx").on(
+      table.environment,
+      table.status,
+    ),
+    check(
+      "platform_secret_references_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)+$'`,
+    ),
+    check(
+      "platform_secret_references_no_value_columns",
+      sql`${table.providerName} <> '' AND ${table.purpose} <> ''`,
+    ),
+    check(
+      "platform_secret_references_active_metadata",
+      sql`${table.status} NOT IN ('active', 'rotating', 'rotation_failed', 'revoking', 'revocation_failed', 'revoked') OR (${table.providerSecretId} IS NOT NULL AND ${table.currentVersionNumber} IS NOT NULL AND ${table.currentVersionNumber} > 0)`,
+    ),
+    check(
+      "platform_secret_references_revocation_metadata",
+      sql`(${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL AND ${table.revokedByOperatorId} IS NOT NULL AND ${table.revokedReason} IS NOT NULL AND ${table.revokedCorrelationId} IS NOT NULL) OR (${table.status} <> 'revoked' AND ${table.revokedAt} IS NULL AND ${table.revokedByOperatorId} IS NULL AND ${table.revokedReason} IS NULL AND ${table.revokedCorrelationId} IS NULL)`,
+    ),
+  ],
+);
+
+export const platformSecretVersions = pgTable(
+  "platform_secret_versions",
+  {
+    id: uuid("id").primaryKey(),
+    referenceId: uuid("reference_id")
+      .notNull()
+      .references(() => platformSecretReferences.id, { onDelete: "restrict" }),
+    versionNumber: integer("version_number").notNull(),
+    status: platformSecretVersionStatus("status").notNull().default("pending"),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("platform_secret_versions_number_unique").on(
+      table.referenceId,
+      table.versionNumber,
+    ),
+    uniqueIndex("platform_secret_versions_correlation_unique").on(
+      table.correlationId,
+    ),
+    uniqueIndex("platform_secret_versions_one_active")
+      .on(table.referenceId)
+      .where(sql`${table.status} = 'active'`),
+    uniqueIndex("platform_secret_versions_one_pending")
+      .on(table.referenceId)
+      .where(sql`${table.status} = 'pending'`),
+    index("platform_secret_versions_reference_created_idx").on(
+      table.referenceId,
+      table.createdAt,
+    ),
+    check(
+      "platform_secret_versions_number_positive",
+      sql`${table.versionNumber} > 0`,
+    ),
+    check(
+      "platform_secret_versions_terminal_metadata",
+      sql`(${table.status} = 'pending' AND ${table.activatedAt} IS NULL AND ${table.retiredAt} IS NULL AND ${table.failedAt} IS NULL) OR (${table.status} = 'active' AND ${table.activatedAt} IS NOT NULL AND ${table.retiredAt} IS NULL AND ${table.failedAt} IS NULL) OR (${table.status} = 'retired' AND ${table.activatedAt} IS NOT NULL AND ${table.retiredAt} IS NOT NULL AND ${table.failedAt} IS NULL) OR (${table.status} = 'failed' AND ${table.activatedAt} IS NULL AND ${table.retiredAt} IS NULL AND ${table.failedAt} IS NOT NULL)`,
     ),
   ],
 );
