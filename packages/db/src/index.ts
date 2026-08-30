@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/neon-serverless";
 import * as schema from "./schema";
 
 export { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
+export { createPostgresPlatformAdministrationReader } from "./platform-administration-reader";
 export { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 export * as authDatabaseSchema from "./schema";
 

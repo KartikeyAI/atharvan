@@ -10,6 +10,7 @@ import {
   createNeonDatabase,
   createPostgresOperatorOnboardingStore,
   createPostgresOperatorSessionPolicyStore,
+  createPostgresPlatformAdministrationReader,
 } from "@atharvan/db";
 import {
   createResendTransactionalEmailSender,
@@ -59,6 +60,9 @@ async function createProductionAuthenticationRuntime(input: {
   const policyStore = createPostgresOperatorSessionPolicyStore(
     databaseHandle.database,
   );
+  const administrationReader = createPostgresPlatformAdministrationReader(
+    databaseHandle.database,
+  );
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -68,11 +72,13 @@ async function createProductionAuthenticationRuntime(input: {
       })
     : unconfiguredTransactionalEmailSender;
 
-  await createOperatorOnboardingService({
+  const onboardingService = createOperatorOnboardingService({
     store: onboardingStore,
     emailSender,
     verificationHmacSecret: config.ATHARVAN_VERIFICATION_HMAC_SECRET,
-  }).bootstrapSuperAdministrator({
+  });
+
+  await onboardingService.bootstrapSuperAdministrator({
     email: config.ATHARVAN_SUPER_ADMIN_EMAIL,
     reason: "Configured singleton Super Administrator bootstrap.",
   });
@@ -114,9 +120,45 @@ async function createProductionAuthenticationRuntime(input: {
         query: { disableCookieCache: true },
       });
 
-      return session === null ? null : { userId: session.user.id };
+      return session === null
+        ? null
+        : { userId: session.user.id, createdAt: session.session.createdAt };
     },
     resolveActiveOperator: (authUserId) =>
       policyStore.resolveActiveOperator(authUserId),
+    listOperators: () => administrationReader.listOperators(),
+    listMembershipDomains: () => administrationReader.listMembershipDomains(),
+    async createOperatorInvitation(actor, command) {
+      const result = await onboardingService.createInvitation({
+        actor,
+        email: command.email,
+        organizationId: command.organizationId,
+        intendedCapabilities: command.intendedCapabilities,
+        reason: command.reason,
+        ...(command.approvalReference === undefined
+          ? {}
+          : { approvalReference: command.approvalReference }),
+        correlationId: command.correlationId,
+      });
+
+      return { outcome: result.outcome, id: result.id };
+    },
+    addMembershipDomain: (actor, command) =>
+      onboardingService.addAllowedEmailDomain({
+        actor,
+        domain: command.domain,
+        includeSubdomains: command.includeSubdomains,
+        isPublicDomainException: false,
+        reason: command.reason,
+        correlationId: command.correlationId,
+      }),
+    disableMembershipDomain: (actor, command) =>
+      onboardingService.disableAllowedEmailDomain({
+        actor,
+        domain: command.domain,
+        membershipLockdown: command.membershipLockdown,
+        reason: command.reason,
+        correlationId: command.correlationId,
+      }),
   };
 }

@@ -10,33 +10,79 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as MembershipDomainsRouteImport } from './routes/membership-domains'
+import { Route as OperatorsRouteImport } from './routes/operators'
+import { Route as ApiSplatRouteImport } from './routes/api.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembershipDomainsRoute = MembershipDomainsRouteImport.update({
+  id: '/membership-domains',
+  path: '/membership-domains',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperatorsRoute = OperatorsRouteImport.update({
+  id: '/operators',
+  path: '/operators',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSplatRoute = ApiSplatRouteImport.update({
+  id: '/api/$',
+  path: '/api/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/membership-domains': typeof MembershipDomainsRoute
+  '/operators': typeof OperatorsRoute
+  '/api/$': typeof ApiSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/membership-domains': typeof MembershipDomainsRoute
+  '/operators': typeof OperatorsRoute
+  '/api/$': typeof ApiSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/membership-domains': typeof MembershipDomainsRoute
+  '/operators': typeof OperatorsRoute
+  '/api/$': typeof ApiSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/login' | '/membership-domains' | '/operators' | '/api/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/login' | '/membership-domains' | '/operators' | '/api/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/membership-domains'
+    | '/operators'
+    | '/api/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LoginRoute: typeof LoginRoute
+  MembershipDomainsRoute: typeof MembershipDomainsRoute
+  OperatorsRoute: typeof OperatorsRoute
+  ApiSplatRoute: typeof ApiSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +94,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/membership-domains': {
+      id: '/membership-domains'
+      path: '/membership-domains'
+      fullPath: '/membership-domains'
+      preLoaderRoute: typeof MembershipDomainsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operators': {
+      id: '/operators'
+      path: '/operators'
+      fullPath: '/operators'
+      preLoaderRoute: typeof OperatorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/$': {
+      id: '/api/$'
+      path: '/api/$'
+      fullPath: '/api/$'
+      preLoaderRoute: typeof ApiSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LoginRoute: LoginRoute,
+  MembershipDomainsRoute: MembershipDomainsRoute,
+  OperatorsRoute: OperatorsRoute,
+  ApiSplatRoute: ApiSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

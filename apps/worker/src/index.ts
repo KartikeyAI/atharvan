@@ -2,11 +2,15 @@ import { Hono, type Context } from "hono";
 import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 
+import { OnboardingCommandRejectedError } from "@atharvan/auth";
 import { parseRuntimeConfig } from "@atharvan/config";
 import {
+  delegablePlatformCapabilities,
   operatorHasCapability,
   unknownPlatformOverview,
   type AuthenticatedOperator,
+  type MembershipDomainEntry,
+  type OperatorDirectoryEntry,
 } from "@atharvan/domain";
 
 import { resolveProductionAuthenticationRuntime } from "./auth-runtime";
@@ -25,10 +29,59 @@ export interface RuntimeBindings {
 export interface AuthenticationRuntime {
   readonly emailDeliveryConfigured: boolean;
   handle(request: Request): Promise<Response>;
-  getSession(headers: Headers): Promise<{ readonly userId: string } | null>;
+  getSession(headers: Headers): Promise<{
+    readonly userId: string;
+    readonly createdAt: Date;
+  } | null>;
   resolveActiveOperator(
     authUserId: string,
   ): Promise<AuthenticatedOperator | null>;
+  listOperators(): Promise<ReadonlyArray<OperatorDirectoryEntry>>;
+  listMembershipDomains(): Promise<ReadonlyArray<MembershipDomainEntry>>;
+  createOperatorInvitation(
+    actor: AuthenticatedOperator,
+    input: OperatorInvitationCommand,
+  ): Promise<{
+    readonly outcome: "created" | "already_exists";
+    readonly id: string;
+  }>;
+  addMembershipDomain(
+    actor: AuthenticatedOperator,
+    input: MembershipDomainCommand,
+  ): Promise<{
+    readonly outcome: "created" | "already_exists";
+    readonly id: string;
+  }>;
+  disableMembershipDomain(
+    actor: AuthenticatedOperator,
+    input: DisableMembershipDomainCommand,
+  ): Promise<{
+    readonly outcome: "created" | "already_exists";
+    readonly id: string;
+  }>;
+}
+
+export interface OperatorInvitationCommand {
+  readonly email: string;
+  readonly organizationId: string;
+  readonly intendedCapabilities: ReadonlyArray<string>;
+  readonly reason: string;
+  readonly approvalReference?: string;
+  readonly correlationId: string;
+}
+
+export interface MembershipDomainCommand {
+  readonly domain: string;
+  readonly includeSubdomains: boolean;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface DisableMembershipDomainCommand {
+  readonly domain: string;
+  readonly membershipLockdown: boolean;
+  readonly reason: string;
+  readonly correlationId: string;
 }
 
 type AppEnvironment = {
@@ -132,7 +185,17 @@ export function createApp(
       );
     }
 
-    context.set("operator", operator);
+    const freshSessionProof =
+      Date.now() - session.createdAt.getTime() <= 5 * 60 * 1_000
+        ? session.createdAt
+        : undefined;
+
+    context.set("operator", {
+      ...operator,
+      ...(freshSessionProof === undefined
+        ? {}
+        : { stepUpVerifiedAt: freshSessionProof }),
+    });
     await next();
   });
 
@@ -152,6 +215,92 @@ export function createApp(
 
     return context.json(unknownPlatformOverview);
   });
+
+  app.get("/v1/platform/operators", async (context) => {
+    const operator = context.get("operator");
+
+    if (!operatorHasCapability(operator, "platform:operators:read")) {
+      return capabilityRequired(context);
+    }
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json({ items: await runtime.listOperators() });
+  });
+
+  app.post("/v1/platform/operators/invitations", async (context) => {
+    const operator = context.get("operator");
+
+    if (!operatorHasCapability(operator, "platform:operators:invite")) {
+      return capabilityRequired(context);
+    }
+
+    const input = await readJson(context, parseOperatorInvitation);
+
+    if (input === null) {
+      return invalidRequest(context);
+    }
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.createOperatorInvitation(operator, {
+        email: input.email,
+        organizationId: input.organizationId,
+        intendedCapabilities: input.intendedCapabilities,
+        reason: input.reason,
+        ...(input.approvalReference === undefined
+          ? {}
+          : { approvalReference: input.approvalReference }),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.get("/v1/platform/membership-domains", async (context) => {
+    const operator = context.get("operator");
+
+    if (!operatorHasCapability(operator, "platform:membership-domains:read")) {
+      return capabilityRequired(context);
+    }
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json({ items: await runtime.listMembershipDomains() });
+  });
+
+  app.post("/v1/platform/membership-domains", async (context) => {
+    const input = await readJson(context, parseMembershipDomain);
+
+    if (input === null) {
+      return invalidRequest(context);
+    }
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.addMembershipDomain(context.get("operator"), {
+        ...input,
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
+  app.post(
+    "/v1/platform/membership-domains/:domain/disable",
+    async (context) => {
+    const input = await readJson(context, parseDisableMembershipDomain);
+
+      if (input === null) {
+        return invalidRequest(context);
+      }
+
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(context, () =>
+        runtime.disableMembershipDomain(context.get("operator"), {
+          ...input,
+          domain: context.req.param("domain"),
+          correlationId: context.get("requestId"),
+        }),
+      );
+    },
+  );
 
   app.notFound((context) => {
     return context.json(
@@ -185,6 +334,180 @@ export function createApp(
   });
 
   return app;
+}
+
+async function readJson<Result>(
+  context: Context<AppEnvironment>,
+  parse: (value: unknown) => Result | null,
+): Promise<Result | null> {
+  try {
+    const body: unknown = await context.req.json();
+    return parse(body);
+  } catch {
+    return null;
+  }
+}
+
+function parseOperatorInvitation(
+  value: unknown,
+): Omit<OperatorInvitationCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const email = readTrimmedString(value.email, 254);
+  const organizationId = readTrimmedString(value.organizationId, 100);
+  const reason = readReason(value.reason);
+  const capabilities = value.intendedCapabilities;
+  const approvalReference =
+    value.approvalReference === undefined
+      ? undefined
+      : readTrimmedString(value.approvalReference, 200);
+
+  if (
+    email === null ||
+    !email.includes("@") ||
+    organizationId === null ||
+    reason === null ||
+    approvalReference === null ||
+    !Array.isArray(capabilities) ||
+    capabilities.length === 0 ||
+    capabilities.length > delegablePlatformCapabilities.length ||
+    capabilities.some(
+      (capability) =>
+        typeof capability !== "string" ||
+        !delegablePlatformCapabilities.includes(
+          capability as (typeof delegablePlatformCapabilities)[number],
+        ),
+    ) ||
+    new Set(capabilities).size !== capabilities.length
+  ) {
+    return null;
+  }
+
+  return {
+    email,
+    organizationId,
+    intendedCapabilities: capabilities as ReadonlyArray<string>,
+    reason,
+    ...(approvalReference === undefined ? {} : { approvalReference }),
+  };
+}
+
+function parseMembershipDomain(
+  value: unknown,
+): Omit<MembershipDomainCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const domain = readTrimmedString(value.domain, 253);
+  const reason = readReason(value.reason);
+  const includeSubdomains = value.includeSubdomains ?? false;
+
+  return domain !== null &&
+    domain.length >= 3 &&
+    reason !== null &&
+    typeof includeSubdomains === "boolean"
+    ? { domain, includeSubdomains, reason }
+    : null;
+}
+
+function parseDisableMembershipDomain(
+  value: unknown,
+): Omit<DisableMembershipDomainCommand, "domain" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const membershipLockdown = value.membershipLockdown ?? false;
+
+  return reason !== null && typeof membershipLockdown === "boolean"
+    ? { membershipLockdown, reason }
+    : null;
+}
+
+function readReason(value: unknown): string | null {
+  const reason = readTrimmedString(value, 500);
+  return reason !== null && reason.length >= 8 ? reason : null;
+}
+
+function readTrimmedString(value: unknown, maximumLength: number) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= maximumLength
+    ? normalized
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function invalidRequest(context: Context<AppEnvironment>) {
+  return context.json(
+    {
+      code: "invalid_request",
+      message: "The request body is invalid.",
+      requestId: context.get("requestId"),
+    },
+    400,
+  );
+}
+
+function capabilityRequired(context: Context<AppEnvironment>) {
+  return context.json(
+    {
+      code: "operator_capability_required",
+      message: "The operator lacks the required platform capability.",
+      requestId: context.get("requestId"),
+    },
+    403,
+  );
+}
+
+async function executeCommand(
+  context: Context<AppEnvironment>,
+  command: () => Promise<{
+    readonly outcome: "created" | "already_exists";
+    readonly id: string;
+  }>,
+) {
+  try {
+    const result = await command();
+    return context.json(result, result.outcome === "created" ? 201 : 200);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "";
+
+    if (reason === "recent_step_up_required") {
+      return context.json(
+        {
+          code: reason,
+          message: "Sign in again before changing organization domains.",
+          requestId: context.get("requestId"),
+        },
+        403,
+      );
+    }
+
+    if (reason === "operator_command_forbidden") {
+      return capabilityRequired(context);
+    }
+
+    if (error instanceof OnboardingCommandRejectedError) {
+      return context.json(
+        {
+          code: "command_rejected",
+          reason: error.reason,
+          message: "The requested administrative change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (
+      reason.startsWith("invalid_") ||
+      reason.endsWith("_required") ||
+      reason === "verification_secret_too_short"
+    ) {
+      return invalidRequest(context);
+    }
+
+    throw error;
+  }
 }
 
 export const app = createApp();

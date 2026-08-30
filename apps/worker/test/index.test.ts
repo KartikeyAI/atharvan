@@ -24,7 +24,10 @@ function createRuntime(input?: {
     getSession: vi.fn(async () =>
       input?.userId === null
         ? null
-        : { userId: input?.userId ?? "auth-user-1" },
+        : {
+            userId: input?.userId ?? "auth-user-1",
+            createdAt: new Date(),
+          },
     ),
     resolveActiveOperator: vi.fn(async () =>
       input?.operator === undefined
@@ -35,6 +38,20 @@ function createRuntime(input?: {
           }
         : input.operator,
     ),
+    listOperators: vi.fn(async () => []),
+    listMembershipDomains: vi.fn(async () => []),
+    createOperatorInvitation: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "invitation-1",
+    })),
+    addMembershipDomain: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "domain-1",
+    })),
+    disableMembershipDomain: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "domain-1",
+    })),
   };
 }
 
@@ -126,6 +143,100 @@ describe("Atharvan control-plane worker", () => {
       observedAt: null,
       evidence: [],
     });
+  });
+
+  it("returns the operator directory only with its read capability", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.listOperators).mockResolvedValue([
+      {
+        id: "operator-1",
+        email: "owner@example.com",
+        emailDomain: "example.com",
+        status: "active",
+        isSuperAdministrator: true,
+        effectiveCapabilities: ["platform:*"],
+        invitationStatus: null,
+        invitedAt: "2026-08-30T00:00:00.000Z",
+        activatedAt: "2026-08-30T00:00:00.000Z",
+      },
+    ]);
+
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/operators",
+      undefined,
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      items: [{ email: "owner@example.com" }],
+    });
+  });
+
+  it("validates and delegates an audited operator invitation", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/operators/invitations",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "operator@example.com",
+          organizationId: "arth",
+          intendedCapabilities: ["platform:operators:read"],
+          reason: "Platform operations responsibility.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(201);
+    expect(runtime.createOperatorInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorId: "operator-1" }),
+      expect.objectContaining({
+        email: "operator@example.com",
+        correlationId: expect.any(String),
+      }),
+    );
+  });
+
+  it("rejects malformed administrative commands before storage", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/operators/invitations",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "not-an-email" }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(400);
+    expect(runtime.createOperatorInvitation).not.toHaveBeenCalled();
+  });
+
+  it("uses a newly verified session as short-lived domain-change proof", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/membership-domains",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          domain: "engineering.example.com",
+          includeSubdomains: false,
+          reason: "Approved internal operator organization.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(201);
+    expect(runtime.addMembershipDomain).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({ domain: "engineering.example.com" }),
+    );
   });
 
   it("fails closed before OTP handling when email delivery is absent", async () => {

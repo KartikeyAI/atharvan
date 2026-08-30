@@ -125,3 +125,4 @@ export function assertDelegableOperatorCapabilities(
 }
 
 export * from "./operator-onboarding";
+export * from "./platform-administration";

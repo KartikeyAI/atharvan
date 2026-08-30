@@ -11,9 +11,21 @@
   "env": {
     "dev": {
       "name": "atharvan-console-dev",
+      "services": [
+        {
+          "binding": "CONTROL_PLANE",
+          "service": "atharvan-control-plane-dev",
+        },
+      ],
     },
     "production": {
       "name": "atharvan-console-production",
+      "services": [
+        {
+          "binding": "CONTROL_PLANE",
+          "service": "atharvan-control-plane-production",
+        },
+      ],
     },
   },
 }
