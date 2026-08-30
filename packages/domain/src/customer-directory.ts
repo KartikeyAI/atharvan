@@ -86,3 +86,47 @@ export interface CustomerWorkspaceInspection {
 
 export type CustomerDirectoryInspection =
   CustomerUserInspection | CustomerWorkspaceInspection;
+
+export type CustomerRestrictionTargetType = "user" | "workspace";
+
+export type CustomerRestrictionCapability =
+  | "login"
+  | "new_executions"
+  | "provider_mutations"
+  | "production_deployments"
+  | "integrations"
+  | "runner_access"
+  | "all_access";
+
+export type CustomerRestrictionDesiredState = "restricted" | "restored";
+
+export type CustomerRestrictionObservedState =
+  "restricted" | "restored" | "failed";
+
+export type CustomerRestrictionReconciliationState =
+  "pending" | "applied" | "drifted" | "failed";
+
+export interface CustomerRestrictionEntry {
+  readonly id: string;
+  readonly environment: PlatformConfigurationEnvironment;
+  readonly targetType: CustomerRestrictionTargetType;
+  readonly targetId: string;
+  readonly capability: CustomerRestrictionCapability;
+  readonly revisionNumber: number;
+  readonly desiredState: CustomerRestrictionDesiredState;
+  readonly reconciliationState: CustomerRestrictionReconciliationState;
+  readonly reason: string;
+  readonly requestedByOperatorId: string;
+  readonly requestedAt: string;
+  readonly observedState: CustomerRestrictionObservedState | null;
+  readonly observedSourceRevision: string | null;
+  readonly observedAt: string | null;
+  readonly reconciliationMessage: string | null;
+}
+
+export interface CustomerRestrictionRegistry {
+  readonly environment: PlatformConfigurationEnvironment;
+  readonly targetType: CustomerRestrictionTargetType;
+  readonly targetId: string;
+  readonly items: ReadonlyArray<CustomerRestrictionEntry>;
+}

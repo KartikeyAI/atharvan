@@ -5,6 +5,9 @@ import {
   account,
   allowedEmailDomains,
   customerDirectorySources,
+  customerAccessRestrictionObservations,
+  customerAccessRestrictionRevisions,
+  customerAccessRestrictions,
   customerUserProjections,
   customerWorkspaceMembershipProjections,
   customerWorkspaceProjections,
@@ -244,6 +247,33 @@ describe("operator onboarding schema", () => {
         "repository_contents",
         "secret_value",
         "access_token",
+      ]),
+    );
+  });
+
+  it("keeps customer restrictions revisioned and reconciliation evidence append-only", () => {
+    const restrictionConfig = getTableConfig(customerAccessRestrictions);
+    const revisionConfig = getTableConfig(customerAccessRestrictionRevisions);
+    const observationConfig = getTableConfig(
+      customerAccessRestrictionObservations,
+    );
+
+    expect(restrictionConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "customer_access_restrictions_target_capability_unique",
+        "customer_access_restrictions_target_idx",
+      ]),
+    );
+    expect(revisionConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "customer_access_restriction_revisions_number_unique",
+        "customer_access_restriction_revisions_correlation_unique",
+      ]),
+    );
+    expect(observationConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "customer_access_restriction_observations_source_unique",
+        "customer_access_restriction_observations_correlation_unique",
       ]),
     );
   });

@@ -45,6 +45,22 @@ function createStore(): CustomerDirectoryStore {
       workspaces: input.workspaces.length,
       memberships: input.memberships.length,
     })),
+    listRestrictions: vi.fn(async (input) => ({
+      environment: input.environment,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      items: [],
+    })),
+    setRestriction: vi.fn(async (input) => ({
+      outcome: "updated" as const,
+      restrictionId: "00000000-0000-4000-8000-000000000701",
+      revisionNumber: 1,
+      desiredState: input.desiredState,
+    })),
+    recordRestrictionObservation: vi.fn(async (input) => ({
+      outcome: "created" as const,
+      restrictionId: input.restrictionId,
+    })),
   };
   return store;
 }
@@ -194,5 +210,76 @@ describe("customer directory service", () => {
       }),
     ).rejects.toThrow("customer_directory_rejected");
     expect(store.reconcileSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("requires step-up and exact target confirmation for a restriction", async () => {
+    const store = createStore();
+    const service = createCustomerDirectoryService({
+      store,
+      environment: "development",
+      now: () => now,
+    });
+    const restrictionActor = {
+      ...actor,
+      effectiveCapabilities: ["platform:users:restrict"],
+      stepUpVerifiedAt: now,
+    };
+
+    await expect(
+      service.setRestriction({
+        actor: restrictionActor,
+        targetType: "user",
+        targetId: "usr_1",
+        capability: "login",
+        desiredState: "restricted",
+        confirmation: "RESTRICT usr_1",
+        reason: "Contain the confirmed account compromise.",
+      }),
+    ).resolves.toMatchObject({
+      outcome: "updated",
+      desiredState: "restricted",
+    });
+    expect(store.setRestriction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetType: "user",
+        targetId: "usr_1",
+        capability: "login",
+      }),
+    );
+
+    await expect(
+      service.setRestriction({
+        actor: restrictionActor,
+        targetType: "user",
+        targetId: "usr_1",
+        capability: "login",
+        desiredState: "restored",
+        confirmation: "RESTORE someone_else",
+        reason: "Restore access after the investigation is complete.",
+      }),
+    ).rejects.toMatchObject({ reason: "restriction_confirmation_invalid" });
+  });
+
+  it("rejects login restrictions for a workspace", async () => {
+    const service = createCustomerDirectoryService({
+      store: createStore(),
+      environment: "development",
+      now: () => now,
+    });
+    await expect(
+      service.setRestriction({
+        actor: {
+          ...actor,
+          effectiveCapabilities: ["platform:workspaces:restrict"],
+          stepUpVerifiedAt: now,
+        },
+        targetType: "workspace",
+        targetId: "wrk_1",
+        capability: "login",
+        desiredState: "restricted",
+        confirmation: "RESTRICT wrk_1",
+        reason: "Contain the workspace while the incident is investigated.",
+      }),
+    ).rejects.toMatchObject({ reason: "workspace_login_restriction_invalid" });
   });
 });

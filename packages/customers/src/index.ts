@@ -6,6 +6,10 @@ import {
   type CustomerDirectorySearchResult,
   type CustomerDirectoryStatus,
   type CustomerMembershipLifecycle,
+  type CustomerRestrictionCapability,
+  type CustomerRestrictionDesiredState,
+  type CustomerRestrictionObservedState,
+  type CustomerRestrictionRegistry,
   type CustomerUserLifecycle,
   type CustomerVerificationStatus,
   type CustomerWorkspaceLifecycle,
@@ -98,6 +102,52 @@ export interface CustomerDirectoryStore {
         readonly memberships: number;
       }
     | { readonly outcome: "unchanged"; readonly sourceRevision: string }
+    | { readonly outcome: "rejected"; readonly reason: string }
+  >;
+  listRestrictions(input: {
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly targetType: CustomerDirectoryEntityType;
+    readonly targetId: string;
+  }): Promise<CustomerRestrictionRegistry>;
+  setRestriction(input: {
+    readonly actorId: string;
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly targetType: CustomerDirectoryEntityType;
+    readonly targetId: string;
+    readonly capability: CustomerRestrictionCapability;
+    readonly desiredState: CustomerRestrictionDesiredState;
+    readonly reason: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<
+    | {
+        readonly outcome: "updated";
+        readonly restrictionId: string;
+        readonly revisionNumber: number;
+        readonly desiredState: CustomerRestrictionDesiredState;
+      }
+    | {
+        readonly outcome: "unchanged";
+        readonly restrictionId: string;
+        readonly revisionNumber: number;
+        readonly desiredState: CustomerRestrictionDesiredState;
+      }
+    | { readonly outcome: "rejected"; readonly reason: string }
+  >;
+  recordRestrictionObservation(input: {
+    readonly actorId: string;
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly restrictionId: string;
+    readonly desiredRevisionNumber: number;
+    readonly sourceRevision: string;
+    readonly observedState: CustomerRestrictionObservedState;
+    readonly message: string | null;
+    readonly observedAt: Date;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<
+    | { readonly outcome: "created"; readonly restrictionId: string }
+    | { readonly outcome: "unchanged"; readonly restrictionId: string }
     | { readonly outcome: "rejected"; readonly reason: string }
   >;
 }
@@ -227,7 +277,137 @@ export function createCustomerDirectoryService(input: {
       if (result.outcome === "rejected") reject(result.reason);
       return result;
     },
+
+    listRestrictions(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly targetType: CustomerDirectoryEntityType;
+      readonly targetId: string;
+    }) {
+      const targetType = requireEntityType(command.targetType);
+      assertRestrictionAuthorized(command.actor, targetType, false, now());
+      return input.store.listRestrictions({
+        environment: input.environment,
+        targetType,
+        targetId: requireIdentifier(command.targetId, "entity_id_invalid"),
+      });
+    },
+
+    async setRestriction(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly targetType: CustomerDirectoryEntityType;
+      readonly targetId: string;
+      readonly capability: CustomerRestrictionCapability;
+      readonly desiredState: CustomerRestrictionDesiredState;
+      readonly confirmation: string;
+      readonly reason: string;
+      readonly correlationId?: string;
+    }) {
+      const commandTime = now();
+      const targetType = requireEntityType(command.targetType);
+      const targetId = requireIdentifier(command.targetId, "entity_id_invalid");
+      const capability = requireRestrictionCapability(command.capability);
+      const desiredState = requireEnum(
+        command.desiredState,
+        ["restricted", "restored"] as const,
+        "restriction_state_invalid",
+      );
+      assertRestrictionAuthorized(command.actor, targetType, true, commandTime);
+      if (targetType === "workspace" && capability === "login") {
+        reject("workspace_login_restriction_invalid");
+      }
+      const verb = desiredState === "restricted" ? "RESTRICT" : "RESTORE";
+      if (command.confirmation.trim() !== `${verb} ${targetId}`) {
+        reject("restriction_confirmation_invalid");
+      }
+      const result = await input.store.setRestriction({
+        actorId: command.actor.operatorId,
+        environment: input.environment,
+        targetType,
+        targetId,
+        capability,
+        desiredState,
+        reason: requireText(
+          command.reason,
+          8,
+          500,
+          "restriction_reason_required",
+        ),
+        correlationId: command.correlationId ?? randomId(),
+        now: commandTime,
+      });
+      if (result.outcome === "rejected") reject(result.reason);
+      return result;
+    },
+
+    async recordRestrictionObservation(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly restrictionId: string;
+      readonly desiredRevisionNumber: number;
+      readonly sourceRevision: string;
+      readonly observedState: CustomerRestrictionObservedState;
+      readonly message?: string | null;
+      readonly observedAt: string;
+      readonly correlationId?: string;
+    }) {
+      const commandTime = now();
+      assertPlatformCommandAuthorized({
+        actor: command.actor,
+        requestedCapability: "platform:customer-restrictions:sync",
+        requireSuperAdministrator: true,
+        requireRecentStepUp: true,
+        now: commandTime,
+      });
+      const result = await input.store.recordRestrictionObservation({
+        actorId: command.actor.operatorId,
+        environment: input.environment,
+        restrictionId: requireUuid(
+          command.restrictionId,
+          "restriction_id_invalid",
+        ),
+        desiredRevisionNumber: requirePositiveInteger(
+          command.desiredRevisionNumber,
+          "restriction_revision_invalid",
+        ),
+        sourceRevision: requireSourceRevision(command.sourceRevision),
+        observedState: requireEnum(
+          command.observedState,
+          ["restricted", "restored", "failed"] as const,
+          "restriction_observation_state_invalid",
+        ),
+        message:
+          command.message === undefined || command.message === null
+            ? null
+            : requireText(
+                command.message,
+                1,
+                500,
+                "restriction_observation_message_invalid",
+              ),
+        observedAt: requireObservedAt(command.observedAt, commandTime),
+        correlationId: command.correlationId ?? randomId(),
+        now: commandTime,
+      });
+      if (result.outcome === "rejected") reject(result.reason);
+      return result;
+    },
   };
+}
+
+function assertRestrictionAuthorized(
+  actor: AuthenticatedOperator,
+  targetType: CustomerDirectoryEntityType,
+  requireStepUp: boolean,
+  now: Date,
+) {
+  assertPlatformCommandAuthorized({
+    actor,
+    requestedCapability:
+      targetType === "user"
+        ? "platform:users:restrict"
+        : "platform:workspaces:restrict",
+    requireRecentStepUp: requireStepUp,
+    now,
+  });
 }
 
 function assertAnyDirectoryRead(actor: AuthenticatedOperator) {
@@ -371,6 +551,22 @@ function requireEntityType(value: CustomerDirectoryEntityType) {
   );
 }
 
+function requireRestrictionCapability(value: CustomerRestrictionCapability) {
+  return requireEnum(
+    value,
+    [
+      "login",
+      "new_executions",
+      "provider_mutations",
+      "production_deployments",
+      "integrations",
+      "runner_access",
+      "all_access",
+    ] as const,
+    "restriction_capability_invalid",
+  );
+}
+
 function requireSearchQuery(value: string) {
   return requireText(value, 2, 200, "search_query_invalid").toLowerCase();
 }
@@ -405,6 +601,23 @@ function requireIdentifier(value: string, reason: string) {
   const normalized = value.trim();
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(normalized)) reject(reason);
   return normalized;
+}
+
+function requireUuid(value: string, reason: string) {
+  const normalized = value.trim().toLowerCase();
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      normalized,
+    )
+  ) {
+    reject(reason);
+  }
+  return normalized;
+}
+
+function requirePositiveInteger(value: number, reason: string) {
+  if (!Number.isSafeInteger(value) || value < 1) reject(reason);
+  return value;
 }
 
 function requireText(

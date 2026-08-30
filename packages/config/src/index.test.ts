@@ -33,7 +33,7 @@ describe("authentication runtime configuration", () => {
     BETTER_AUTH_SECRET: "b".repeat(32),
     ATHARVAN_VERIFICATION_HMAC_SECRET: "h".repeat(32),
     ATHARVAN_SUPER_ADMIN_EMAIL: "owner@arth.example",
-    ATHARVAN_EMAIL_FROM: "Atharvan <operators@arth.example>",
+    ATHARVAN_EMAIL_FROM: "Atharvan <login@updates.arth.sh>",
   } as const;
 
   it("allows email delivery to remain explicitly unconfigured", () => {

@@ -13,6 +13,7 @@ import type {
   CustomerDirectoryInspection,
   CustomerDirectorySearchResult,
   CustomerDirectoryStatus,
+  CustomerRestrictionRegistry,
   PlatformFeatureFlagRegistry,
   PlatformSecretReferenceRegistry,
 } from "@atharvan/domain";
@@ -127,6 +128,8 @@ export type CustomerDirectoryStatusResponse = CustomerDirectoryStatus;
 export type CustomerDirectorySearchResponse = CustomerDirectorySearchResult;
 
 export type CustomerDirectoryInspectionResponse = CustomerDirectoryInspection;
+
+export type CustomerRestrictionRegistryResponse = CustomerRestrictionRegistry;
 
 function isApiErrorBody(
   value: unknown,

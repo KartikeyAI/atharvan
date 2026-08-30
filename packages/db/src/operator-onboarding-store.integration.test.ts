@@ -29,6 +29,7 @@ import { createPostgresPlatformAdapterRegistryStore } from "./platform-adapter-s
 import { createPostgresPlatformSecretStore } from "./platform-secret-store";
 import {
   auditEvents,
+  customerAccessRestrictionRevisions,
   customerUserProjections,
   customerWorkspaceMembershipProjections,
   customerWorkspaceProjections,
@@ -734,6 +735,85 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
           },
         ],
       });
+      const restricted = await customerDirectoryService.setRestriction({
+        actor,
+        targetType: "workspace",
+        targetId: "arth-workspace-integration-1",
+        capability: "new_executions",
+        desiredState: "restricted",
+        confirmation: "RESTRICT arth-workspace-integration-1",
+        reason: "Contain new executions during the integration incident.",
+        correlationId: "00000000-0000-4000-8000-000000000133",
+      });
+      expect(restricted).toMatchObject({
+        outcome: "updated",
+        revisionNumber: 1,
+        desiredState: "restricted",
+      });
+      if (restricted.outcome !== "updated") {
+        throw new Error("integration_restriction_not_created");
+      }
+      await expect(
+        customerDirectoryService.listRestrictions({
+          actor,
+          targetType: "workspace",
+          targetId: "arth-workspace-integration-1",
+        }),
+      ).resolves.toMatchObject({
+        items: [
+          {
+            capability: "new_executions",
+            desiredState: "restricted",
+            reconciliationState: "pending",
+          },
+        ],
+      });
+      await customerDirectoryService.recordRestrictionObservation({
+        actor,
+        restrictionId: restricted.restrictionId,
+        desiredRevisionNumber: restricted.revisionNumber,
+        sourceRevision: "100",
+        observedState: "restricted",
+        message: "Arth deny policy is active.",
+        observedAt: commandTime.toISOString(),
+        correlationId: "00000000-0000-4000-8000-000000000134",
+      });
+      await expect(
+        customerDirectoryService.listRestrictions({
+          actor,
+          targetType: "workspace",
+          targetId: "arth-workspace-integration-1",
+        }),
+      ).resolves.toMatchObject({
+        items: [{ reconciliationState: "applied" }],
+      });
+      await expect(
+        customerDirectoryService.setRestriction({
+          actor,
+          targetType: "workspace",
+          targetId: "arth-workspace-integration-1",
+          capability: "new_executions",
+          desiredState: "restored",
+          confirmation: "RESTORE arth-workspace-integration-1",
+          reason: "Restore executions after the incident is resolved.",
+          correlationId: "00000000-0000-4000-8000-000000000135",
+        }),
+      ).resolves.toMatchObject({
+        outcome: "updated",
+        revisionNumber: 2,
+        desiredState: "restored",
+      });
+      await expect(
+        database
+          .update(customerAccessRestrictionRevisions)
+          .set({ reason: "Attempt to rewrite restriction history." })
+          .where(
+            eq(
+              customerAccessRestrictionRevisions.restrictionId,
+              restricted.restrictionId,
+            ),
+          ),
+      ).rejects.toThrow(/restriction history cannot be mutated/u);
       await expect(
         customerDirectoryService.reconcileSnapshot({
           ...customerSnapshot,

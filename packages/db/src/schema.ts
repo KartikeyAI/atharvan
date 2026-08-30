@@ -340,6 +340,34 @@ export const customerMembershipLifecycle = pgEnum(
   ["invited", "active", "suspended", "removed"],
 );
 
+export const customerRestrictionTargetType = pgEnum(
+  "customer_restriction_target_type",
+  ["user", "workspace"],
+);
+
+export const customerRestrictionCapability = pgEnum(
+  "customer_restriction_capability",
+  [
+    "login",
+    "new_executions",
+    "provider_mutations",
+    "production_deployments",
+    "integrations",
+    "runner_access",
+    "all_access",
+  ],
+);
+
+export const customerRestrictionDesiredState = pgEnum(
+  "customer_restriction_desired_state",
+  ["restricted", "restored"],
+);
+
+export const customerRestrictionObservedState = pgEnum(
+  "customer_restriction_observed_state",
+  ["restricted", "restored", "failed"],
+);
+
 export const operators = pgTable(
   "operators",
   {
@@ -2004,6 +2032,134 @@ export const customerWorkspaceMembershipProjections = pgTable(
     check(
       "customer_memberships_permission_sets_bounded",
       sql`cardinality(${table.grantedPermissions}) <= 200 AND cardinality(${table.deniedPermissions}) <= 200 AND cardinality(${table.effectivePermissions}) <= 200`,
+    ),
+  ],
+);
+
+export const customerAccessRestrictions = pgTable(
+  "customer_access_restrictions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    targetType: customerRestrictionTargetType("target_type").notNull(),
+    targetSourceId: text("target_source_id").notNull(),
+    capability: customerRestrictionCapability("capability").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_access_restrictions_target_capability_unique").on(
+      table.environment,
+      table.targetType,
+      table.targetSourceId,
+      table.capability,
+    ),
+    index("customer_access_restrictions_target_idx").on(
+      table.environment,
+      table.targetType,
+      table.targetSourceId,
+    ),
+    check(
+      "customer_access_restrictions_target_id_nonempty",
+      sql`length(btrim(${table.targetSourceId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "customer_access_restrictions_workspace_login_invalid",
+      sql`${table.targetType} <> 'workspace' OR ${table.capability} <> 'login'`,
+    ),
+  ],
+);
+
+export const customerAccessRestrictionRevisions = pgTable(
+  "customer_access_restriction_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    restrictionId: uuid("restriction_id")
+      .notNull()
+      .references(() => customerAccessRestrictions.id, {
+        onDelete: "restrict",
+      }),
+    revisionNumber: integer("revision_number").notNull(),
+    desiredState: customerRestrictionDesiredState("desired_state").notNull(),
+    reason: text("reason").notNull(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("customer_access_restriction_revisions_number_unique").on(
+      table.restrictionId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("customer_access_restriction_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("customer_access_restriction_revisions_requested_idx").on(
+      table.restrictionId,
+      table.requestedAt,
+    ),
+    check(
+      "customer_access_restriction_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "customer_access_restriction_revisions_reason_nonempty",
+      sql`length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const customerAccessRestrictionObservations = pgTable(
+  "customer_access_restriction_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    restrictionId: uuid("restriction_id")
+      .notNull()
+      .references(() => customerAccessRestrictions.id, {
+        onDelete: "restrict",
+      }),
+    desiredRevisionNumber: integer("desired_revision_number").notNull(),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    observedState: customerRestrictionObservedState("observed_state").notNull(),
+    message: text("message"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    synchronizedAt: timestamp("synchronized_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("customer_access_restriction_observations_source_unique").on(
+      table.restrictionId,
+      table.sourceRevision,
+    ),
+    uniqueIndex(
+      "customer_access_restriction_observations_correlation_unique",
+    ).on(table.correlationId),
+    index("customer_access_restriction_observations_revision_idx").on(
+      table.restrictionId,
+      table.desiredRevisionNumber,
+      table.observedAt,
+    ),
+    check(
+      "customer_access_restriction_observations_revision_positive",
+      sql`${table.desiredRevisionNumber} > 0`,
+    ),
+    check(
+      "customer_access_restriction_observations_source_revision_positive",
+      sql`${table.sourceRevision} > 0`,
+    ),
+    check(
+      "customer_access_restriction_observations_message_bounded",
+      sql`${table.message} IS NULL OR length(btrim(${table.message})) BETWEEN 1 AND 500`,
     ),
   ],
 );

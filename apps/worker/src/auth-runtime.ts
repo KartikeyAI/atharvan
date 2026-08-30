@@ -237,6 +237,15 @@ async function createProductionAuthenticationRuntime(input: {
       customerDirectoryService.inspect({ actor, ...command }),
     reconcileCustomerDirectorySnapshot: (actor, command) =>
       customerDirectoryService.reconcileSnapshot({ actor, ...command }),
+    listCustomerRestrictions: (actor, command) =>
+      customerDirectoryService.listRestrictions({ actor, ...command }),
+    setCustomerRestriction: (actor, command) =>
+      customerDirectoryService.setRestriction({ actor, ...command }),
+    recordCustomerRestrictionObservation: (actor, command) =>
+      customerDirectoryService.recordRestrictionObservation({
+        actor,
+        ...command,
+      }),
     beginPlatformCommand: (command) => commandService.begin(command),
     completePlatformCommand: (command) => commandService.complete(command),
     listPlatformAuditEvents: (actor, query) =>

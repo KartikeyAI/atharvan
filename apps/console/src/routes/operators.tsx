@@ -519,7 +519,11 @@ function AccessError({
       </strong>
       <span>{message}</span>
       {code === "authentication_required" ? (
-        <Link className="button button-outline" to="/login">
+        <Link
+          className="button button-outline"
+          search={{ returnTo: undefined }}
+          to="/login"
+        >
           Go to sign in
         </Link>
       ) : (

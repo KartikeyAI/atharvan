@@ -8,10 +8,20 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/api";
+import { sanitizeReturnTo } from "@/lib/session";
 
-export const Route = createFileRoute("/login")({ component: OperatorLogin });
+export const Route = createFileRoute("/login")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    returnTo:
+      search.returnTo === undefined
+        ? undefined
+        : sanitizeReturnTo(search.returnTo),
+  }),
+  component: OperatorLogin,
+});
 
 function OperatorLogin() {
+  const returnTo = sanitizeReturnTo(Route.useSearch().returnTo);
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [step, setStep] = useState<"email" | "otp">("email");
@@ -54,7 +64,7 @@ function OperatorLogin() {
         method: "POST",
         body: JSON.stringify({ email, otp }),
       });
-      window.location.assign("/operators");
+      window.location.assign(returnTo);
     } catch {
       setError(
         "The code is invalid or expired. Request a new code and try again.",

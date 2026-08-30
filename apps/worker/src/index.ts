@@ -28,6 +28,10 @@ import {
   type CustomerDirectoryInspection,
   type CustomerDirectorySearchResult,
   type CustomerDirectoryStatus,
+  type CustomerRestrictionCapability,
+  type CustomerRestrictionDesiredState,
+  type CustomerRestrictionObservedState,
+  type CustomerRestrictionRegistry,
   type MembershipDomainEntry,
   type PlatformAdapterCapabilityDeclaration,
   type PlatformAdapterCategory,
@@ -144,6 +148,26 @@ export interface AuthenticationRuntime {
     readonly users?: number;
     readonly workspaces?: number;
     readonly memberships?: number;
+  }>;
+  listCustomerRestrictions(
+    actor: AuthenticatedOperator,
+    input: ListCustomerRestrictionsCommand,
+  ): Promise<CustomerRestrictionRegistry>;
+  setCustomerRestriction(
+    actor: AuthenticatedOperator,
+    input: SetCustomerRestrictionCommand,
+  ): Promise<{
+    readonly outcome: "updated" | "unchanged";
+    readonly restrictionId: string;
+    readonly revisionNumber: number;
+    readonly desiredState: CustomerRestrictionDesiredState;
+  }>;
+  recordCustomerRestrictionObservation(
+    actor: AuthenticatedOperator,
+    input: RecordCustomerRestrictionObservationCommand,
+  ): Promise<{
+    readonly outcome: "created" | "unchanged";
+    readonly restrictionId: string;
   }>;
   beginPlatformCommand(
     input: BeginPlatformCommand,
@@ -325,6 +349,29 @@ export interface ReconcileCustomerDirectorySnapshotCommand {
   readonly workspaces: ReadonlyArray<CustomerDirectorySnapshotWorkspace>;
   readonly memberships: ReadonlyArray<CustomerDirectorySnapshotMembership>;
   readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface ListCustomerRestrictionsCommand {
+  readonly targetType: CustomerDirectoryEntityType;
+  readonly targetId: string;
+}
+
+export interface SetCustomerRestrictionCommand extends ListCustomerRestrictionsCommand {
+  readonly capability: CustomerRestrictionCapability;
+  readonly desiredState: CustomerRestrictionDesiredState;
+  readonly confirmation: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface RecordCustomerRestrictionObservationCommand {
+  readonly restrictionId: string;
+  readonly desiredRevisionNumber: number;
+  readonly sourceRevision: string;
+  readonly observedState: CustomerRestrictionObservedState;
+  readonly message: string | null;
+  readonly observedAt: string;
   readonly correlationId: string;
 }
 
@@ -737,6 +784,98 @@ export function createApp(
         }),
     );
   });
+
+  app.get(
+    "/v1/platform/customer-restrictions/:targetType/:targetId",
+    async (context) => {
+      const target = parseCustomerRestrictionTarget({
+        targetType: context.req.param("targetType"),
+        targetId: context.req.param("targetId"),
+      });
+      if (target === null) return invalidRequest(context);
+      const operator = context.get("operator");
+      const capability =
+        target.targetType === "user"
+          ? "platform:users:restrict"
+          : "platform:workspaces:restrict";
+      if (!operatorHasCapability(operator, capability))
+        return capabilityRequired(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      try {
+        return context.json(
+          await runtime.listCustomerRestrictions(operator, target),
+        );
+      } catch (error) {
+        return customerDirectoryReadError(context, error);
+      }
+    },
+  );
+
+  app.post("/v1/platform/customer-restrictions", async (context) => {
+    const input = await readJson(context, parseSetCustomerRestriction);
+    if (input === null) return invalidRequest(context);
+    const requiredCapability =
+      input.targetType === "user"
+        ? "platform:users:restrict"
+        : "platform:workspaces:restrict";
+    if (!operatorHasCapability(context.get("operator"), requiredCapability)) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability,
+        name: `${input.targetType}.${
+          input.desiredState === "restricted" ? "restrict" : "restore"
+        }-capability`,
+        version: 1,
+        targetType: `customer_${input.targetType}`,
+        targetId: input.targetId,
+        payload: input,
+        reason: input.reason,
+      },
+      () =>
+        runtime.setCustomerRestriction(context.get("operator"), {
+          ...input,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
+
+  app.put(
+    "/v1/platform/customer-restrictions/observations",
+    async (context) => {
+      const input = await readJson(
+        context,
+        parseCustomerRestrictionObservation,
+      );
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:customer-restrictions:sync",
+          name: "customer-restriction.observation.reconcile",
+          version: 1,
+          targetType: "customer_restriction",
+          targetId: input.restrictionId,
+          payload: input,
+          reason: "Reconcile the restriction state observed by Arth.",
+        },
+        () =>
+          runtime.recordCustomerRestrictionObservation(
+            context.get("operator"),
+            {
+              ...input,
+              correlationId: context.get("requestId"),
+            },
+          ),
+      );
+    },
+  );
 
   app.get("/v1/platform/audit-events", async (context) => {
     const operator = context.get("operator");
@@ -1534,6 +1673,76 @@ function parseReconcileCustomerDirectorySnapshot(
     workspaces !== null &&
     memberships !== null
     ? { sourceRevision, observedAt, users, workspaces, memberships, reason }
+    : null;
+}
+
+function parseCustomerRestrictionTarget(
+  value: unknown,
+): ListCustomerRestrictionsCommand | null {
+  if (!isRecord(value)) return null;
+  const targetId = readTrimmedString(value.targetId, 200);
+  return targetId !== null &&
+    (value.targetType === "user" || value.targetType === "workspace")
+    ? { targetType: value.targetType, targetId }
+    : null;
+}
+
+function parseSetCustomerRestriction(
+  value: unknown,
+): Omit<SetCustomerRestrictionCommand, "correlationId"> | null {
+  const target = parseCustomerRestrictionTarget(value);
+  if (target === null || !isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const confirmation = readTrimmedString(value.confirmation, 220);
+  const capability = value.capability;
+  const validCapability =
+    capability === "login" ||
+    capability === "new_executions" ||
+    capability === "provider_mutations" ||
+    capability === "production_deployments" ||
+    capability === "integrations" ||
+    capability === "runner_access" ||
+    capability === "all_access";
+  return reason !== null &&
+    confirmation !== null &&
+    validCapability &&
+    (value.desiredState === "restricted" || value.desiredState === "restored")
+    ? {
+        ...target,
+        capability,
+        desiredState: value.desiredState,
+        confirmation,
+        reason,
+      }
+    : null;
+}
+
+function parseCustomerRestrictionObservation(
+  value: unknown,
+): Omit<RecordCustomerRestrictionObservationCommand, "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const restrictionId = readTrimmedString(value.restrictionId, 36);
+  const sourceRevision = readTrimmedString(value.sourceRevision, 19);
+  const observedAt = readTrimmedString(value.observedAt, 40);
+  const message = readNullableString(value.message, 500);
+  return restrictionId !== null &&
+    sourceRevision !== null &&
+    observedAt !== null &&
+    typeof value.desiredRevisionNumber === "number" &&
+    Number.isSafeInteger(value.desiredRevisionNumber) &&
+    value.desiredRevisionNumber > 0 &&
+    (value.observedState === "restricted" ||
+      value.observedState === "restored" ||
+      value.observedState === "failed") &&
+    message !== undefined
+    ? {
+        restrictionId,
+        desiredRevisionNumber: value.desiredRevisionNumber,
+        sourceRevision,
+        observedState: value.observedState,
+        message,
+        observedAt,
+      }
     : null;
 }
 

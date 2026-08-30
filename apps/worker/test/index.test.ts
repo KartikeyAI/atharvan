@@ -99,6 +99,22 @@ function createRuntime(input?: {
       workspaces: input.workspaces.length,
       memberships: input.memberships.length,
     })),
+    listCustomerRestrictions: vi.fn(async (actor, input) => ({
+      environment: "development" as const,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      items: [],
+    })),
+    setCustomerRestriction: vi.fn(async (actor, input) => ({
+      outcome: "updated" as const,
+      restrictionId: "00000000-0000-4000-8000-000000000701",
+      revisionNumber: 1,
+      desiredState: input.desiredState,
+    })),
+    recordCustomerRestrictionObservation: vi.fn(async (actor, input) => ({
+      outcome: "created" as const,
+      restrictionId: input.restrictionId,
+    })),
     beginPlatformCommand: vi.fn(async () => ({
       state: "started" as const,
       commandId: "00000000-0000-4000-8000-000000000990",
@@ -427,6 +443,83 @@ describe("Atharvan control-plane worker", () => {
       expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
       expect.objectContaining({ sourceRevision: "12" }),
     );
+  });
+
+  it("requests a granular customer restriction through the shared command envelope", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/customer-restrictions",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "restrict-user-login-1",
+        },
+        body: JSON.stringify({
+          targetType: "user",
+          targetId: "usr_1",
+          capability: "login",
+          desiredState: "restricted",
+          confirmation: "RESTRICT usr_1",
+          reason: "Contain the confirmed customer account compromise.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runtime.beginPlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "user.restrict-capability",
+        requiredCapability: "platform:users:restrict",
+        targetType: "customer_user",
+        targetId: "usr_1",
+        idempotencyKey: "restrict-user-login-1",
+      }),
+    );
+    expect(runtime.setCustomerRestriction).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        targetType: "user",
+        targetId: "usr_1",
+        capability: "login",
+      }),
+    );
+  });
+
+  it("does not let a directory reader mutate customer restrictions", async () => {
+    const response = await createTestApp(
+      createRuntime({
+        operator: {
+          operatorId: "operator-2",
+          isSuperAdministrator: false,
+          effectiveCapabilities: ["platform:users:read"],
+        },
+      }),
+    ).request(
+      "/v1/platform/customer-restrictions",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "unauthorized-restriction",
+        },
+        body: JSON.stringify({
+          targetType: "user",
+          targetId: "usr_1",
+          capability: "login",
+          desiredState: "restricted",
+          confirmation: "RESTRICT usr_1",
+          reason: "Attempt a restriction without mutation authority.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      code: "operator_capability_required",
+    });
   });
 
   it("searches and exports immutable audit evidence with separate capabilities", async () => {

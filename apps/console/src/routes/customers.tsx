@@ -32,10 +32,13 @@ import {
   type CustomerDirectoryInspectionResponse,
   type CustomerDirectorySearchResponse,
   type CustomerDirectoryStatusResponse,
+  type CustomerRestrictionRegistryResponse,
   useApiResource,
 } from "@/lib/api";
 import type {
   CustomerDirectoryStatus,
+  CustomerRestrictionCapability,
+  CustomerRestrictionDesiredState,
   CustomerUserSummary,
   CustomerWorkspaceMembership,
   CustomerWorkspaceSummary,
@@ -65,6 +68,9 @@ function CustomersPage() {
   const [inspection, setInspection] = useState<
     RequestState<CustomerDirectoryInspectionResponse>
   >({ status: "idle" });
+  const [restrictions, setRestrictions] = useState<
+    RequestState<CustomerRestrictionRegistryResponse>
+  >({ status: "idle" });
 
   async function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,6 +93,7 @@ function CustomersPage() {
 
   async function inspect(entityType: "user" | "workspace", entityId: string) {
     setInspection({ status: "loading" });
+    setRestrictions({ status: "loading" });
     try {
       const data = await apiRequest<CustomerDirectoryInspectionResponse>(
         "/api/platform/customer-directory/inspect",
@@ -96,8 +103,24 @@ function CustomersPage() {
         },
       );
       setInspection({ status: "success", data });
+      await loadRestrictions(entityType, entityId);
     } catch (error) {
       setInspection({ status: "error", error: toApiError(error) });
+      setRestrictions({ status: "idle" });
+    }
+  }
+
+  async function loadRestrictions(
+    entityType: "user" | "workspace",
+    entityId: string,
+  ) {
+    try {
+      const data = await apiRequest<CustomerRestrictionRegistryResponse>(
+        `/api/platform/customer-restrictions/${entityType}/${encodeURIComponent(entityId)}`,
+      );
+      setRestrictions({ status: "success", data });
+    } catch (error) {
+      setRestrictions({ status: "error", error: toApiError(error) });
     }
   }
 
@@ -234,11 +257,241 @@ function CustomersPage() {
           <Alert variant="destructive">{inspection.error.message}</Alert>
         ) : null}
         {inspection.status === "success" ? (
-          <InspectionCard inspection={inspection.data} />
+          <>
+            <InspectionCard inspection={inspection.data} />
+            <RestrictionControl
+              inspection={inspection.data}
+              reload={loadRestrictions}
+              restrictions={restrictions}
+            />
+          </>
         ) : null}
       </div>
     </OperatorShell>
   );
+}
+
+const restrictionCapabilities: ReadonlyArray<{
+  readonly value: CustomerRestrictionCapability;
+  readonly label: string;
+}> = [
+  { value: "login", label: "Login" },
+  { value: "new_executions", label: "New executions" },
+  { value: "provider_mutations", label: "Provider mutations" },
+  { value: "production_deployments", label: "Production deployments" },
+  { value: "integrations", label: "Integrations" },
+  { value: "runner_access", label: "Runner access" },
+  { value: "all_access", label: "All access" },
+];
+
+function RestrictionControl({
+  inspection,
+  restrictions,
+  reload,
+}: Readonly<{
+  inspection: CustomerDirectoryInspectionResponse;
+  restrictions: RequestState<CustomerRestrictionRegistryResponse>;
+  reload: (entityType: "user" | "workspace", entityId: string) => Promise<void>;
+}>) {
+  const targetType = inspection.entityType;
+  const targetId =
+    inspection.entityType === "user"
+      ? inspection.user.id
+      : inspection.workspace.id;
+  const [capability, setCapability] = useState<CustomerRestrictionCapability>(
+    targetType === "user" ? "login" : "new_executions",
+  );
+  const [desiredState, setDesiredState] =
+    useState<CustomerRestrictionDesiredState>("restricted");
+  const [reason, setReason] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const expectedConfirmation = `${
+    desiredState === "restricted" ? "RESTRICT" : "RESTORE"
+  } ${targetId}`;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await apiRequest("/api/platform/customer-restrictions", {
+        method: "POST",
+        body: JSON.stringify({
+          targetType,
+          targetId,
+          capability,
+          desiredState,
+          confirmation,
+          reason,
+        }),
+      });
+      setConfirmation("");
+      setReason("");
+      setMessage(
+        `The ${desiredState} request is recorded and awaiting Arth reconciliation.`,
+      );
+      await reload(targetType, targetId);
+    } catch (requestError) {
+      setError(toApiError(requestError).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const availableCapabilities = restrictionCapabilities.filter(
+    (item) => targetType === "user" || item.value !== "login",
+  );
+  return (
+    <Card className="customer-restrictions">
+      <CardHeader>
+        <div>
+          <CardTitle>Access restrictions</CardTitle>
+          <CardDescription>
+            Request a granular deny or restoration. Atharvan records intent;
+            status remains pending until Arth reports the enforced state.
+          </CardDescription>
+        </div>
+        <Badge variant="warning">Step-up required</Badge>
+      </CardHeader>
+      <CardContent>
+        {restrictions.status === "loading" ? (
+          <p className="customer-muted">Loading restriction state…</p>
+        ) : null}
+        {restrictions.status === "error" ? (
+          <Alert variant="destructive">{restrictions.error.message}</Alert>
+        ) : null}
+        {restrictions.status === "success" ? (
+          restrictions.data.items.length === 0 ? (
+            <p className="customer-muted">No restriction history.</p>
+          ) : (
+            <div className="customer-restriction-list">
+              {restrictions.data.items.map((item) => (
+                <article className="customer-restriction-item" key={item.id}>
+                  <div>
+                    <strong>{restrictionLabel(item.capability)}</strong>
+                    <span>
+                      Revision {item.revisionNumber} · requested{" "}
+                      {formatDate(item.requestedAt)}
+                    </span>
+                  </div>
+                  <div className="customer-badge-row">
+                    <Badge
+                      variant={
+                        item.desiredState === "restricted"
+                          ? "critical"
+                          : "success"
+                      }
+                    >
+                      {item.desiredState}
+                    </Badge>
+                    <Badge
+                      variant={reconciliationVariant(item.reconciliationState)}
+                    >
+                      {item.reconciliationState}
+                    </Badge>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )
+        ) : null}
+        {message ? <Alert variant="success">{message}</Alert> : null}
+        {error ? <Alert variant="destructive">{error}</Alert> : null}
+        <form className="form-stack" onSubmit={submit}>
+          <div className="customer-search-grid">
+            <Field>
+              <FieldLabel htmlFor="restriction-capability">
+                Capability
+              </FieldLabel>
+              <select
+                className="input"
+                id="restriction-capability"
+                onChange={(event) =>
+                  setCapability(
+                    event.target.value as CustomerRestrictionCapability,
+                  )
+                }
+                value={capability}
+              >
+                {availableCapabilities.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="restriction-action">Action</FieldLabel>
+              <select
+                className="input"
+                id="restriction-action"
+                onChange={(event) => {
+                  setDesiredState(
+                    event.target.value as CustomerRestrictionDesiredState,
+                  );
+                  setConfirmation("");
+                }}
+                value={desiredState}
+              >
+                <option value="restricted">Restrict</option>
+                <option value="restored">Restore</option>
+              </select>
+            </Field>
+          </div>
+          <Field>
+            <FieldLabel htmlFor="restriction-reason">Reason</FieldLabel>
+            <Input
+              autoComplete="off"
+              id="restriction-reason"
+              minLength={8}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Incident, risk, or restoration rationale"
+              required
+              value={reason}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="restriction-confirmation">
+              Type {expectedConfirmation}
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              id="restriction-confirmation"
+              onChange={(event) => setConfirmation(event.target.value)}
+              required
+              value={confirmation}
+            />
+            <FieldDescription>
+              The command will not claim enforcement until Arth reconciles it.
+            </FieldDescription>
+          </Field>
+          <Button
+            disabled={pending || confirmation !== expectedConfirmation}
+            type="submit"
+            variant={desiredState === "restricted" ? "destructive" : "default"}
+          >
+            {pending ? "Submitting…" : `Request ${desiredState}`}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function restrictionLabel(value: CustomerRestrictionCapability) {
+  return (
+    restrictionCapabilities.find((item) => item.value === value)?.label ?? value
+  );
+}
+
+function reconciliationVariant(value: string) {
+  if (value === "applied") return "success" as const;
+  if (value === "pending") return "warning" as const;
+  return "critical" as const;
 }
 
 function DirectoryStatusCard({

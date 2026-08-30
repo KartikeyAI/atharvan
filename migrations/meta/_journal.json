@@ -92,6 +92,13 @@
       "when": 1788113496946,
       "tag": "0012_customer_directory_projection",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788121236265,
+      "tag": "0013_customer_access_restrictions",
+      "breakpoints": true
     }
   ]
 }

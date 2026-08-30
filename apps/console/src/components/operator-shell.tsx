@@ -21,8 +21,10 @@ import {
   UsersIcon,
   WalletCardsIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
+
+import { apiRequest } from "@/lib/api";
 
 const navigation: ReadonlyArray<{
   readonly label: string;
@@ -109,9 +111,19 @@ export function OperatorShell({
   title,
   children,
 }: Readonly<{ title: string; children: ReactNode }>) {
+  const [signingOut, setSigningOut] = useState(false);
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
+
+  async function signOut() {
+    setSigningOut(true);
+    try {
+      await apiRequest("/api/auth/sign-out", { method: "POST" });
+    } finally {
+      window.location.assign("/login");
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -168,9 +180,14 @@ export function OperatorShell({
             <strong>{title}</strong>
           </div>
           <div className="topbar-spacer" />
-          <Link className="quiet-link" to="/login">
-            Sign in
-          </Link>
+          <button
+            className="quiet-link"
+            disabled={signingOut}
+            onClick={signOut}
+            type="button"
+          >
+            {signingOut ? "Signing out…" : "Sign out"}
+          </button>
           <button aria-label="Help" className="icon-button" type="button">
             <CircleHelpIcon aria-hidden="true" />
           </button>

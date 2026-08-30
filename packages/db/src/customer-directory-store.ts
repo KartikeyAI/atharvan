@@ -1,17 +1,21 @@
 import type { CustomerDirectoryStore } from "@atharvan/customers";
 import type {
   CustomerDirectoryStatus,
+  CustomerRestrictionEntry,
   CustomerUserSummary,
   CustomerWorkspaceMembership,
   CustomerWorkspaceSummary,
 } from "@atharvan/domain";
-import { and, asc, eq, ilike, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, lt, or } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
 import {
   auditEvents,
+  customerAccessRestrictionObservations,
+  customerAccessRestrictionRevisions,
+  customerAccessRestrictions,
   customerDirectorySources,
   customerUserProjections,
   customerWorkspaceMembershipProjections,
@@ -217,6 +221,318 @@ export function createPostgresCustomerDirectoryStore(
         };
       });
     },
+
+    async listRestrictions(input) {
+      const restrictions = await database
+        .select()
+        .from(customerAccessRestrictions)
+        .where(
+          and(
+            eq(customerAccessRestrictions.environment, input.environment),
+            eq(customerAccessRestrictions.targetType, input.targetType),
+            eq(customerAccessRestrictions.targetSourceId, input.targetId),
+          ),
+        )
+        .orderBy(asc(customerAccessRestrictions.capability));
+      const items = (
+        await Promise.all(
+          restrictions.map((restriction) =>
+            loadRestrictionEntry(database, restriction),
+          ),
+        )
+      ).filter((value): value is CustomerRestrictionEntry => value !== null);
+      return {
+        environment: input.environment,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        items,
+      };
+    },
+
+    setRestriction(input) {
+      return database.transaction(async (transaction) => {
+        if (!(await activeOperatorExists(transaction, input.actorId))) {
+          return { outcome: "rejected", reason: "operator_not_active" };
+        }
+        if (
+          !(await projectedTargetExists(
+            transaction,
+            input.environment,
+            input.targetType,
+            input.targetId,
+          ))
+        ) {
+          return { outcome: "rejected", reason: "customer_target_not_found" };
+        }
+
+        let [restriction] = await transaction
+          .select()
+          .from(customerAccessRestrictions)
+          .where(
+            and(
+              eq(customerAccessRestrictions.environment, input.environment),
+              eq(customerAccessRestrictions.targetType, input.targetType),
+              eq(customerAccessRestrictions.targetSourceId, input.targetId),
+              eq(customerAccessRestrictions.capability, input.capability),
+            ),
+          )
+          .limit(1)
+          .for("update");
+
+        if (restriction === undefined) {
+          if (input.desiredState === "restored") {
+            return {
+              outcome: "rejected",
+              reason: "restriction_not_active",
+            };
+          }
+          [restriction] = await transaction
+            .insert(customerAccessRestrictions)
+            .values({
+              environment: input.environment,
+              targetType: input.targetType,
+              targetSourceId: input.targetId,
+              capability: input.capability,
+              createdAt: input.now,
+            })
+            .returning();
+        }
+        if (restriction === undefined) {
+          return { outcome: "rejected", reason: "restriction_create_failed" };
+        }
+
+        const [current] = await transaction
+          .select()
+          .from(customerAccessRestrictionRevisions)
+          .where(
+            eq(
+              customerAccessRestrictionRevisions.restrictionId,
+              restriction.id,
+            ),
+          )
+          .orderBy(desc(customerAccessRestrictionRevisions.revisionNumber))
+          .limit(1);
+        if (current?.desiredState === input.desiredState) {
+          return {
+            outcome: "unchanged",
+            restrictionId: restriction.id,
+            revisionNumber: current.revisionNumber,
+            desiredState: current.desiredState,
+          };
+        }
+        if (input.desiredState === "restored" && current === undefined) {
+          return { outcome: "rejected", reason: "restriction_not_active" };
+        }
+        const revisionNumber = (current?.revisionNumber ?? 0) + 1;
+        await transaction.insert(customerAccessRestrictionRevisions).values({
+          restrictionId: restriction.id,
+          revisionNumber,
+          desiredState: input.desiredState,
+          reason: input.reason,
+          actorId: input.actorId,
+          correlationId: input.correlationId,
+          requestedAt: input.now,
+        });
+        await transaction.insert(auditEvents).values({
+          actorId: input.actorId,
+          eventType: `platform.customer_restriction.${input.desiredState}_requested`,
+          targetType: `customer_${input.targetType}`,
+          targetId: input.targetId,
+          correlationId: input.correlationId,
+          reason: input.reason,
+          evidence: {
+            restrictionId: restriction.id,
+            capability: input.capability,
+            desiredState: input.desiredState,
+            revisionNumber,
+            reconciliationState: "pending",
+          },
+          occurredAt: input.now,
+        });
+        return {
+          outcome: "updated",
+          restrictionId: restriction.id,
+          revisionNumber,
+          desiredState: input.desiredState,
+        };
+      });
+    },
+
+    recordRestrictionObservation(input) {
+      return database.transaction(async (transaction) => {
+        if (!(await activeOperatorExists(transaction, input.actorId))) {
+          return { outcome: "rejected", reason: "operator_not_active" };
+        }
+        const [restriction] = await transaction
+          .select()
+          .from(customerAccessRestrictions)
+          .where(
+            and(
+              eq(customerAccessRestrictions.id, input.restrictionId),
+              eq(customerAccessRestrictions.environment, input.environment),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (restriction === undefined) {
+          return { outcome: "rejected", reason: "restriction_not_found" };
+        }
+        const [desiredRevision] = await transaction
+          .select()
+          .from(customerAccessRestrictionRevisions)
+          .where(
+            and(
+              eq(
+                customerAccessRestrictionRevisions.restrictionId,
+                input.restrictionId,
+              ),
+              eq(
+                customerAccessRestrictionRevisions.revisionNumber,
+                input.desiredRevisionNumber,
+              ),
+            ),
+          )
+          .limit(1);
+        if (desiredRevision === undefined) {
+          return {
+            outcome: "rejected",
+            reason: "restriction_revision_not_found",
+          };
+        }
+        const [latestObservation] = await transaction
+          .select({
+            sourceRevision:
+              customerAccessRestrictionObservations.sourceRevision,
+          })
+          .from(customerAccessRestrictionObservations)
+          .where(
+            eq(
+              customerAccessRestrictionObservations.restrictionId,
+              input.restrictionId,
+            ),
+          )
+          .orderBy(desc(customerAccessRestrictionObservations.sourceRevision))
+          .limit(1);
+        const sourceRevision = BigInt(input.sourceRevision);
+        if (
+          latestObservation !== undefined &&
+          sourceRevision <= latestObservation.sourceRevision
+        ) {
+          return {
+            outcome: "unchanged",
+            restrictionId: input.restrictionId,
+          };
+        }
+        await transaction.insert(customerAccessRestrictionObservations).values({
+          restrictionId: input.restrictionId,
+          desiredRevisionNumber: input.desiredRevisionNumber,
+          sourceRevision,
+          observedState: input.observedState,
+          message: input.message,
+          observedAt: input.observedAt,
+          synchronizedAt: input.now,
+          actorId: input.actorId,
+          correlationId: input.correlationId,
+        });
+        await transaction.insert(auditEvents).values({
+          actorId: input.actorId,
+          eventType: "platform.customer_restriction.reconciled",
+          targetType: `customer_${restriction.targetType}`,
+          targetId: restriction.targetSourceId,
+          correlationId: input.correlationId,
+          reason: "Reconcile the restriction state observed by Arth.",
+          evidence: {
+            restrictionId: restriction.id,
+            desiredRevisionNumber: input.desiredRevisionNumber,
+            sourceRevision: input.sourceRevision,
+            observedState: input.observedState,
+          },
+          occurredAt: input.now,
+        });
+        return { outcome: "created", restrictionId: input.restrictionId };
+      });
+    },
+  };
+}
+
+async function activeOperatorExists(transaction: Transaction, actorId: string) {
+  const [operator] = await transaction
+    .select({ id: operators.id })
+    .from(operators)
+    .where(and(eq(operators.id, actorId), eq(operators.status, "active")))
+    .limit(1);
+  return operator !== undefined;
+}
+
+async function projectedTargetExists(
+  transaction: Transaction,
+  environment: ReconcileInput["environment"],
+  targetType: "user" | "workspace",
+  targetId: string,
+) {
+  const table =
+    targetType === "user"
+      ? customerUserProjections
+      : customerWorkspaceProjections;
+  const [target] = await transaction
+    .select({ id: table.id })
+    .from(table)
+    .where(
+      and(eq(table.environment, environment), eq(table.sourceId, targetId)),
+    )
+    .limit(1);
+  return target !== undefined;
+}
+
+async function loadRestrictionEntry(
+  database: Database | Transaction,
+  restriction: typeof customerAccessRestrictions.$inferSelect,
+): Promise<CustomerRestrictionEntry | null> {
+  const [revision] = await database
+    .select()
+    .from(customerAccessRestrictionRevisions)
+    .where(eq(customerAccessRestrictionRevisions.restrictionId, restriction.id))
+    .orderBy(desc(customerAccessRestrictionRevisions.revisionNumber))
+    .limit(1);
+  if (revision === undefined) return null;
+  const [observation] = await database
+    .select()
+    .from(customerAccessRestrictionObservations)
+    .where(
+      and(
+        eq(customerAccessRestrictionObservations.restrictionId, restriction.id),
+        eq(
+          customerAccessRestrictionObservations.desiredRevisionNumber,
+          revision.revisionNumber,
+        ),
+      ),
+    )
+    .orderBy(desc(customerAccessRestrictionObservations.sourceRevision))
+    .limit(1);
+  const reconciliationState =
+    observation === undefined
+      ? "pending"
+      : observation.observedState === "failed"
+        ? "failed"
+        : observation.observedState === revision.desiredState
+          ? "applied"
+          : "drifted";
+  return {
+    id: restriction.id,
+    environment: restriction.environment,
+    targetType: restriction.targetType,
+    targetId: restriction.targetSourceId,
+    capability: restriction.capability,
+    revisionNumber: revision.revisionNumber,
+    desiredState: revision.desiredState,
+    reconciliationState,
+    reason: revision.reason,
+    requestedByOperatorId: revision.actorId,
+    requestedAt: revision.requestedAt.toISOString(),
+    observedState: observation?.observedState ?? null,
+    observedSourceRevision: observation?.sourceRevision.toString() ?? null,
+    observedAt: observation?.observedAt.toISOString() ?? null,
+    reconciliationMessage: observation?.message ?? null,
   };
 }
 

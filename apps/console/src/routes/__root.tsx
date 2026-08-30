@@ -4,11 +4,34 @@ import {
   Outlet,
   Scripts,
   createRootRoute,
+  redirect,
 } from "@tanstack/react-router";
 
+import { resolveConsoleSession, sanitizeReturnTo } from "../lib/session";
 import styles from "../styles.css?url";
 
 export const Route = createRootRoute({
+  beforeLoad: async ({ location }) => {
+    if (location.pathname.startsWith("/api/")) return;
+    const session = await resolveConsoleSession();
+    if (location.pathname === "/login") {
+      if (session.authenticated) {
+        const returnTo = new URLSearchParams(location.searchStr).get(
+          "returnTo",
+        );
+        throw redirect({ href: sanitizeReturnTo(returnTo) });
+      }
+      return;
+    }
+    if (!session.authenticated) {
+      throw redirect({
+        to: "/login",
+        search: {
+          returnTo: sanitizeReturnTo(location.href),
+        },
+      });
+    }
+  },
   head: () => ({
     links: [{ rel: "stylesheet", href: styles }],
     meta: [
