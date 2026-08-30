@@ -4,6 +4,7 @@ import type {
   MembershipDomainEntry,
   OperatorDirectoryEntry,
   OperatorRoleDefinitionEntry,
+  PlatformConfigurationRegistry,
 } from "@atharvan/domain";
 
 export class ApiError extends Error {
@@ -87,6 +88,8 @@ export type MembershipDomainResponse = {
 export type OperatorRolesResponse = {
   readonly items: ReadonlyArray<OperatorRoleDefinitionEntry>;
 };
+
+export type PlatformConfigurationResponse = PlatformConfigurationRegistry;
 
 function isApiErrorBody(
   value: unknown,

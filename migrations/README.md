@@ -21,4 +21,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0003_operator_roles.sql` adds immutable, versioned operator-role definitions, audited role assignments, and an optional invitation-to-role reference. It seeds only system role definitions; it does not grant a role to any operator or broaden the Super Administrator wildcard. Existing activated invitations continue to resolve their immutable capability snapshots until an explicit role assignment replaces that legacy path.
 
+`0004_platform_configuration_registry.sql` adds typed non-secret configuration definitions, append-only revisions, and current platform/environment bindings. It seeds declared operational defaults but no overrides. A PostgreSQL trigger rejects revision updates or deletion, while current bindings may move forward only through the audited command path. Secret-like keys are rejected by both application validation and a database constraint.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

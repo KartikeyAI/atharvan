@@ -71,7 +71,7 @@ const navigation: ReadonlyArray<{
     label: "Settings",
     href: "/settings",
     icon: SettingsIcon,
-    available: false,
+    available: true,
   },
 ];
 

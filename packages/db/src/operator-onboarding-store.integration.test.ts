@@ -1,4 +1,5 @@
 import { createOperatorOnboardingService } from "@atharvan/auth";
+import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import type { AuthenticatedOperator } from "@atharvan/domain";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -7,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
 import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
+import { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 import {
   auditEvents,
   operatorInvitations,
@@ -59,6 +61,69 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         effectiveCapabilities: ["platform:*"],
         stepUpVerifiedAt: commandTime,
       };
+      const configurationStore =
+        createPostgresPlatformConfigurationStore(database);
+      const configurationService =
+        createPlatformConfigurationAdministrationService({
+          store: configurationStore,
+          environment: "development",
+          now: () => commandTime,
+        });
+
+      const configurationChanges = await Promise.all([
+        configurationService.setConfiguration({
+          actor,
+          key: "platform.release.channel",
+          scope: "platform",
+          value: "beta",
+          reason: "Exercise the platform-level revision path.",
+          correlationId: "00000000-0000-4000-8000-000000000107",
+        }),
+        configurationService.setConfiguration({
+          actor,
+          key: "platform.release.channel",
+          scope: "environment",
+          value: "stable",
+          reason: "Exercise environment precedence under concurrency.",
+          correlationId: "00000000-0000-4000-8000-000000000108",
+        }),
+      ]);
+      expect(configurationChanges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ outcome: "updated" }),
+          expect.objectContaining({ outcome: "updated" }),
+        ]),
+      );
+      await expect(
+        configurationService.setConfiguration({
+          actor,
+          key: "platform.release.channel",
+          scope: "environment",
+          value: "stable",
+          reason: "Prove an identical value remains a no-op.",
+          correlationId: "00000000-0000-4000-8000-000000000109",
+        }),
+      ).resolves.toEqual({
+        outcome: "unchanged",
+        key: "platform.release.channel",
+      });
+      await expect(
+        configurationStore.listConfiguration("development"),
+      ).resolves.toMatchObject({
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            key: "platform.release.channel",
+            platformOverride: expect.objectContaining({ value: "beta" }),
+            environmentOverride: expect.objectContaining({ value: "stable" }),
+            resolvedValue: "stable",
+            resolvedFrom: "environment",
+            recentRevisions: expect.arrayContaining([
+              expect.objectContaining({ value: "beta" }),
+              expect.objectContaining({ value: "stable" }),
+            ]),
+          }),
+        ]),
+      });
 
       await expect(
         service.createInvitation({

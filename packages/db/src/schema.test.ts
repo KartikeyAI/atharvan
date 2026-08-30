@@ -9,6 +9,9 @@ import {
   operatorRoleDefinitions,
   operators,
   operatorVerificationChallenges,
+  platformConfigurationBindings,
+  platformConfigurationDefinitions,
+  platformConfigurationRevisions,
   rateLimit,
   session,
   user,
@@ -85,5 +88,30 @@ describe("operator onboarding schema", () => {
     expect(
       assignmentConfig.checks.map((constraint) => constraint.name),
     ).toContain("operator_role_assignments_revocation_metadata");
+  });
+
+  it("separates immutable configuration revisions from current bindings", () => {
+    const definitionConfig = getTableConfig(platformConfigurationDefinitions);
+    const revisionConfig = getTableConfig(platformConfigurationRevisions);
+    const bindingConfig = getTableConfig(platformConfigurationBindings);
+
+    expect(
+      definitionConfig.checks.map((constraint) => constraint.name),
+    ).toEqual(
+      expect.arrayContaining([
+        "platform_configuration_definitions_key_nonsecret",
+        "platform_configuration_definitions_default_type",
+      ]),
+    );
+    expect(revisionConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "platform_configuration_revisions_number_unique",
+    );
+    expect(bindingConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "platform_configuration_bindings_platform_unique",
+        "platform_configuration_bindings_environment_unique",
+        "platform_configuration_bindings_revision_unique",
+      ]),
+    );
   });
 });

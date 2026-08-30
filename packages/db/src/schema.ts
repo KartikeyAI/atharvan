@@ -15,6 +15,11 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+import type {
+  PlatformConfigurationValidation,
+  PlatformConfigurationValue,
+} from "@atharvan/domain";
+
 export const authSchema = pgSchema("auth");
 
 export const user = authSchema.table(
@@ -142,6 +147,21 @@ export const operatorInvitationStatus = pgEnum("operator_invitation_status", [
 export const verificationChallengeStatus = pgEnum(
   "verification_challenge_status",
   ["pending", "consumed", "expired", "locked", "superseded"],
+);
+
+export const platformConfigurationValueType = pgEnum(
+  "platform_configuration_value_type",
+  ["boolean", "integer", "string", "string_list"],
+);
+
+export const platformConfigurationScope = pgEnum(
+  "platform_configuration_scope",
+  ["platform", "environment"],
+);
+
+export const platformConfigurationEnvironment = pgEnum(
+  "platform_configuration_environment",
+  ["development", "production", "test"],
 );
 
 export const operators = pgTable(
@@ -459,6 +479,148 @@ export const operatorVerificationChallenges = pgTable(
     check(
       "operator_verification_challenges_consumed_metadata",
       sql`${table.status} <> 'consumed' OR ${table.consumedAt} IS NOT NULL`,
+    ),
+  ],
+);
+
+export const platformConfigurationDefinitions = pgTable(
+  "platform_configuration_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull(),
+    category: text("category").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    valueType: platformConfigurationValueType("value_type").notNull(),
+    validation: jsonb("validation")
+      .$type<PlatformConfigurationValidation>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    defaultValue: jsonb("default_value")
+      .$type<PlatformConfigurationValue>()
+      .notNull(),
+    isMutable: boolean("is_mutable").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_configuration_definitions_key_unique").on(table.key),
+    index("platform_configuration_definitions_category_idx").on(
+      table.category,
+      table.key,
+    ),
+    check(
+      "platform_configuration_definitions_key_normalized",
+      sql`${table.key} = lower(${table.key}) AND ${table.key} ~ '^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)+$'`,
+    ),
+    check(
+      "platform_configuration_definitions_key_nonsecret",
+      sql`${table.key} !~ '(^|[._-])(secret|password|token|credential|private[_-]?key|api[_-]?key|access[_-]?key|signing[_-]?key|hmac)([._-]|$)'`,
+    ),
+    check(
+      "platform_configuration_definitions_category_normalized",
+      sql`${table.category} = lower(${table.category}) AND ${table.category} ~ '^[a-z][a-z0-9_-]{1,63}$'`,
+    ),
+    check(
+      "platform_configuration_definitions_validation_object",
+      sql`jsonb_typeof(${table.validation}) = 'object'`,
+    ),
+    check(
+      "platform_configuration_definitions_default_type",
+      sql`(${table.valueType} = 'boolean' AND jsonb_typeof(${table.defaultValue}) = 'boolean') OR (${table.valueType} = 'integer' AND jsonb_typeof(${table.defaultValue}) = 'number') OR (${table.valueType} = 'string' AND jsonb_typeof(${table.defaultValue}) = 'string') OR (${table.valueType} = 'string_list' AND jsonb_typeof(${table.defaultValue}) = 'array' AND jsonb_array_length(${table.defaultValue}) > 0)`,
+    ),
+  ],
+);
+
+export const platformConfigurationRevisions = pgTable(
+  "platform_configuration_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    definitionId: uuid("definition_id")
+      .notNull()
+      .references(() => platformConfigurationDefinitions.id, {
+        onDelete: "restrict",
+      }),
+    revisionNumber: integer("revision_number").notNull(),
+    scope: platformConfigurationScope("scope").notNull(),
+    environment: platformConfigurationEnvironment("environment"),
+    value: jsonb("value").$type<PlatformConfigurationValue>().notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_configuration_revisions_number_unique").on(
+      table.definitionId,
+      table.revisionNumber,
+    ),
+    index("platform_configuration_revisions_definition_created_idx").on(
+      table.definitionId,
+      table.createdAt,
+    ),
+    index("platform_configuration_revisions_correlation_idx").on(
+      table.correlationId,
+    ),
+    check(
+      "platform_configuration_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "platform_configuration_revisions_scope_environment",
+      sql`(${table.scope} = 'platform' AND ${table.environment} IS NULL) OR (${table.scope} = 'environment' AND ${table.environment} IS NOT NULL)`,
+    ),
+    check(
+      "platform_configuration_revisions_value_supported",
+      sql`jsonb_typeof(${table.value}) IN ('boolean', 'number', 'string', 'array')`,
+    ),
+  ],
+);
+
+export const platformConfigurationBindings = pgTable(
+  "platform_configuration_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    definitionId: uuid("definition_id")
+      .notNull()
+      .references(() => platformConfigurationDefinitions.id, {
+        onDelete: "restrict",
+      }),
+    scope: platformConfigurationScope("scope").notNull(),
+    environment: platformConfigurationEnvironment("environment"),
+    currentRevisionId: uuid("current_revision_id")
+      .notNull()
+      .references(() => platformConfigurationRevisions.id, {
+        onDelete: "restrict",
+      }),
+    updatedByOperatorId: uuid("updated_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_configuration_bindings_platform_unique")
+      .on(table.definitionId)
+      .where(sql`${table.scope} = 'platform'`),
+    uniqueIndex("platform_configuration_bindings_environment_unique")
+      .on(table.definitionId, table.environment)
+      .where(sql`${table.scope} = 'environment'`),
+    uniqueIndex("platform_configuration_bindings_revision_unique").on(
+      table.currentRevisionId,
+    ),
+    index("platform_configuration_bindings_updated_by_idx").on(
+      table.updatedByOperatorId,
+    ),
+    check(
+      "platform_configuration_bindings_scope_environment",
+      sql`(${table.scope} = 'platform' AND ${table.environment} IS NULL) OR (${table.scope} = 'environment' AND ${table.environment} IS NOT NULL)`,
     ),
   ],
 );

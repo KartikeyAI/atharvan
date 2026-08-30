@@ -6,6 +6,7 @@ import * as schema from "./schema";
 export { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
 export { createPostgresOperatorRoleAdministrationStore } from "./operator-role-administration-store";
 export { createPostgresPlatformAdministrationReader } from "./platform-administration-reader";
+export { createPostgresPlatformConfigurationStore } from "./platform-configuration-store";
 export { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 export * as authDatabaseSchema from "./schema";
 

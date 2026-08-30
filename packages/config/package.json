@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@atharvan/domain": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

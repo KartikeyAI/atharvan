@@ -6,7 +6,10 @@ import {
   createOperatorRoleAdministrationService,
   OnboardingCommandRejectedError,
 } from "@atharvan/auth";
-import { parseAuthenticationRuntimeConfig } from "@atharvan/config";
+import {
+  createPlatformConfigurationAdministrationService,
+  parseAuthenticationRuntimeConfig,
+} from "@atharvan/config";
 import {
   authDatabaseSchema,
   createNeonDatabase,
@@ -14,6 +17,7 @@ import {
   createPostgresOperatorRoleAdministrationStore,
   createPostgresOperatorSessionPolicyStore,
   createPostgresPlatformAdministrationReader,
+  createPostgresPlatformConfigurationStore,
 } from "@atharvan/db";
 import {
   createResendTransactionalEmailSender,
@@ -71,6 +75,14 @@ async function createProductionAuthenticationRuntime(input: {
       databaseHandle.database,
     ),
   });
+  const configurationStore = createPostgresPlatformConfigurationStore(
+    databaseHandle.database,
+  );
+  const configurationAdministrationService =
+    createPlatformConfigurationAdministrationService({
+      store: configurationStore,
+      environment: config.ATHARVAN_ENVIRONMENT,
+    });
   const resendApiKey = config.RESEND_API_KEY;
   const emailDeliveryConfigured = resendApiKey !== undefined;
   const emailSender = resendApiKey
@@ -138,7 +150,18 @@ async function createProductionAuthenticationRuntime(input: {
     listMembershipDomains: () => administrationReader.listMembershipDomains(),
     listOperatorRoleDefinitions: () =>
       administrationReader.listOperatorRoleDefinitions(),
+    listPlatformConfiguration: () =>
+      configurationStore.listConfiguration(config.ATHARVAN_ENVIRONMENT),
     async createOperatorInvitation(actor, command) {
+      const registry = await configurationStore.listConfiguration(
+        config.ATHARVAN_ENVIRONMENT,
+      );
+      const signupMode = registry.items.find(
+        (item) => item.key === "platform.signup.mode",
+      );
+      if (signupMode?.resolvedValue === "disabled") {
+        throw new OnboardingCommandRejectedError("operator_signup_disabled");
+      }
       const role = await administrationReader.findActiveOperatorRoleDefinition(
         command.roleKey,
       );
@@ -147,12 +170,19 @@ async function createProductionAuthenticationRuntime(input: {
         throw new OnboardingCommandRejectedError("role_not_found");
       }
 
+      const invitationLifetime = registry.items.find(
+        (item) => item.key === "operator.invitation.lifetime_hours",
+      )?.resolvedValue;
+      const invitationLifetimeHours =
+        typeof invitationLifetime === "number" ? invitationLifetime : 24;
+
       const result = await onboardingService.createInvitation({
         actor,
         email: command.email,
         organizationId: command.organizationId,
         intendedCapabilities: role.capabilities,
         intendedRoleDefinitionId: role.definitionId,
+        expiresAt: new Date(Date.now() + invitationLifetimeHours * 60 * 60_000),
         reason: command.reason,
         ...(command.approvalReference === undefined
           ? {}
@@ -184,6 +214,15 @@ async function createProductionAuthenticationRuntime(input: {
         actor,
         targetOperatorId: command.targetOperatorId,
         roleKeys: command.roleKeys,
+        reason: command.reason,
+        correlationId: command.correlationId,
+      }),
+    setPlatformConfiguration: (actor, command) =>
+      configurationAdministrationService.setConfiguration({
+        actor,
+        key: command.key,
+        scope: command.scope,
+        value: command.value,
         reason: command.reason,
         correlationId: command.correlationId,
       }),

@@ -12,6 +12,9 @@ const expectedTables = [
   "operator_invitations",
   "operator_verification_challenges",
   "operators",
+  "platform_configuration_bindings",
+  "platform_configuration_definitions",
+  "platform_configuration_revisions",
 ] as const;
 
 const expectedIndexes = [
@@ -20,6 +23,10 @@ const expectedIndexes = [
   "operator_invitations_one_pending_per_operator",
   "operator_verification_challenges_one_pending_per_operator",
   "operator_verification_challenges_correlation_idx",
+  "platform_configuration_bindings_environment_unique",
+  "platform_configuration_bindings_platform_unique",
+  "platform_configuration_definitions_key_unique",
+  "platform_configuration_revisions_number_unique",
 ] as const;
 
 const expectedAuthTables = [
@@ -39,6 +46,10 @@ const expectedAuthIndexes = [
 
 const expectedConstraints = [
   "operators_super_administrator_must_be_active",
+] as const;
+
+const expectedTriggers = [
+  "platform_configuration_revisions_immutable",
 ] as const;
 
 const pool = new Pool({
@@ -65,6 +76,9 @@ try {
   const authIndexResult = await pool.query<{ indexname: string }>(
     "select indexname from pg_indexes where schemaname = 'auth'",
   );
+  const triggerResult = await pool.query<{ trigger_name: string }>(
+    "select trigger_name from information_schema.triggers where trigger_schema = 'public'",
+  );
   const tableNames = new Set(tableResult.rows.map((row) => row.table_name));
   const indexNames = new Set(indexResult.rows.map((row) => row.indexname));
   const constraintNames = new Set(
@@ -75,6 +89,9 @@ try {
   );
   const authIndexNames = new Set(
     authIndexResult.rows.map((row) => row.indexname),
+  );
+  const triggerNames = new Set(
+    triggerResult.rows.map((row) => row.trigger_name),
   );
 
   for (const tableName of expectedTables) {
@@ -92,6 +109,12 @@ try {
   for (const constraintName of expectedConstraints) {
     if (!constraintNames.has(constraintName)) {
       throw new Error(`Missing migrated constraint: ${constraintName}`);
+    }
+  }
+
+  for (const triggerName of expectedTriggers) {
+    if (!triggerNames.has(triggerName)) {
+      throw new Error(`Missing migrated trigger: ${triggerName}`);
     }
   }
 

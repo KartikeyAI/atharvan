@@ -41,6 +41,10 @@ function createRuntime(input?: {
     listOperators: vi.fn(async () => []),
     listMembershipDomains: vi.fn(async () => []),
     listOperatorRoleDefinitions: vi.fn(async () => []),
+    listPlatformConfiguration: vi.fn(async () => ({
+      environment: "development" as const,
+      items: [],
+    })),
     createOperatorInvitation: vi.fn(async () => ({
       outcome: "created" as const,
       id: "invitation-1",
@@ -56,6 +60,11 @@ function createRuntime(input?: {
     replaceOperatorRoles: vi.fn(async () => ({
       outcome: "updated" as const,
       operatorId: "operator-2",
+    })),
+    setPlatformConfiguration: vi.fn(async () => ({
+      outcome: "updated" as const,
+      key: "platform.release.channel",
+      revisionNumber: 1,
     })),
   };
 }
@@ -257,6 +266,86 @@ describe("Atharvan control-plane worker", () => {
         roleKeys: ["platform_viewer", "auditor"],
       }),
     );
+  });
+
+  it("returns resolved platform configuration only to authorized operators", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.listPlatformConfiguration).mockResolvedValue({
+      environment: "development",
+      items: [
+        {
+          definitionId: "00000000-0000-4000-8000-000000000203",
+          key: "platform.release.channel",
+          category: "releases",
+          name: "Release channel",
+          description: "Default release channel.",
+          valueType: "string",
+          validation: { allowedValues: ["stable", "beta"] },
+          defaultValue: "stable",
+          platformOverride: null,
+          environmentOverride: null,
+          resolvedValue: "stable",
+          resolvedFrom: "default",
+          recentRevisions: [],
+        },
+      ],
+    });
+
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/configuration",
+      undefined,
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      environment: "development",
+      items: [{ key: "platform.release.channel", resolvedFrom: "default" }],
+    });
+  });
+
+  it("delegates an audited configuration revision with fresh-session proof", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/configuration/platform.release.channel",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          scope: "environment",
+          value: "beta",
+          reason: "Enable beta releases in development.",
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runtime.setPlatformConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        key: "platform.release.channel",
+        scope: "environment",
+        value: "beta",
+        correlationId: expect.any(String),
+      }),
+    );
+  });
+
+  it("rejects malformed configuration writes before storage", async () => {
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/configuration/platform.release.channel",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scope: "workspace", value: "beta" }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(400);
+    expect(runtime.setPlatformConfiguration).not.toHaveBeenCalled();
   });
 
   it("rejects malformed administrative commands before storage", async () => {

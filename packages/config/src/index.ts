@@ -34,3 +34,5 @@ export function parseAuthenticationRuntimeConfig(
 ): AuthenticationRuntimeConfig {
   return authenticationRuntimeConfigSchema.parse(input);
 }
+
+export * from "./platform-configuration";

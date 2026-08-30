@@ -3,7 +3,10 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 
 import { OnboardingCommandRejectedError } from "@atharvan/auth";
-import { parseRuntimeConfig } from "@atharvan/config";
+import {
+  parseRuntimeConfig,
+  PlatformConfigurationRejectedError,
+} from "@atharvan/config";
 import {
   operatorHasCapability,
   unknownPlatformOverview,
@@ -11,6 +14,8 @@ import {
   type MembershipDomainEntry,
   type OperatorDirectoryEntry,
   type OperatorRoleDefinitionEntry,
+  type PlatformConfigurationRegistry,
+  type PlatformConfigurationScope,
 } from "@atharvan/domain";
 
 import { resolveProductionAuthenticationRuntime } from "./auth-runtime";
@@ -41,6 +46,7 @@ export interface AuthenticationRuntime {
   listOperatorRoleDefinitions(): Promise<
     ReadonlyArray<OperatorRoleDefinitionEntry>
   >;
+  listPlatformConfiguration(): Promise<PlatformConfigurationRegistry>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
     input: OperatorInvitationCommand,
@@ -69,6 +75,14 @@ export interface AuthenticationRuntime {
     readonly outcome: "updated" | "unchanged";
     readonly operatorId: string;
   }>;
+  setPlatformConfiguration(
+    actor: AuthenticatedOperator,
+    input: SetPlatformConfigurationCommand,
+  ): Promise<{
+    readonly outcome: "updated" | "unchanged";
+    readonly key: string;
+    readonly revisionNumber?: number;
+  }>;
 }
 
 export interface OperatorInvitationCommand {
@@ -83,6 +97,14 @@ export interface OperatorInvitationCommand {
 export interface ReplaceOperatorRolesCommand {
   readonly targetOperatorId: string;
   readonly roleKeys: ReadonlyArray<string>;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface SetPlatformConfigurationCommand {
+  readonly key: string;
+  readonly scope: PlatformConfigurationScope;
+  readonly value: unknown;
   readonly reason: string;
   readonly correlationId: string;
 }
@@ -285,6 +307,34 @@ export function createApp(
     });
   });
 
+  app.get("/v1/platform/configuration", async (context) => {
+    if (
+      !operatorHasCapability(
+        context.get("operator"),
+        "platform:configuration:read",
+      )
+    ) {
+      return capabilityRequired(context);
+    }
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listPlatformConfiguration());
+  });
+
+  app.put("/v1/platform/configuration/:key", async (context) => {
+    const input = await readJson(context, parseSetPlatformConfiguration);
+    if (input === null) return invalidRequest(context);
+
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(context, () =>
+      runtime.setPlatformConfiguration(context.get("operator"), {
+        ...input,
+        key: context.req.param("key"),
+        correlationId: context.get("requestId"),
+      }),
+    );
+  });
+
   app.put("/v1/platform/operators/:operatorId/roles", async (context) => {
     const input = await readJson(context, parseReplaceOperatorRoles);
 
@@ -455,6 +505,20 @@ function parseReplaceOperatorRoles(
   return { roleKeys: roleKeys as ReadonlyArray<string>, reason };
 }
 
+function parseSetPlatformConfiguration(
+  value: unknown,
+): Omit<SetPlatformConfigurationCommand, "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const scope = value.scope;
+
+  return reason !== null &&
+    (scope === "platform" || scope === "environment") &&
+    "value" in value
+    ? { scope, value: value.value, reason }
+    : null;
+}
+
 function parseMembershipDomain(
   value: unknown,
 ): Omit<MembershipDomainCommand, "correlationId"> | null {
@@ -528,6 +592,8 @@ async function executeCommand(
     readonly outcome: "created" | "already_exists" | "updated" | "unchanged";
     readonly id?: string;
     readonly operatorId?: string;
+    readonly key?: string;
+    readonly revisionNumber?: number;
   }>,
 ) {
   try {
@@ -540,7 +606,7 @@ async function executeCommand(
       return context.json(
         {
           code: reason,
-          message: "Sign in again before changing organization domains.",
+          message: "Sign in again before making this sensitive change.",
           requestId: context.get("requestId"),
         },
         403,
@@ -557,6 +623,18 @@ async function executeCommand(
           code: "command_rejected",
           reason: error.reason,
           message: "The requested administrative change was not accepted.",
+          requestId: context.get("requestId"),
+        },
+        409,
+      );
+    }
+
+    if (error instanceof PlatformConfigurationRejectedError) {
+      return context.json(
+        {
+          code: "configuration_change_rejected",
+          reason: error.reason,
+          message: "The requested configuration change was not accepted.",
           requestId: context.get("requestId"),
         },
         409,
