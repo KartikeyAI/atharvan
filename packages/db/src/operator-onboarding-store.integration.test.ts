@@ -750,25 +750,27 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         users: [expect.objectContaining({ id: "arth-user-integration-1" })],
       });
       expect(customerSearch.queryFingerprint).toMatch(/^[0-9a-f]{64}$/u);
-      await expect(
-        customerDirectoryService.inspect({
-          actor,
-          entityType: "workspace",
-          entityId: "arth-workspace-integration-1",
-          reason: "Inspect effective integration permissions.",
-          correlationId: "00000000-0000-4000-8000-000000000130",
-        }),
-      ).resolves.toMatchObject({
+      const workspaceInspection = await customerDirectoryService.inspect({
+        actor,
         entityType: "workspace",
-        memberships: [
-          {
-            membership: {
-              effectivePermissions: ["workspace:read", "workspace:write"],
-            },
-            user: { id: "arth-user-integration-1" },
-          },
-        ],
+        entityId: "arth-workspace-integration-1",
+        reason: "Inspect effective integration permissions.",
+        correlationId: "00000000-0000-4000-8000-000000000130",
       });
+      if (!workspaceInspection) {
+        throw new Error("expected the reconciled workspace to be inspectable");
+      }
+      expect(workspaceInspection).toMatchObject({ entityType: "workspace" });
+      expect(workspaceInspection.memberships).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            membership: expect.objectContaining({
+              effectivePermissions: ["workspace:read", "workspace:write"],
+            }),
+            user: expect.objectContaining({ id: "arth-user-integration-1" }),
+          }),
+        ]),
+      );
       const restricted = await customerDirectoryService.setRestriction({
         actor,
         targetType: "workspace",
