@@ -849,7 +849,23 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
               restricted.restrictionId,
             ),
           ),
-      ).rejects.toThrow(/restriction history cannot be mutated/u);
+      ).rejects.toThrow();
+      await expect(
+        database
+          .select({ reason: customerAccessRestrictionRevisions.reason })
+          .from(customerAccessRestrictionRevisions)
+          .where(
+            eq(
+              customerAccessRestrictionRevisions.restrictionId,
+              restricted.restrictionId,
+            ),
+          ),
+      ).resolves.toEqual(
+        expect.arrayContaining([
+          { reason: "Contain new executions during the integration incident." },
+          { reason: "Restore executions after the incident is resolved." },
+        ]),
+      );
       const note = await customerDirectoryService.createInternalNote({
         actor,
         targetType: "workspace",
@@ -927,19 +943,45 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
           .update(customerInternalNotes)
           .set({ body: "Attempt to rewrite internal note history." })
           .where(eq(customerInternalNotes.id, note.id)),
-      ).rejects.toThrow(/customer operations history cannot be mutated/u);
+      ).rejects.toThrow();
+      await expect(
+        database
+          .select({ body: customerInternalNotes.body })
+          .from(customerInternalNotes)
+          .where(eq(customerInternalNotes.id, note.id)),
+      ).resolves.toEqual([
+        {
+          body: "Owner departure was verified through the support process.",
+        },
+      ]);
       await expect(
         database
           .update(customerRiskMarkerRevisions)
           .set({ summary: "Attempt to rewrite risk history." })
           .where(eq(customerRiskMarkerRevisions.markerId, marker.id)),
-      ).rejects.toThrow(/customer operations history cannot be mutated/u);
+      ).rejects.toThrow();
+      await expect(
+        database
+          .select({ summary: customerRiskMarkerRevisions.summary })
+          .from(customerRiskMarkerRevisions)
+          .where(eq(customerRiskMarkerRevisions.markerId, marker.id)),
+      ).resolves.toEqual([
+        { summary: "Workspace owner is no longer available." },
+      ]);
       await expect(
         database
           .update(customerWorkspaceOwnershipTransfers)
           .set({ reason: "Attempt to rewrite transfer history." })
           .where(eq(customerWorkspaceOwnershipTransfers.id, transfer.id)),
-      ).rejects.toThrow(/customer operations history cannot be mutated/u);
+      ).rejects.toThrow();
+      await expect(
+        database
+          .select({ reason: customerWorkspaceOwnershipTransfers.reason })
+          .from(customerWorkspaceOwnershipTransfers)
+          .where(eq(customerWorkspaceOwnershipTransfers.id, transfer.id)),
+      ).resolves.toEqual([
+        { reason: "Recover ownership after verified owner departure." },
+      ]);
       await expect(
         customerDirectoryService.reconcileSnapshot({
           ...customerSnapshot,
