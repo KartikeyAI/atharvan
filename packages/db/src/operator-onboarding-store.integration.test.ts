@@ -658,7 +658,13 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
           .update(platformCommands)
           .set({ reason: "Attempt to rewrite immutable command history." })
           .where(eq(platformCommands.id, begun.commandId)),
-      ).rejects.toThrow(/command history cannot be mutated/u);
+      ).rejects.toThrow();
+      await expect(
+        database
+          .select({ reason: platformCommands.reason })
+          .from(platformCommands)
+          .where(eq(platformCommands.id, begun.commandId)),
+      ).resolves.toEqual([{ reason: commandInput.reason }]);
       const customerDirectoryService = createCustomerDirectoryService({
         store: createPostgresCustomerDirectoryStore(database),
         environment: "development",
