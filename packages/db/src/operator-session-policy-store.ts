@@ -18,6 +18,7 @@ import {
   operatorRoleDefinitions,
   operators,
   operatorVerificationChallenges,
+  passkey,
   user,
 } from "./schema";
 
@@ -37,6 +38,7 @@ export function createPostgresOperatorSessionPolicyStore(
             id: operators.id,
             email: operators.email,
             status: operators.status,
+            authUserId: operators.authUserId,
             isSuperAdministrator: operators.isSuperAdministrator,
           })
           .from(operators)
@@ -57,6 +59,18 @@ export function createPostgresOperatorSessionPolicyStore(
         }
 
         if (operator.status === "active") {
+          if (operator.authUserId !== null) {
+            const [strongAuthenticator] = await transaction
+              .select({ id: passkey.id })
+              .from(passkey)
+              .where(eq(passkey.userId, operator.authUserId))
+              .limit(1);
+
+            if (strongAuthenticator !== undefined) {
+              return false;
+            }
+          }
+
           return true;
         }
 
@@ -341,11 +355,20 @@ async function resolveOperatorAuthority(
   },
   evaluatedAt: Date,
 ): Promise<AuthenticatedOperator> {
+  const [strongAuthenticator] = await database
+    .select({ id: passkey.id })
+    .from(passkey)
+    .innerJoin(operators, eq(operators.authUserId, passkey.userId))
+    .where(eq(operators.id, operator.operatorId))
+    .limit(1);
+  const strongAuthenticatorEnrolled = strongAuthenticator !== undefined;
+
   if (operator.isSuperAdministrator) {
     return {
       operatorId: operator.operatorId,
       isSuperAdministrator: true,
       effectiveCapabilities: [platformCapabilityWildcard],
+      strongAuthenticatorEnrolled,
     };
   }
 
@@ -409,6 +432,7 @@ async function resolveOperatorAuthority(
     operatorId: operator.operatorId,
     isSuperAdministrator: false,
     effectiveCapabilities,
+    strongAuthenticatorEnrolled,
     ...(activeBreakGlassGrants.length === 0
       ? {}
       : {

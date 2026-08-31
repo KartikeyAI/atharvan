@@ -193,6 +193,8 @@ async function createProductionAuthenticationRuntime(input: {
     verificationHmacSecret: config.ATHARVAN_VERIFICATION_HMAC_SECRET,
     baseURL: input.requestOrigin,
     trustedOrigins: [config.ATHARVAN_PUBLIC_ORIGIN, input.requestOrigin],
+    passkeyOrigin: config.ATHARVAN_PUBLIC_ORIGIN,
+    passkeyRpID: new URL(config.ATHARVAN_PUBLIC_ORIGIN).hostname,
     defer(operation) {
       input.waitUntil(
         operation.catch((error: unknown) => {
@@ -221,7 +223,16 @@ async function createProductionAuthenticationRuntime(input: {
 
       return session === null
         ? null
-        : { userId: session.user.id, createdAt: session.session.createdAt };
+        : {
+            userId: session.user.id,
+            createdAt: session.session.createdAt,
+            authenticationMethod:
+              session.session.authenticationMethod === "passkey"
+                ? "passkey"
+                : "email_otp",
+            strongAuthenticationAt:
+              session.session.strongAuthenticationAt ?? null,
+          };
     },
     resolveActiveOperator: (authUserId) =>
       policyStore.resolveActiveOperator(authUserId),

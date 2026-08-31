@@ -45,4 +45,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0015_operator_break_glass.sql` adds 5–60 minute operator elevation grants, guarded revocation, immutable terminal review, approval and incident evidence, and exact grant provenance on every command envelope executed with temporary authority. Security Operator and Auditor role version 2 add terminal-review authority; existing assignments remain pinned until explicitly replaced.
 
+`0016_operator_passkey_authentication.sql` adds Better Auth passkey credentials and explicit session-assurance evidence in the isolated `auth` schema. PostgreSQL audits linked session and passkey lifecycle events, rejects credential-history rewrites and counter rollback, and serializes deletion so an active operator cannot lose the final enrolled passkey through concurrent requests.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

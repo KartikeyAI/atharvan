@@ -63,6 +63,8 @@ import {
   type ModelRoutingDecision,
   type ModelRoutingOperations,
   type OperatorDirectoryEntry,
+  type OperatorAuthenticationAssurance,
+  type OperatorAuthenticationMethod,
   type OperatorBreakGlassGrantEntry,
   type OperatorBreakGlassReviewOutcome,
   type OperatorRoleDefinitionEntry,
@@ -116,6 +118,8 @@ export interface AuthenticationRuntime {
   getSession(headers: Headers): Promise<{
     readonly userId: string;
     readonly createdAt: Date;
+    readonly authenticationMethod: OperatorAuthenticationMethod;
+    readonly strongAuthenticationAt: Date | null;
   } | null>;
   resolveActiveOperator(
     authUserId: string,
@@ -683,7 +687,10 @@ export interface DisableMembershipDomainCommand {
 
 type AppEnvironment = {
   Bindings: RuntimeBindings;
-  Variables: { operator: AuthenticatedOperator };
+  Variables: {
+    operator: AuthenticatedOperator;
+    authenticationAssurance: OperatorAuthenticationAssurance;
+  };
 };
 
 export interface AppDependencies {
@@ -782,10 +789,31 @@ export function createApp(
       );
     }
 
+    const strongAuthenticationTime = session.strongAuthenticationAt?.getTime();
+    const strongAuthenticationValid =
+      session.authenticationMethod === "passkey" &&
+      strongAuthenticationTime !== undefined &&
+      strongAuthenticationTime <= Date.now();
     const freshSessionProof =
-      Date.now() - session.createdAt.getTime() <= 5 * 60 * 1_000
-        ? session.createdAt
+      strongAuthenticationValid &&
+      Date.now() - strongAuthenticationTime <= 5 * 60 * 1_000
+        ? session.strongAuthenticationAt!
         : undefined;
+    const assurance: OperatorAuthenticationAssurance = {
+      mode:
+        operator.strongAuthenticatorEnrolled !== true
+          ? "enrollment_required"
+          : strongAuthenticationValid
+            ? "verified"
+            : "passkey_verification_required",
+      strongAuthenticatorEnrolled:
+        operator.strongAuthenticatorEnrolled === true,
+      authenticationMethod: session.authenticationMethod,
+      strongAuthenticationAt: strongAuthenticationValid
+        ? session.strongAuthenticationAt!.toISOString()
+        : null,
+      recentStepUp: freshSessionProof !== undefined,
+    };
 
     context.set("operator", {
       ...operator,
@@ -793,8 +821,41 @@ export function createApp(
         ? {}
         : { stepUpVerifiedAt: freshSessionProof }),
     });
+    context.set("authenticationAssurance", assurance);
+
+    if (context.req.path === "/v1/platform/authentication/assurance") {
+      await next();
+      return;
+    }
+
+    if (assurance.mode === "enrollment_required") {
+      return context.json(
+        {
+          code: "strong_authentication_enrollment_required",
+          message: "Register a passkey before accessing platform operations.",
+          requestId: context.get("requestId"),
+        },
+        403,
+      );
+    }
+
+    if (assurance.mode === "passkey_verification_required") {
+      return context.json(
+        {
+          code: "strong_authentication_required",
+          message: "Verify an enrolled passkey before accessing the platform.",
+          requestId: context.get("requestId"),
+        },
+        403,
+      );
+    }
+
     await next();
   });
+
+  app.get("/v1/platform/authentication/assurance", (context) =>
+    context.json(context.get("authenticationAssurance")),
+  );
 
   app.get("/v1/platform/overview", (context) => {
     if (

@@ -24,6 +24,8 @@ import { Route as AuthenticatedOperatorsRouteImport } from './routes/_authentica
 import { Route as AuthenticatedSecretsRouteImport } from './routes/_authenticated/secrets'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
+import { Route as SecurityPasskeysRouteImport } from './routes/security.passkeys'
+import { Route as SecurityVerifyRouteImport } from './routes/security.verify'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
@@ -103,6 +105,16 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SecurityPasskeysRoute = SecurityPasskeysRouteImport.update({
+  id: '/security/passkeys',
+  path: '/security/passkeys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SecurityVerifyRoute = SecurityVerifyRouteImport.update({
+  id: '/security/verify',
+  path: '/security/verify',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -119,6 +131,8 @@ export interface FileRoutesByFullPath {
   '/secrets': typeof AuthenticatedSecretsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
+  '/security/passkeys': typeof SecurityPasskeysRoute
+  '/security/verify': typeof SecurityVerifyRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -134,6 +148,8 @@ export interface FileRoutesByTo {
   '/secrets': typeof AuthenticatedSecretsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
+  '/security/passkeys': typeof SecurityPasskeysRoute
+  '/security/verify': typeof SecurityVerifyRoute
   '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesById {
@@ -152,6 +168,8 @@ export interface FileRoutesById {
   '/_authenticated/secrets': typeof AuthenticatedSecretsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
+  '/security/passkeys': typeof SecurityPasskeysRoute
+  '/security/verify': typeof SecurityVerifyRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
 }
 export interface FileRouteTypes {
@@ -171,6 +189,8 @@ export interface FileRouteTypes {
     | '/secrets'
     | '/settings'
     | '/api/$'
+    | '/security/passkeys'
+    | '/security/verify'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -186,6 +206,8 @@ export interface FileRouteTypes {
     | '/secrets'
     | '/settings'
     | '/api/$'
+    | '/security/passkeys'
+    | '/security/verify'
     | '/'
   id:
     | '__root__'
@@ -203,6 +225,8 @@ export interface FileRouteTypes {
     | '/_authenticated/secrets'
     | '/_authenticated/settings'
     | '/api/$'
+    | '/security/passkeys'
+    | '/security/verify'
     | '/_authenticated/'
   fileRoutesById: FileRoutesById
 }
@@ -210,6 +234,8 @@ export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  SecurityPasskeysRoute: typeof SecurityPasskeysRoute
+  SecurityVerifyRoute: typeof SecurityVerifyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -319,6 +345,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/security/passkeys': {
+      id: '/security/passkeys'
+      path: '/security/passkeys'
+      fullPath: '/security/passkeys'
+      preLoaderRoute: typeof SecurityPasskeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/security/verify': {
+      id: '/security/verify'
+      path: '/security/verify'
+      fullPath: '/security/verify'
+      preLoaderRoute: typeof SecurityVerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -360,6 +400,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   ApiSplatRoute: ApiSplatRoute,
+  SecurityPasskeysRoute: SecurityPasskeysRoute,
+  SecurityVerifyRoute: SecurityVerifyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

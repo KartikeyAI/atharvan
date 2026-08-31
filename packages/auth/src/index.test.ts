@@ -286,7 +286,8 @@ describe("Better Auth operator login", () => {
   it("uses one invited OTP to create the Better Auth session and activate the operator", async () => {
     const emailSender = createEmailSender();
     const policyStore = createSessionPolicyStore(true);
-    const auth = createTestAuth(policyStore, emailSender);
+    const records = createMemoryRecords();
+    const auth = createTestAuth(policyStore, emailSender, records);
     const issueResponse = await auth.handler(
       authRequest("/email-otp/send-verification-otp", {
         email: "operator@example.com",
@@ -317,6 +318,12 @@ describe("Better Auth operator login", () => {
         authUserId: expect.any(String),
       }),
     );
+    expect(records.session).toEqual([
+      expect.objectContaining({
+        authenticationMethod: "email_otp",
+        strongAuthenticationAt: null,
+      }),
+    ]);
   });
 });
 
@@ -341,23 +348,31 @@ function createSessionPolicyStore(
 function createTestAuth(
   policyStore: OperatorSessionPolicyStore,
   emailSender: TransactionalEmailSender,
+  records = createMemoryRecords(),
 ) {
   return createAtharvanAuth({
-    database: memoryAdapter({
-      account: [],
-      rateLimit: [],
-      session: [],
-      user: [],
-      verification: [],
-    }),
+    database: memoryAdapter(records),
     policyStore,
     emailSender,
     secret: "b".repeat(32),
     verificationHmacSecret: verificationSecret,
     baseURL: "https://auth.atharvan.example",
     trustedOrigins: ["https://console.atharvan.example"],
+    passkeyOrigin: "https://console.atharvan.example",
+    passkeyRpID: "console.atharvan.example",
     now: () => fixedNow,
   });
+}
+
+function createMemoryRecords() {
+  return {
+    account: [] as Record<string, unknown>[],
+    passkey: [] as Record<string, unknown>[],
+    rateLimit: [] as Record<string, unknown>[],
+    session: [] as Record<string, unknown>[],
+    user: [] as Record<string, unknown>[],
+    verification: [] as Record<string, unknown>[],
+  };
 }
 
 function authRequest(path: string, body: unknown): Request {

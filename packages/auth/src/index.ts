@@ -11,6 +11,7 @@ import {
   type AuthenticatedOperator,
 } from "@atharvan/domain";
 import type { TransactionalEmailSender } from "@atharvan/email";
+import { passkey } from "@better-auth/passkey";
 import {
   betterAuth,
   type BetterAuthOptions,
@@ -169,6 +170,8 @@ export interface AtharvanAuthOptions {
   readonly verificationHmacSecret: string;
   readonly baseURL: string;
   readonly trustedOrigins: ReadonlyArray<string>;
+  readonly passkeyOrigin: string;
+  readonly passkeyRpID: string;
   readonly now?: () => Date;
   readonly defer?: (operation: Promise<void>) => void;
 }
@@ -188,6 +191,19 @@ export function createAtharvanAuth(options: AtharvanAuthOptions) {
       cookieCache: { enabled: false },
       expiresIn: 8 * 60 * 60,
       updateAge: 60 * 60,
+      additionalFields: {
+        authenticationMethod: {
+          type: "string",
+          required: true,
+          defaultValue: "email_otp",
+          input: false,
+        },
+        strongAuthenticationAt: {
+          type: "date",
+          required: false,
+          input: false,
+        },
+      },
     },
     rateLimit: {
       enabled: true,
@@ -197,6 +213,10 @@ export function createAtharvanAuth(options: AtharvanAuthOptions) {
       customRules: {
         "/email-otp/send-verification-otp": { window: 60, max: 3 },
         "/sign-in/email-otp": { window: 60, max: 5 },
+        "/passkey/generate-register-options": { window: 60, max: 5 },
+        "/passkey/verify-registration": { window: 60, max: 5 },
+        "/passkey/generate-authenticate-options": { window: 60, max: 10 },
+        "/passkey/verify-authentication": { window: 60, max: 10 },
       },
     },
     advanced: {
@@ -239,6 +259,33 @@ export function createAtharvanAuth(options: AtharvanAuthOptions) {
           }
 
           await delivery;
+        },
+      }),
+      passkey({
+        origin: options.passkeyOrigin,
+        rpID: options.passkeyRpID,
+        rpName: "Atharvan",
+        authenticatorSelection: {
+          residentKey: "required",
+          userVerification: "required",
+        },
+        advanced: {
+          webAuthnChallengeCookie: "atharvan-passkey",
+        },
+        registration: {
+          requireSession: true,
+          afterVerification({ verification }) {
+            if (verification.registrationInfo?.userVerified !== true) {
+              throw new Error("passkey_user_verification_required");
+            }
+          },
+        },
+        authentication: {
+          afterVerification({ verification }) {
+            if (verification.authenticationInfo.userVerified !== true) {
+              throw new Error("passkey_user_verification_required");
+            }
+          },
         },
       }),
     ],
@@ -301,15 +348,33 @@ export function createAtharvanAuth(options: AtharvanAuthOptions) {
       },
       session: {
         create: {
-          before: async (session: Session & Record<string, unknown>) => {
+          before: async (
+            session: Session & Record<string, unknown>,
+            context,
+          ) => {
+            const strongAuthentication =
+              context?.path === "/passkey/verify-authentication";
+            const verifiedAt = now();
             const operator =
               await options.policyStore.activateOperatorForAuthUser({
                 authUserId: session.userId,
                 correlationId: crypto.randomUUID(),
-                now: now(),
+                now: verifiedAt,
               });
 
-            return operator !== null;
+            return operator === null
+              ? false
+              : {
+                  data: {
+                    ...session,
+                    authenticationMethod: strongAuthentication
+                      ? "passkey"
+                      : "email_otp",
+                    strongAuthenticationAt: strongAuthentication
+                      ? verifiedAt
+                      : null,
+                  },
+                };
           },
         },
       },

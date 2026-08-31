@@ -100,6 +100,7 @@ const expectedIndexes = [
 
 const expectedAuthTables = [
   "account",
+  "passkey",
   "rate_limit",
   "session",
   "user",
@@ -108,9 +109,23 @@ const expectedAuthTables = [
 
 const expectedAuthIndexes = [
   "auth_account_issuer_account_unique",
+  "auth_passkey_credential_unique",
+  "auth_passkey_user_id_idx",
   "auth_rate_limit_key_unique",
   "auth_session_token_unique",
   "auth_user_email_unique",
+] as const;
+
+const expectedAuthConstraints = ["auth_session_assurance_consistent"] as const;
+
+const expectedAuthTriggers = [
+  "auth_passkey_audit_delete",
+  "auth_passkey_audit_insert",
+  "auth_passkey_audit_rename",
+  "auth_passkey_guard_delete",
+  "auth_passkey_guard_insert",
+  "auth_passkey_guard_update",
+  "auth_session_audit_insert",
 ] as const;
 
 const expectedConstraints = [
@@ -202,6 +217,12 @@ try {
   const authIndexResult = await pool.query<{ indexname: string }>(
     "select indexname from pg_indexes where schemaname = 'auth'",
   );
+  const authConstraintResult = await pool.query<{ constraint_name: string }>(
+    "select constraint_name from information_schema.table_constraints where constraint_schema = 'auth'",
+  );
+  const authTriggerResult = await pool.query<{ trigger_name: string }>(
+    "select trigger_name from information_schema.triggers where trigger_schema = 'auth'",
+  );
   const triggerResult = await pool.query<{ trigger_name: string }>(
     "select trigger_name from information_schema.triggers where trigger_schema = 'public'",
   );
@@ -221,6 +242,12 @@ try {
   );
   const authIndexNames = new Set(
     authIndexResult.rows.map((row) => row.indexname),
+  );
+  const authConstraintNames = new Set(
+    authConstraintResult.rows.map((row) => row.constraint_name),
+  );
+  const authTriggerNames = new Set(
+    authTriggerResult.rows.map((row) => row.trigger_name),
   );
   const triggerNames = new Set(
     triggerResult.rows.map((row) => row.trigger_name),
@@ -259,6 +286,18 @@ try {
   for (const indexName of expectedAuthIndexes) {
     if (!authIndexNames.has(indexName)) {
       throw new Error(`Missing migrated auth index: ${indexName}`);
+    }
+  }
+
+  for (const constraintName of expectedAuthConstraints) {
+    if (!authConstraintNames.has(constraintName)) {
+      throw new Error(`Missing migrated auth constraint: ${constraintName}`);
+    }
+  }
+
+  for (const triggerName of expectedAuthTriggers) {
+    if (!authTriggerNames.has(triggerName)) {
+      throw new Error(`Missing migrated auth trigger: ${triggerName}`);
     }
   }
 

@@ -47,6 +47,7 @@ import {
   platformIntegrations,
   platformSecretReferences,
   platformSecretVersions,
+  passkey,
   rateLimit,
   session,
   user,
@@ -99,13 +100,41 @@ describe("operator onboarding schema", () => {
   });
 
   it("isolates Better Auth state in a dedicated PostgreSQL schema", () => {
-    for (const table of [account, rateLimit, session, user, verification]) {
+    for (const table of [
+      account,
+      passkey,
+      rateLimit,
+      session,
+      user,
+      verification,
+    ]) {
       expect(getTableConfig(table).schema).toBe("auth");
     }
 
     expect(
       getTableConfig(verification).columns.map((column) => column.name),
     ).toContain("value");
+  });
+
+  it("models phishing-resistant operator assurance in auth state", () => {
+    const sessionConfig = getTableConfig(session);
+    const passkeyConfig = getTableConfig(passkey);
+
+    expect(sessionConfig.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "authentication_method",
+        "strong_authentication_at",
+      ]),
+    );
+    expect(sessionConfig.checks.map((constraint) => constraint.name)).toContain(
+      "auth_session_assurance_consistent",
+    );
+    expect(passkeyConfig.indexes.map((entry) => entry.config.name)).toEqual(
+      expect.arrayContaining([
+        "auth_passkey_credential_unique",
+        "auth_passkey_user_id_idx",
+      ]),
+    );
   });
 
   it("versions role definitions and prevents duplicate active assignments", () => {

@@ -59,6 +59,17 @@ export async function apiRequest<Result>(
           code: "request_failed",
           message: "Atharvan could not complete the request.",
         };
+    if (
+      typeof window !== "undefined" &&
+      (error.code === "recent_step_up_required" ||
+        ("reason" in error && error.reason === "recent_step_up_required")) &&
+      !window.location.pathname.startsWith("/security/")
+    ) {
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(
+        `/security/verify?returnTo=${encodeURIComponent(returnTo)}`,
+      );
+    }
     throw new ApiError(response.status, error.code, error.message);
   }
 
@@ -136,15 +147,18 @@ export type CustomerDirectoryInspectionResponse = CustomerDirectoryInspection;
 
 export type CustomerRestrictionRegistryResponse = CustomerRestrictionRegistry;
 
-function isApiErrorBody(
-  value: unknown,
-): value is { readonly code: string; readonly message: string } {
+function isApiErrorBody(value: unknown): value is {
+  readonly code: string;
+  readonly message: string;
+  readonly reason?: string;
+} {
   return (
     typeof value === "object" &&
     value !== null &&
     "code" in value &&
     typeof value.code === "string" &&
     "message" in value &&
-    typeof value.message === "string"
+    typeof value.message === "string" &&
+    (!("reason" in value) || typeof value.reason === "string")
   );
 }

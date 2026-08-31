@@ -1631,6 +1631,90 @@ button {
   text-align: center;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+  content: "";
+}
+
+.security-page {
+  place-content: start center;
+}
+
+.security-card {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.passkey-choice {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.passkey-choice legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.passkey-choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.passkey-list {
+  display: grid;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.passkey-list h2,
+.passkey-list p {
+  margin: 0;
+}
+
+.passkey-list p {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.section-heading-row,
+.passkey-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.security-card .section-heading-row .button,
+.security-card .passkey-entry .button {
+  width: auto;
+}
+
+.passkey-entry {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
 .auth-footnote {
   max-width: 400px;
   margin: 14px auto 0;

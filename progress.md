@@ -61,8 +61,8 @@ An item may be marked complete only when its implementation, tests, operational 
 - [~] Implement organisation email-domain allowlist administration.
 - [x] Reject invitations and activation when the email domain is not allowed.
 - [x] Implement invited-to-active first-login email verification code flow.
-- [ ] Add mandatory strong MFA/passkey policy.
-- [~] Add step-up authentication for sensitive actions.
+- [x] Add mandatory strong MFA/passkey policy.
+- [x] Add step-up authentication for sensitive actions.
 - [x] Add break-glass grant lifecycle with expiry and review.
 
 ### Configuration and secrets

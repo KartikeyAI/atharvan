@@ -18,6 +18,8 @@ function createRuntime(input?: {
   readonly userId?: string | null;
   readonly operator?: AuthenticatedOperator | null;
   readonly emailDeliveryConfigured?: boolean;
+  readonly authenticationMethod?: "email_otp" | "passkey";
+  readonly strongAuthenticationAt?: Date | null;
 }): AuthenticationRuntime {
   return {
     emailDeliveryConfigured: input?.emailDeliveryConfigured ?? true,
@@ -29,17 +31,26 @@ function createRuntime(input?: {
         : {
             userId: input?.userId ?? "auth-user-1",
             createdAt: new Date(),
+            authenticationMethod: input?.authenticationMethod ?? "passkey",
+            strongAuthenticationAt:
+              input?.strongAuthenticationAt === undefined
+                ? new Date()
+                : input.strongAuthenticationAt,
           },
     ),
-    resolveActiveOperator: vi.fn(async () =>
-      input?.operator === undefined
-        ? {
-            operatorId: "operator-1",
-            isSuperAdministrator: true,
-            effectiveCapabilities: ["platform:*"],
-          }
-        : input.operator,
-    ),
+    resolveActiveOperator: vi.fn(async () => {
+      if (input?.operator === null) return null;
+      const operator = input?.operator ?? {
+        operatorId: "operator-1",
+        isSuperAdministrator: true,
+        effectiveCapabilities: ["platform:*"],
+      };
+      return {
+        ...operator,
+        strongAuthenticatorEnrolled:
+          operator.strongAuthenticatorEnrolled ?? true,
+      };
+    }),
     listOperators: vi.fn(async () => []),
     listMembershipDomains: vi.fn(async () => []),
     listOperatorRoleDefinitions: vi.fn(async () => []),
@@ -316,6 +327,90 @@ describe("Atharvan control-plane worker", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
       code: "operator_access_denied",
+    });
+  });
+
+  it("exposes passkey enrollment as the only platform path after bootstrap", async () => {
+    const runtime = createRuntime({
+      authenticationMethod: "email_otp",
+      strongAuthenticationAt: null,
+      operator: {
+        operatorId: "operator-1",
+        isSuperAdministrator: true,
+        effectiveCapabilities: ["platform:*"],
+        strongAuthenticatorEnrolled: false,
+      },
+    });
+
+    const assuranceResponse = await createTestApp(runtime).request(
+      "/v1/platform/authentication/assurance",
+      undefined,
+      bindings,
+    );
+    expect(assuranceResponse.status).toBe(200);
+    await expect(assuranceResponse.json()).resolves.toEqual({
+      mode: "enrollment_required",
+      strongAuthenticatorEnrolled: false,
+      authenticationMethod: "email_otp",
+      strongAuthenticationAt: null,
+      recentStepUp: false,
+    });
+
+    const platformResponse = await createTestApp(runtime).request(
+      "/v1/platform/overview",
+      undefined,
+      bindings,
+    );
+    expect(platformResponse.status).toBe(403);
+    await expect(platformResponse.json()).resolves.toMatchObject({
+      code: "strong_authentication_enrollment_required",
+    });
+  });
+
+  it("requires an enrolled passkey to establish the platform session", async () => {
+    const runtime = createRuntime({
+      authenticationMethod: "email_otp",
+      strongAuthenticationAt: null,
+    });
+
+    const assuranceResponse = await createTestApp(runtime).request(
+      "/v1/platform/authentication/assurance",
+      undefined,
+      bindings,
+    );
+    await expect(assuranceResponse.json()).resolves.toMatchObject({
+      mode: "passkey_verification_required",
+      strongAuthenticatorEnrolled: true,
+      recentStepUp: false,
+    });
+
+    const platformResponse = await createTestApp(runtime).request(
+      "/v1/platform/overview",
+      undefined,
+      bindings,
+    );
+    expect(platformResponse.status).toBe(403);
+    await expect(platformResponse.json()).resolves.toMatchObject({
+      code: "strong_authentication_required",
+    });
+  });
+
+  it("keeps an older passkey session valid without treating it as recent step-up", async () => {
+    const verifiedAt = new Date(Date.now() - 6 * 60 * 1_000);
+    const response = await createTestApp(
+      createRuntime({
+        authenticationMethod: "passkey",
+        strongAuthenticationAt: verifiedAt,
+      }),
+    ).request("/v1/platform/authentication/assurance", undefined, bindings);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      mode: "verified",
+      strongAuthenticatorEnrolled: true,
+      authenticationMethod: "passkey",
+      strongAuthenticationAt: verifiedAt.toISOString(),
+      recentStepUp: false,
     });
   });
 

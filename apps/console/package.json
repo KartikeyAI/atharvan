@@ -15,11 +15,13 @@
   },
   "dependencies": {
     "@atharvan/domain": "workspace:*",
+    "@better-auth/passkey": "1.7.2",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
     "@vitejs/plugin-react": "6.1.1",
+    "better-auth": "1.7.2",
     "lucide-react": "^0.544.0",
     "react": "catalog:",
     "react-dom": "catalog:",

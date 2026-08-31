@@ -113,6 +113,13 @@
       "when": 1788134213484,
       "tag": "0015_operator_break_glass",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788137728217,
+      "tag": "0016_operator_passkey_authentication",
+      "breakpoints": true
     }
   ]
 }

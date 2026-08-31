@@ -27,4 +27,4 @@ Maintaining a separate custom verification endpoint alongside Better Auth would 
 - Domain removal, invitation expiry, suspension, and deactivation are enforced server-side.
 - A Better Auth session alone never grants platform authority; it must resolve to an active Atharvan operator.
 - Email delivery is replaceable behind `@atharvan/email`. The first adapter is Resend and remains fail-closed until its API key is configured.
-- Passkeys, strong MFA policy, step-up sessions, and default role bundles remain later Phase 1 slices.
+- ADR 0015 extends this boundary with mandatory passkey authentication and passkey-backed step-up sessions. Email OTP remains only the invitation bootstrap mechanism.

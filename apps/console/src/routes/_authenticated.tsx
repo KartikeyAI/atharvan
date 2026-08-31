@@ -11,6 +11,18 @@ export const Route = createFileRoute("/_authenticated")({
         search: { returnTo: sanitizeReturnTo(location.href) },
       });
     }
+    if (session.assurance.mode === "enrollment_required") {
+      throw redirect({
+        to: "/security/passkeys",
+        search: { returnTo: sanitizeReturnTo(location.href) },
+      });
+    }
+    if (session.assurance.mode === "passkey_verification_required") {
+      throw redirect({
+        to: "/security/verify",
+        search: { returnTo: sanitizeReturnTo(location.href) },
+      });
+    }
   },
   component: Outlet,
 });

@@ -1,4 +1,9 @@
-import { BlocksIcon, KeyRoundIcon, MailIcon } from "lucide-react";
+import {
+  BlocksIcon,
+  FingerprintIcon,
+  KeyRoundIcon,
+  MailIcon,
+} from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -8,6 +13,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
 import { sanitizeReturnTo } from "@/lib/session";
 
 export const Route = createFileRoute("/login")({
@@ -74,6 +80,20 @@ function OperatorLogin() {
     }
   }
 
+  async function verifyPasskey() {
+    setPending(true);
+    setError(null);
+    const result = await authClient.signIn.passkey();
+    setPending(false);
+    if (result.error) {
+      setError(
+        result.error.message ?? "Passkey verification was not completed.",
+      );
+      return;
+    }
+    window.location.assign(returnTo);
+  }
+
   return (
     <main className="auth-page">
       <div className="auth-brand">
@@ -100,6 +120,12 @@ function OperatorLogin() {
         <CardContent>
           {message ? <Alert variant="success">{message}</Alert> : null}
           {error ? <Alert variant="destructive">{error}</Alert> : null}
+          <Button disabled={pending} onClick={verifyPasskey} variant="outline">
+            <FingerprintIcon aria-hidden="true" /> Sign in with passkey
+          </Button>
+          <div className="auth-divider">
+            <span>First sign-in or enrollment</span>
+          </div>
           {step === "email" ? (
             <form className="form-stack" onSubmit={requestCode}>
               <div className="field-stack">
@@ -155,7 +181,8 @@ function OperatorLogin() {
         </CardContent>
       </Card>
       <p className="auth-footnote">
-        Operator actions are authorization-checked and immutably audited.
+        Email codes are limited to initial enrollment. Returning operators use a
+        phishing-resistant passkey.
       </p>
     </main>
   );

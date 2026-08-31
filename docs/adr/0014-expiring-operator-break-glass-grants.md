@@ -23,4 +23,4 @@ Atharvan needs a recoverable way to grant temporary platform authority during an
 - Break-glass authority cannot mint another Super Administrator or enter the customer-private namespace.
 - Existing sessions pick up or lose temporary capabilities when Atharvan resolves current operator authority; durable roles are unchanged.
 - Post-event review remains visibly pending until an authorised reviewer records it.
-- Mandatory phishing-resistant MFA and a dedicated reauthentication ceremony remain separate authentication-hardening work; a fresh session is the current step-up proof.
+- ADR 0015 supplies the mandatory phishing-resistant authenticator and dedicated reauthentication ceremony. Break-glass commands now receive recent proof only from a passkey-authenticated session.

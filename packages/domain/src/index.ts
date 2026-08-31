@@ -6,6 +6,7 @@ export interface AuthenticatedOperator {
   readonly operatorId: string;
   readonly isSuperAdministrator: boolean;
   readonly effectiveCapabilities: ReadonlyArray<string>;
+  readonly strongAuthenticatorEnrolled?: boolean;
   readonly stepUpVerifiedAt?: Date;
   readonly breakGlassGrantIds?: ReadonlyArray<string>;
 }
@@ -126,6 +127,7 @@ export function assertDelegableOperatorCapabilities(
 }
 
 export * from "./operator-onboarding";
+export * from "./operator-authentication";
 export * from "./customer-directory";
 export * from "./platform-administration";
 export * from "./platform-adapters";

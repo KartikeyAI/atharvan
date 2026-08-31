@@ -45,9 +45,11 @@ import {
   operatorBreakGlassReviews,
   operators,
   operatorVerificationChallenges,
+  passkey,
   platformSecretReferences,
   platformSecretVersions,
   platformCommands,
+  session,
   user,
 } from "./schema";
 import * as schema from "./schema";
@@ -1176,12 +1178,78 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         sessionPolicyStore.resolveActiveOperator("auth-user-integration-1"),
       ).resolves.toMatchObject({
         effectiveCapabilities: ["platform:overview:read"],
+        strongAuthenticatorEnrolled: false,
       });
 
       const [sessionOperator] = await database
         .select({ id: operators.id })
         .from(operators)
         .where(eq(operators.authUserId, "auth-user-integration-1"));
+
+      await database.insert(passkey).values({
+        id: "integration-passkey-1",
+        name: "Primary security key",
+        publicKey: "integration-public-key-1",
+        userId: "auth-user-integration-1",
+        credentialID: "integration-credential-1",
+        counter: 0,
+        deviceType: "singleDevice",
+        backedUp: false,
+        transports: "usb,nfc",
+        createdAt: commandTime,
+        aaguid: "00000000-0000-0000-0000-000000000001",
+      });
+      await expect(
+        sessionPolicyStore.canIssueSignInOtp({
+          normalizedEmail: "session-operator@atharvan-ci.example",
+          now: commandTime,
+        }),
+      ).resolves.toBe(false);
+      await expect(
+        sessionPolicyStore.resolveActiveOperator("auth-user-integration-1"),
+      ).resolves.toMatchObject({ strongAuthenticatorEnrolled: true });
+
+      await database.insert(session).values({
+        id: "integration-passkey-session-1",
+        token: "integration-passkey-session-token-1",
+        userId: "auth-user-integration-1",
+        createdAt: commandTime,
+        updatedAt: commandTime,
+        expiresAt: new Date(commandTime.getTime() + 60 * 60 * 1_000),
+        authenticationMethod: "passkey",
+        strongAuthenticationAt: commandTime,
+      });
+      await expect(
+        database.delete(passkey).where(eq(passkey.id, "integration-passkey-1")),
+      ).rejects.toThrow("last active operator passkey cannot be removed");
+
+      await database.insert(passkey).values({
+        id: "integration-passkey-2",
+        name: "Recovery security key",
+        publicKey: "integration-public-key-2",
+        userId: "auth-user-integration-1",
+        credentialID: "integration-credential-2",
+        counter: 0,
+        deviceType: "multiDevice",
+        backedUp: true,
+        createdAt: commandTime,
+      });
+      await expect(
+        database.delete(passkey).where(eq(passkey.id, "integration-passkey-1")),
+      ).resolves.toBeDefined();
+
+      const authenticationAudits = await database
+        .select({ eventType: auditEvents.eventType })
+        .from(auditEvents)
+        .where(eq(auditEvents.actorId, sessionOperator!.id));
+      expect(authenticationAudits).toEqual(
+        expect.arrayContaining([
+          { eventType: "platform.operator.authenticated" },
+          { eventType: "platform.operator.passkey_enrolled" },
+          { eventType: "platform.operator.passkey_removed" },
+        ]),
+      );
+
       const breakGlassService = createOperatorBreakGlassAdministrationService({
         store: createPostgresOperatorBreakGlassAdministrationStore(database),
         now: () => commandTime,

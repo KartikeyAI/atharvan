@@ -63,10 +63,45 @@ export const session = authSchema.table(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    authenticationMethod: text("authentication_method")
+      .notNull()
+      .default("email_otp"),
+    strongAuthenticationAt: timestamp("strong_authentication_at", {
+      withTimezone: true,
+    }),
   },
   (table) => [
     uniqueIndex("auth_session_token_unique").on(table.token),
     index("auth_session_user_id_idx").on(table.userId),
+    check(
+      "auth_session_assurance_consistent",
+      sql`(${table.authenticationMethod} = 'email_otp' AND ${table.strongAuthenticationAt} IS NULL) OR (${table.authenticationMethod} = 'passkey' AND ${table.strongAuthenticationAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const passkey = authSchema.table(
+  "passkey",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    publicKey: text("public_key").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    credentialID: text("credential_id").notNull(),
+    counter: integer("counter").notNull(),
+    deviceType: text("device_type").notNull(),
+    backedUp: boolean("backed_up").notNull(),
+    transports: text("transports"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    aaguid: text("aaguid"),
+  },
+  (table) => [
+    uniqueIndex("auth_passkey_credential_unique").on(table.credentialID),
+    index("auth_passkey_user_id_idx").on(table.userId),
   ],
 );
 
