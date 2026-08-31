@@ -8,6 +8,7 @@ import {
   createOperatorOnboardingService,
   createAtharvanAuth,
   digestBetterAuthOtp,
+  requirePasskeyUserVerification,
   type OperatorOnboardingStore,
   type OperatorSessionPolicyStore,
 } from "./index";
@@ -262,6 +263,26 @@ describe("Better Auth OTP storage", () => {
     expect(first).toBe(repeated);
     expect(first).not.toBe("123456");
     expect(first).not.toBe(differentSecret);
+  });
+});
+
+describe("Better Auth passkey policy", () => {
+  it("requires browser user verification in authentication options", async () => {
+    const response = await requirePasskeyUserVerification(
+      new Request(
+        "https://console.atharvan.example/api/auth/passkey/generate-authenticate-options",
+      ),
+      Response.json(
+        { challenge: "challenge-1", userVerification: "preferred" },
+        { headers: { "set-cookie": "challenge=value; Secure; HttpOnly" } },
+      ),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      challenge: "challenge-1",
+      userVerification: "required",
+    });
+    expect(response.headers.get("set-cookie")).toContain("challenge=value");
   });
 });
 

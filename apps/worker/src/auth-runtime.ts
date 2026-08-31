@@ -7,6 +7,7 @@ import {
   createOperatorOnboardingService,
   createOperatorRoleAdministrationService,
   OnboardingCommandRejectedError,
+  requirePasskeyUserVerification,
 } from "@atharvan/auth";
 import { createPlatformCommandService } from "@atharvan/commands";
 import {
@@ -214,7 +215,12 @@ async function createProductionAuthenticationRuntime(input: {
   return {
     emailDeliveryConfigured,
     secretProviderConfigured: secretMaterialProvider.configured,
-    handle: (request) => auth.handler(request),
+    async handle(request) {
+      return requirePasskeyUserVerification(
+        request,
+        await auth.handler(request),
+      );
+    },
     async getSession(headers) {
       const session = await auth.api.getSession({
         headers,

@@ -403,6 +403,39 @@ export async function digestBetterAuthOtp(
   return encodeBase64Url(new Uint8Array(digest));
 }
 
+export async function requirePasskeyUserVerification(
+  request: Request,
+  response: Response,
+): Promise<Response> {
+  if (
+    new URL(request.url).pathname !==
+      "/api/auth/passkey/generate-authenticate-options" ||
+    !response.ok
+  ) {
+    return response;
+  }
+
+  const body: unknown = await response
+    .clone()
+    .json()
+    .catch(() => null);
+  if (typeof body !== "object" || body === null || !("challenge" in body)) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json; charset=utf-8");
+  return new Response(
+    JSON.stringify({ ...body, userVerification: "required" }),
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    },
+  );
+}
+
 function readOtpRequest(body: unknown): { readonly email: string } | null {
   if (typeof body !== "object" || body === null) {
     return null;
