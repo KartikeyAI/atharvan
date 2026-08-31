@@ -23,7 +23,12 @@ import {
 
 export function createPostgresOperatorSessionPolicyStore(
   database: PgDatabase<PgQueryResultHKT, typeof schema>,
+  options: {
+    readonly now?: () => Date;
+  } = {},
 ): OperatorSessionPolicyStore {
+  const now = options.now ?? (() => new Date());
+
   return {
     canIssueSignInOtp(input) {
       return database.transaction(async (transaction) => {
@@ -145,10 +150,14 @@ export function createPostgresOperatorSessionPolicyStore(
             });
           }
 
-          return resolveOperatorAuthority(transaction, {
-            operatorId: operator.id,
-            isSuperAdministrator: operator.isSuperAdministrator,
-          });
+          return resolveOperatorAuthority(
+            transaction,
+            {
+              operatorId: operator.id,
+              isSuperAdministrator: operator.isSuperAdministrator,
+            },
+            input.now,
+          );
         }
 
         if (!isPreActivationStatus(operator.status)) {
@@ -264,10 +273,14 @@ export function createPostgresOperatorSessionPolicyStore(
             .onConflictDoNothing();
         }
 
-        return resolveOperatorAuthority(transaction, {
-          operatorId: operator.id,
-          isSuperAdministrator: false,
-        });
+        return resolveOperatorAuthority(
+          transaction,
+          {
+            operatorId: operator.id,
+            isSuperAdministrator: false,
+          },
+          input.now,
+        );
       });
     },
 
@@ -290,10 +303,14 @@ export function createPostgresOperatorSessionPolicyStore(
         return null;
       }
 
-      return resolveOperatorAuthority(database, {
-        operatorId: operator.id,
-        isSuperAdministrator: operator.isSuperAdministrator,
-      });
+      return resolveOperatorAuthority(
+        database,
+        {
+          operatorId: operator.id,
+          isSuperAdministrator: operator.isSuperAdministrator,
+        },
+        now(),
+      );
     },
   };
 }
@@ -322,6 +339,7 @@ async function resolveOperatorAuthority(
     readonly operatorId: string;
     readonly isSuperAdministrator: boolean;
   },
+  evaluatedAt: Date,
 ): Promise<AuthenticatedOperator> {
   if (operator.isSuperAdministrator) {
     return {
@@ -372,7 +390,7 @@ async function resolveOperatorAuthority(
           and(
             eq(operatorBreakGlassGrants.operatorId, operator.operatorId),
             isNull(operatorBreakGlassGrants.revokedAt),
-            gt(operatorBreakGlassGrants.expiresAt, new Date()),
+            gt(operatorBreakGlassGrants.expiresAt, evaluatedAt),
           ),
         ),
     ]);

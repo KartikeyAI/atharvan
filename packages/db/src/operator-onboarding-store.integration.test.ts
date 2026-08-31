@@ -63,9 +63,11 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
     const pool = new Pool({ connectionString: databaseUrl, max: 4 });
     const database = drizzle({ client: pool, schema });
     const store = createPostgresOperatorOnboardingStore(database);
-    const sessionPolicyStore =
-      createPostgresOperatorSessionPolicyStore(database);
     const commandTime = new Date("2026-08-28T12:00:00.000Z");
+    const sessionPolicyStore = createPostgresOperatorSessionPolicyStore(
+      database,
+      { now: () => commandTime },
+    );
     let deliveredCode: string | undefined;
     const emailSender = {
       sendFirstLoginVerification: vi.fn(async (message) => {
