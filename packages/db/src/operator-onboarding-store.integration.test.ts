@@ -1221,7 +1221,13 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
       });
       await expect(
         database.delete(passkey).where(eq(passkey.id, "integration-passkey-1")),
-      ).rejects.toThrow("last active operator passkey cannot be removed");
+      ).rejects.toThrow();
+      await expect(
+        database
+          .select({ id: passkey.id })
+          .from(passkey)
+          .where(eq(passkey.id, "integration-passkey-1")),
+      ).resolves.toEqual([{ id: "integration-passkey-1" }]);
 
       await database.insert(passkey).values({
         id: "integration-passkey-2",
