@@ -1,4 +1,5 @@
 import {
+  KeyRoundIcon,
   PlusIcon,
   RefreshCwIcon,
   ShieldIcon,
@@ -19,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import {
   apiRequest,
   type OperatorDirectoryResponse,
+  type OperatorBreakGlassGrantsResponse,
   type OperatorRolesResponse,
   useApiResource,
 } from "@/lib/api";
@@ -35,6 +37,9 @@ function OperatorsPage() {
   const roles = useApiResource<OperatorRolesResponse>(
     "/api/platform/operator-roles",
   );
+  const breakGlassGrants = useApiResource<OperatorBreakGlassGrantsResponse>(
+    "/api/platform/operator-break-glass-grants",
+  );
   const [showInvite, setShowInvite] = useState(false);
   const activeRoles =
     roles.state.status === "success"
@@ -44,6 +49,7 @@ function OperatorsPage() {
   function reloadAll() {
     operators.reload();
     roles.reload();
+    breakGlassGrants.reload();
   }
 
   return (
@@ -73,6 +79,13 @@ function OperatorsPage() {
             reload={reloadAll}
           />
         ) : null}
+        {breakGlassGrants.state.status === "error" ? (
+          <AccessError
+            code={breakGlassGrants.state.error.code}
+            message={breakGlassGrants.state.error.message}
+            reload={reloadAll}
+          />
+        ) : null}
         {showInvite && activeRoles.length > 0 ? (
           <InviteOperator
             onCreated={() => {
@@ -83,7 +96,8 @@ function OperatorsPage() {
           />
         ) : null}
         {operators.state.status === "loading" ||
-        roles.state.status === "loading" ? (
+        roles.state.status === "loading" ||
+        breakGlassGrants.state.status === "loading" ? (
           <LoadingCard />
         ) : null}
         {operators.state.status === "error" ? (
@@ -94,15 +108,24 @@ function OperatorsPage() {
           />
         ) : null}
         {operators.state.status === "success" &&
-        roles.state.status === "success" ? (
-          <div className="operator-layout">
-            <OperatorDirectory
-              items={operators.state.data.items}
+        roles.state.status === "success" &&
+        breakGlassGrants.state.status === "success" ? (
+          <>
+            <div className="operator-layout">
+              <OperatorDirectory
+                items={operators.state.data.items}
+                onChanged={reloadAll}
+                roles={activeRoles}
+              />
+              <RoleCatalog roles={roles.state.data.items} />
+            </div>
+            <BreakGlassPanel
+              grants={breakGlassGrants.state.data.items}
               onChanged={reloadAll}
+              operators={operators.state.data.items}
               roles={activeRoles}
             />
-            <RoleCatalog roles={roles.state.data.items} />
-          </div>
+          </>
         ) : null}
       </div>
     </OperatorShell>
@@ -485,6 +508,423 @@ function RoleCatalog({
       </CardContent>
     </Card>
   );
+}
+
+function BreakGlassPanel({
+  grants,
+  operators,
+  roles,
+  onChanged,
+}: Readonly<{
+  grants: OperatorBreakGlassGrantsResponse["items"];
+  operators: OperatorDirectoryResponse["items"];
+  roles: ReadonlyArray<OperatorRoleDefinitionEntry>;
+  onChanged: () => void;
+}>) {
+  const eligibleOperators = operators.filter(
+    (operator) =>
+      operator.status === "active" && !operator.isSuperAdministrator,
+  );
+  const capabilities = [
+    ...new Set(roles.flatMap((role) => role.capabilities)),
+  ].sort();
+
+  return (
+    <section className="section-stack">
+      <div className="section-heading">
+        <div>
+          <h2>Break-glass access</h2>
+          <p>
+            Time-bound elevation requires approval, expires automatically, and
+            stays open until a terminal review is recorded.
+          </p>
+        </div>
+        <Badge
+          variant={
+            grants.some((grant) => grant.status === "active")
+              ? "critical"
+              : "success"
+          }
+        >
+          {grants.filter((grant) => grant.status === "active").length} active
+        </Badge>
+      </div>
+      {eligibleOperators.length > 0 && capabilities.length > 0 ? (
+        <CreateBreakGlassGrant
+          capabilities={capabilities}
+          onCreated={onChanged}
+          operators={eligibleOperators}
+        />
+      ) : (
+        <Alert>
+          An active non-super operator and an active role catalogue are required
+          before temporary elevation can be issued.
+        </Alert>
+      )}
+      <Card>
+        <CardHeader>
+          <div className="section-icon">
+            <KeyRoundIcon aria-hidden="true" />
+          </div>
+          <div>
+            <h2>Grant ledger</h2>
+            <p>
+              Immutable issuance evidence with explicit revocation and review.
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent className="table-wrap">
+          {grants.length === 0 ? (
+            <div className="empty-card">
+              <p>No break-glass grants have been issued.</p>
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Operator and authority</th>
+                  <th>Window</th>
+                  <th>Evidence</th>
+                  <th>Review</th>
+                </tr>
+              </thead>
+              <tbody>
+                {grants.map((grant) => (
+                  <tr key={grant.id}>
+                    <td>
+                      <strong>{grant.operatorEmail}</strong>
+                      <div className="capability-list">
+                        {grant.capabilities.map((capability) => (
+                          <code key={capability}>{capability}</code>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <StatusBadge status={grant.status} />
+                      <span>{formatDate(grant.grantedAt)}</span>
+                      <span>Expires {formatDate(grant.expiresAt)}</span>
+                    </td>
+                    <td>
+                      <strong>{grant.incidentReference}</strong>
+                      <span>Approval: {grant.approvalReference}</span>
+                      <span>Issued by {grant.grantedByEmail}</span>
+                      <details>
+                        <summary>Audit reason</summary>
+                        <p>{grant.reason}</p>
+                      </details>
+                    </td>
+                    <td>
+                      {grant.review ? (
+                        <div>
+                          <Badge
+                            variant={
+                              grant.review.outcome === "approved"
+                                ? "success"
+                                : "critical"
+                            }
+                          >
+                            {grant.review.outcome}
+                          </Badge>
+                          <span>{grant.review.summary}</span>
+                          <span>By {grant.review.reviewerEmail}</span>
+                        </div>
+                      ) : (
+                        <BreakGlassGrantAction
+                          grant={grant}
+                          onChanged={onChanged}
+                        />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function CreateBreakGlassGrant({
+  capabilities,
+  operators,
+  onCreated,
+}: Readonly<{
+  capabilities: ReadonlyArray<string>;
+  operators: OperatorDirectoryResponse["items"];
+  onCreated: () => void;
+}>) {
+  const [targetOperatorId, setTargetOperatorId] = useState(
+    operators[0]?.id ?? "",
+  );
+  const [selectedCapabilities, setSelectedCapabilities] = useState<
+    ReadonlyArray<string>
+  >([]);
+  const [durationMinutes, setDurationMinutes] = useState(15);
+  const [incidentReference, setIncidentReference] = useState("");
+  const [approvalReference, setApprovalReference] = useState("");
+  const [reason, setReason] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const expectedConfirmation = `GRANT BREAK-GLASS TO ${targetOperatorId}`;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      await apiRequest(
+        `/api/platform/operators/${targetOperatorId}/break-glass-grants`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            capabilities: selectedCapabilities,
+            durationMinutes,
+            incidentReference,
+            approvalReference,
+            reason,
+            confirmation,
+          }),
+        },
+      );
+      setSelectedCapabilities([]);
+      setIncidentReference("");
+      setApprovalReference("");
+      setReason("");
+      setConfirmation("");
+      onCreated();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Temporary authority was not issued.",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card className="action-card">
+      <CardHeader>
+        <div className="section-icon">
+          <KeyRoundIcon aria-hidden="true" />
+        </div>
+        <div>
+          <h2>Issue temporary authority</h2>
+          <p>Use only for a live operational need with recorded approval.</p>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {error ? <Alert variant="destructive">{error}</Alert> : null}
+        <form className="admin-form" onSubmit={submit}>
+          <div className="field-stack">
+            <Label htmlFor="break-glass-operator">Operator</Label>
+            <select
+              className="input"
+              id="break-glass-operator"
+              onChange={(event) => {
+                setTargetOperatorId(event.target.value);
+                setConfirmation("");
+              }}
+              value={targetOperatorId}
+            >
+              {operators.map((operator) => (
+                <option key={operator.id} value={operator.id}>
+                  {operator.email}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field-stack">
+            <Label htmlFor="break-glass-duration">Duration</Label>
+            <select
+              className="input"
+              id="break-glass-duration"
+              onChange={(event) =>
+                setDurationMinutes(Number(event.target.value))
+              }
+              value={durationMinutes}
+            >
+              {[5, 15, 30, 60].map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes} minutes
+                </option>
+              ))}
+            </select>
+          </div>
+          <fieldset className="capability-fieldset field-span">
+            <legend>Temporary capabilities</legend>
+            {capabilities.map((capability) => (
+              <label className="checkbox-row" key={capability}>
+                <input
+                  checked={selectedCapabilities.includes(capability)}
+                  onChange={(event) =>
+                    setSelectedCapabilities((current) =>
+                      event.target.checked
+                        ? [...current, capability]
+                        : current.filter((value) => value !== capability),
+                    )
+                  }
+                  type="checkbox"
+                />
+                <code>{capability}</code>
+              </label>
+            ))}
+          </fieldset>
+          <div className="field-stack">
+            <Label htmlFor="break-glass-incident">Incident/reference</Label>
+            <Input
+              id="break-glass-incident"
+              onChange={(event) => setIncidentReference(event.target.value)}
+              placeholder="INC-2026-001"
+              required
+              value={incidentReference}
+            />
+          </div>
+          <div className="field-stack">
+            <Label htmlFor="break-glass-approval">Approval reference</Label>
+            <Input
+              id="break-glass-approval"
+              onChange={(event) => setApprovalReference(event.target.value)}
+              required
+              value={approvalReference}
+            />
+          </div>
+          <div className="field-stack field-span">
+            <Label htmlFor="break-glass-reason">Audit reason</Label>
+            <Input
+              id="break-glass-reason"
+              minLength={8}
+              onChange={(event) => setReason(event.target.value)}
+              required
+              value={reason}
+            />
+          </div>
+          <div className="field-stack field-span">
+            <Label htmlFor="break-glass-confirmation">
+              Type <code>{expectedConfirmation}</code>
+            </Label>
+            <Input
+              autoComplete="off"
+              id="break-glass-confirmation"
+              onChange={(event) => setConfirmation(event.target.value)}
+              required
+              value={confirmation}
+            />
+          </div>
+          <div className="form-actions field-span">
+            <Button
+              disabled={
+                pending ||
+                selectedCapabilities.length === 0 ||
+                confirmation !== expectedConfirmation
+              }
+              type="submit"
+              variant="destructive"
+            >
+              {pending ? "Issuing authority…" : "Issue break-glass grant"}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BreakGlassGrantAction({
+  grant,
+  onChanged,
+}: Readonly<{
+  grant: OperatorBreakGlassGrantsResponse["items"][number];
+  onChanged: () => void;
+}>) {
+  const [reason, setReason] = useState("");
+  const [outcome, setOutcome] = useState<"approved" | "concerns">("approved");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      if (grant.status === "active") {
+        await apiRequest(
+          `/api/platform/operator-break-glass-grants/${grant.id}/revoke`,
+          { method: "POST", body: JSON.stringify({ reason }) },
+        );
+      } else {
+        await apiRequest(
+          `/api/platform/operator-break-glass-grants/${grant.id}/reviews`,
+          {
+            method: "POST",
+            body: JSON.stringify({ outcome, summary: reason }),
+          },
+        );
+      }
+      onChanged();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "The grant lifecycle change was not recorded.",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form className="field-stack" onSubmit={submit}>
+      {error ? <Alert variant="destructive">{error}</Alert> : null}
+      {grant.status !== "active" ? (
+        <select
+          aria-label="Review outcome"
+          className="input"
+          onChange={(event) =>
+            setOutcome(event.target.value as "approved" | "concerns")
+          }
+          value={outcome}
+        >
+          <option value="approved">Approved</option>
+          <option value="concerns">Concerns found</option>
+        </select>
+      ) : null}
+      <Input
+        aria-label={
+          grant.status === "active" ? "Revocation reason" : "Review summary"
+        }
+        minLength={8}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder={
+          grant.status === "active" ? "Revocation reason" : "Review summary"
+        }
+        required
+        value={reason}
+      />
+      <Button
+        disabled={pending}
+        type="submit"
+        variant={grant.status === "active" ? "destructive" : "outline"}
+      >
+        {pending
+          ? "Recording…"
+          : grant.status === "active"
+            ? "Revoke now"
+            : "Record review"}
+      </Button>
+    </form>
+  );
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function StatusBadge({ status }: Readonly<{ status: string }>) {

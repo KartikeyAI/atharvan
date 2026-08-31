@@ -1,6 +1,6 @@
 # Atharvan Progress
 
-Last updated: 2026-08-30  
+Last updated: 2026-08-31
 Current phase: Safe administrative foundation  
 Overall status: Phase 1 in progress
 
@@ -63,7 +63,7 @@ An item may be marked complete only when its implementation, tests, operational 
 - [x] Implement invited-to-active first-login email verification code flow.
 - [ ] Add mandatory strong MFA/passkey policy.
 - [~] Add step-up authentication for sensitive actions.
-- [ ] Add break-glass grant lifecycle with expiry and review.
+- [~] Add break-glass grant lifecycle with expiry and review.
 
 ### Configuration and secrets
 
@@ -232,6 +232,7 @@ An item may be marked complete only when its implementation, tests, operational 
 | 2026-08-30 | Customer identity and membership metadata is a bounded, disposable projection from Arth with monotonic snapshot replacement, explicit freshness, purpose-bound audited reads, and no customer-private content; Atharvan never infers effective permissions.  | Accepted | `docs/adr/0011-customer-directory-projection-and-purpose-bound-inspection.md` |
 | 2026-08-30 | Customer user/workspace restrictions use exact capability-scoped desired-state revisions and append-only Arth observations; Atharvan records intent but never claims enforcement before reconciliation.                                                      | Accepted | `docs/adr/0012-reconciled-customer-access-restrictions.md`                    |
 | 2026-08-30 | Customer notes are append-only, risk markers use immutable revisions, and ownership transfers remain pending until Arth supplies explicit ownership and a monotonic reconciliation observation; ownership is never inferred from membership.                 | Accepted | `docs/adr/0013-reconciled-customer-operations.md`                             |
+| 2026-08-31 | Break-glass authority uses exact 5–60 minute capability grants, approval and incident evidence, automatic expiry, guarded revocation, immutable terminal review, and command-level grant provenance.                                                         | Accepted | `docs/adr/0014-expiring-operator-break-glass-grants.md`                       |
 
 ## Work log
 

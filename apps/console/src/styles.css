@@ -1484,6 +1484,29 @@ button {
   gap: 16px;
 }
 
+.section-stack {
+  display: grid;
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-heading h2,
+.section-heading p {
+  margin: 0;
+}
+
+.section-heading p {
+  margin-top: 5px;
+  color: var(--muted-foreground);
+}
+
 .role-editor {
   display: grid;
   gap: 16px;

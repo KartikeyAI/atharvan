@@ -41,6 +41,7 @@ export interface PlatformCommandAuditStore {
     readonly reason: string;
     readonly approvalReference: string | null;
     readonly evidenceReferences: ReadonlyArray<string>;
+    readonly breakGlassGrantIds: ReadonlyArray<string>;
     readonly requestedAt: Date;
   }): Promise<PlatformCommandBeginResult>;
   completeCommand(input: {
@@ -156,6 +157,9 @@ export function createPlatformCommandService(input: {
       const evidenceReferences = requireEvidenceReferences(
         command.evidenceReferences ?? [],
       );
+      const breakGlassGrantIds = requireBreakGlassGrantIds(
+        command.actor.breakGlassGrantIds ?? [],
+      );
       const expectedTargetVersion =
         command.expectedTargetVersion === undefined ||
         command.expectedTargetVersion === null
@@ -186,6 +190,7 @@ export function createPlatformCommandService(input: {
         reason,
         approvalReference,
         evidenceReferences,
+        breakGlassGrantIds,
         requestedAt,
       });
     },
@@ -461,6 +466,14 @@ function requireEvidenceReferences(values: ReadonlyArray<string>) {
     reject("command_evidence_invalid");
   return values.map((value) =>
     requireText(value, 1, 256, "command_evidence_invalid"),
+  );
+}
+
+function requireBreakGlassGrantIds(values: ReadonlyArray<string>) {
+  if (values.length > 5 || new Set(values).size !== values.length)
+    reject("command_break_glass_grants_invalid");
+  return values.map((value) =>
+    requireUuid(value, "command_break_glass_grants_invalid"),
   );
 }
 

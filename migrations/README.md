@@ -43,4 +43,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0014_customer_operations.sql` adds explicit projected workspace ownership, controlled ownership-transfer requests and observations, append-only internal notes, and immutable risk-marker revisions. It stores operational metadata only and rejects secret-like note content before PostgreSQL.
 
+`0015_operator_break_glass.sql` adds 5–60 minute operator elevation grants, guarded revocation, immutable terminal review, approval and incident evidence, and exact grant provenance on every command envelope executed with temporary authority. Security Operator and Auditor role version 2 add terminal-review authority; existing assignments remain pinned until explicitly replaced.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

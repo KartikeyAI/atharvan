@@ -12,6 +12,7 @@ import * as schema from "./schema";
 import {
   allowedEmailDomains,
   auditEvents,
+  operatorBreakGlassGrants,
   operatorInvitations,
   operatorRoleAssignments,
   operatorRoleDefinitions,
@@ -330,44 +331,71 @@ async function resolveOperatorAuthority(
     };
   }
 
-  const [acceptedInvitation] = await database
-    .select({
-      intendedCapabilities: operatorInvitations.intendedCapabilities,
-    })
-    .from(operatorInvitations)
-    .where(
-      and(
-        eq(operatorInvitations.operatorId, operator.operatorId),
-        eq(operatorInvitations.status, "accepted"),
-      ),
-    )
-    .orderBy(desc(operatorInvitations.acceptedAt))
-    .limit(1);
-
-  const roleCapabilities = await database
-    .select({ capabilities: operatorRoleDefinitions.capabilities })
-    .from(operatorRoleAssignments)
-    .innerJoin(
-      operatorRoleDefinitions,
-      eq(operatorRoleDefinitions.id, operatorRoleAssignments.roleDefinitionId),
-    )
-    .where(
-      and(
-        eq(operatorRoleAssignments.operatorId, operator.operatorId),
-        isNull(operatorRoleAssignments.revokedAt),
-      ),
-    );
+  const [[acceptedInvitation], roleCapabilities, activeBreakGlassGrants] =
+    await Promise.all([
+      database
+        .select({
+          intendedCapabilities: operatorInvitations.intendedCapabilities,
+        })
+        .from(operatorInvitations)
+        .where(
+          and(
+            eq(operatorInvitations.operatorId, operator.operatorId),
+            eq(operatorInvitations.status, "accepted"),
+          ),
+        )
+        .orderBy(desc(operatorInvitations.acceptedAt))
+        .limit(1),
+      database
+        .select({ capabilities: operatorRoleDefinitions.capabilities })
+        .from(operatorRoleAssignments)
+        .innerJoin(
+          operatorRoleDefinitions,
+          eq(
+            operatorRoleDefinitions.id,
+            operatorRoleAssignments.roleDefinitionId,
+          ),
+        )
+        .where(
+          and(
+            eq(operatorRoleAssignments.operatorId, operator.operatorId),
+            isNull(operatorRoleAssignments.revokedAt),
+          ),
+        ),
+      database
+        .select({
+          id: operatorBreakGlassGrants.id,
+          capabilities: operatorBreakGlassGrants.capabilities,
+        })
+        .from(operatorBreakGlassGrants)
+        .where(
+          and(
+            eq(operatorBreakGlassGrants.operatorId, operator.operatorId),
+            isNull(operatorBreakGlassGrants.revokedAt),
+            gt(operatorBreakGlassGrants.expiresAt, new Date()),
+          ),
+        ),
+    ]);
+  const persistentCapabilities =
+    roleCapabilities.length > 0
+      ? roleCapabilities.flatMap((role) => role.capabilities)
+      : (acceptedInvitation?.intendedCapabilities ?? []);
   const effectiveCapabilities = [
-    ...new Set(roleCapabilities.flatMap((role) => role.capabilities)),
+    ...new Set([
+      ...persistentCapabilities,
+      ...activeBreakGlassGrants.flatMap((grant) => grant.capabilities),
+    ]),
   ].sort();
 
   return {
     operatorId: operator.operatorId,
     isSuperAdministrator: false,
-    effectiveCapabilities:
-      effectiveCapabilities.length > 0
-        ? effectiveCapabilities
-        : (acceptedInvitation?.intendedCapabilities ?? []),
+    effectiveCapabilities,
+    ...(activeBreakGlassGrants.length === 0
+      ? {}
+      : {
+          breakGlassGrantIds: activeBreakGlassGrants.map((grant) => grant.id),
+        }),
   };
 }
 

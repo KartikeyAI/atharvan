@@ -7,6 +7,7 @@ export interface AuthenticatedOperator {
   readonly isSuperAdministrator: boolean;
   readonly effectiveCapabilities: ReadonlyArray<string>;
   readonly stepUpVerifiedAt?: Date;
+  readonly breakGlassGrantIds?: ReadonlyArray<string>;
 }
 
 export type PlatformHealthStatus =

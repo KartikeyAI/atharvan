@@ -63,6 +63,8 @@ import {
   type ModelRoutingDecision,
   type ModelRoutingOperations,
   type OperatorDirectoryEntry,
+  type OperatorBreakGlassGrantEntry,
+  type OperatorBreakGlassReviewOutcome,
   type OperatorRoleDefinitionEntry,
   type PlatformConfigurationRegistry,
   type PlatformConfigurationScope,
@@ -122,6 +124,9 @@ export interface AuthenticationRuntime {
   listMembershipDomains(): Promise<ReadonlyArray<MembershipDomainEntry>>;
   listOperatorRoleDefinitions(): Promise<
     ReadonlyArray<OperatorRoleDefinitionEntry>
+  >;
+  listOperatorBreakGlassGrants(): Promise<
+    ReadonlyArray<OperatorBreakGlassGrantEntry>
   >;
   listPlatformConfiguration(): Promise<PlatformConfigurationRegistry>;
   readonly secretProviderConfigured: boolean;
@@ -251,6 +256,18 @@ export interface AuthenticationRuntime {
     readonly outcome: "updated" | "unchanged";
     readonly operatorId: string;
   }>;
+  createOperatorBreakGlassGrant(
+    actor: AuthenticatedOperator,
+    input: CreateOperatorBreakGlassGrantCommand,
+  ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+  revokeOperatorBreakGlassGrant(
+    actor: AuthenticatedOperator,
+    input: RevokeOperatorBreakGlassGrantCommand,
+  ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
+  reviewOperatorBreakGlassGrant(
+    actor: AuthenticatedOperator,
+    input: ReviewOperatorBreakGlassGrantCommand,
+  ): Promise<{ readonly outcome: "created"; readonly id: string }>;
   setPlatformConfiguration(
     actor: AuthenticatedOperator,
     input: SetPlatformConfigurationCommand,
@@ -615,6 +632,30 @@ export interface ReplaceOperatorRolesCommand {
   readonly targetOperatorId: string;
   readonly roleKeys: ReadonlyArray<string>;
   readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface CreateOperatorBreakGlassGrantCommand {
+  readonly targetOperatorId: string;
+  readonly capabilities: ReadonlyArray<string>;
+  readonly durationMinutes: number;
+  readonly reason: string;
+  readonly incidentReference: string;
+  readonly approvalReference: string;
+  readonly confirmation: string;
+  readonly correlationId: string;
+}
+
+export interface RevokeOperatorBreakGlassGrantCommand {
+  readonly grantId: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
+export interface ReviewOperatorBreakGlassGrantCommand {
+  readonly grantId: string;
+  readonly outcome: OperatorBreakGlassReviewOutcome;
+  readonly summary: string;
   readonly correlationId: string;
 }
 
@@ -1185,6 +1226,18 @@ export function createApp(
     });
   });
 
+  app.get("/v1/platform/operator-break-glass-grants", async (context) => {
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:operators:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json({
+      items: await runtime.listOperatorBreakGlassGrants(),
+    });
+  });
+
   app.get("/v1/platform/configuration", async (context) => {
     if (
       !operatorHasCapability(
@@ -1686,6 +1739,93 @@ export function createApp(
         }),
     );
   });
+
+  app.post(
+    "/v1/platform/operators/:operatorId/break-glass-grants",
+    async (context) => {
+      const input = await readJson(context, parseCreateOperatorBreakGlassGrant);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:operators:break-glass:write",
+          name: "operator.break-glass.grant",
+          version: 1,
+          targetType: "operator",
+          targetId: context.req.param("operatorId"),
+          payload: input,
+          reason: input.reason,
+          approvalReference: input.approvalReference,
+          evidenceReferences: [input.incidentReference],
+        },
+        () =>
+          runtime.createOperatorBreakGlassGrant(context.get("operator"), {
+            ...input,
+            targetOperatorId: context.req.param("operatorId"),
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
+
+  app.post(
+    "/v1/platform/operator-break-glass-grants/:grantId/revoke",
+    async (context) => {
+      const input = await readJson(context, parseRevokeOperatorBreakGlassGrant);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:operators:break-glass:write",
+          name: "operator.break-glass.revoke",
+          version: 1,
+          targetType: "operator_break_glass_grant",
+          targetId: context.req.param("grantId"),
+          payload: input,
+          reason: input.reason,
+        },
+        () =>
+          runtime.revokeOperatorBreakGlassGrant(context.get("operator"), {
+            grantId: context.req.param("grantId"),
+            reason: input.reason,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
+
+  app.post(
+    "/v1/platform/operator-break-glass-grants/:grantId/reviews",
+    async (context) => {
+      const input = await readJson(context, parseReviewOperatorBreakGlassGrant);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:operators:break-glass:review",
+          name: "operator.break-glass.review",
+          version: 1,
+          targetType: "operator_break_glass_grant",
+          targetId: context.req.param("grantId"),
+          payload: input,
+          reason: input.summary,
+        },
+        () =>
+          runtime.reviewOperatorBreakGlassGrant(context.get("operator"), {
+            grantId: context.req.param("grantId"),
+            outcome: input.outcome,
+            summary: input.summary,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
 
   app.get("/v1/platform/membership-domains", async (context) => {
     const operator = context.get("operator");
@@ -2223,6 +2363,70 @@ function parseReplaceOperatorRoles(
   }
 
   return { roleKeys: roleKeys as ReadonlyArray<string>, reason };
+}
+
+function parseCreateOperatorBreakGlassGrant(
+  value: unknown,
+): Omit<
+  CreateOperatorBreakGlassGrantCommand,
+  "targetOperatorId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const capabilities = readStringArray(value.capabilities, 20, 128);
+  const durationMinutes = value.durationMinutes;
+  const reason = readReason(value.reason);
+  const incidentReference = readTrimmedString(value.incidentReference, 128);
+  const approvalReference = readTrimmedString(value.approvalReference, 256);
+  const confirmation = readTrimmedString(value.confirmation, 128);
+  if (
+    capabilities === null ||
+    capabilities.length === 0 ||
+    typeof durationMinutes !== "number" ||
+    !Number.isInteger(durationMinutes) ||
+    durationMinutes < 5 ||
+    durationMinutes > 60 ||
+    reason === null ||
+    incidentReference === null ||
+    approvalReference === null ||
+    confirmation === null
+  ) {
+    return null;
+  }
+  return {
+    capabilities,
+    durationMinutes,
+    reason,
+    incidentReference,
+    approvalReference,
+    confirmation,
+  };
+}
+
+function parseRevokeOperatorBreakGlassGrant(
+  value: unknown,
+): Omit<
+  RevokeOperatorBreakGlassGrantCommand,
+  "grantId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  return reason === null ? null : { reason };
+}
+
+function parseReviewOperatorBreakGlassGrant(
+  value: unknown,
+): Omit<
+  ReviewOperatorBreakGlassGrantCommand,
+  "grantId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const summary = readTrimmedString(value.summary, 1_000);
+  const outcome = value.outcome;
+  return summary !== null &&
+    summary.length >= 8 &&
+    (outcome === "approved" || outcome === "concerns")
+    ? { outcome, summary }
+    : null;
 }
 
 function parseSetPlatformConfiguration(

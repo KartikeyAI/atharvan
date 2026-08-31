@@ -6,6 +6,7 @@ import * as schema from "./schema";
 export { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
 export { createPostgresCustomerDirectoryStore } from "./customer-directory-store";
 export { createPostgresOperatorRoleAdministrationStore } from "./operator-role-administration-store";
+export { createPostgresOperatorBreakGlassAdministrationStore } from "./operator-break-glass-store";
 export { createPostgresPlatformAdministrationReader } from "./platform-administration-reader";
 export { createPostgresPlatformCommandAuditStore } from "./platform-command-audit-store";
 export { createPostgresPlatformAdapterRegistryStore } from "./platform-adapter-store";

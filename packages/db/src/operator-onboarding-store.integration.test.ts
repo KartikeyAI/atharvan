@@ -1,4 +1,7 @@
-import { createOperatorOnboardingService } from "@atharvan/auth";
+import {
+  createOperatorBreakGlassAdministrationService,
+  createOperatorOnboardingService,
+} from "@atharvan/auth";
 import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
 import { createPlatformCommandService } from "@atharvan/commands";
@@ -17,6 +20,7 @@ import { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPostgresOperatorOnboardingStore } from "./operator-onboarding-store";
+import { createPostgresOperatorBreakGlassAdministrationStore } from "./operator-break-glass-store";
 import { createPostgresPlatformCommandAuditStore } from "./platform-command-audit-store";
 import { createPostgresCustomerDirectoryStore } from "./customer-directory-store";
 import { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
@@ -37,6 +41,8 @@ import {
   customerWorkspaceOwnershipTransfers,
   customerWorkspaceProjections,
   operatorInvitations,
+  operatorBreakGlassGrants,
+  operatorBreakGlassReviews,
   operators,
   operatorVerificationChallenges,
   platformSecretReferences,
@@ -1119,6 +1125,63 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
       ).resolves.toMatchObject({
         effectiveCapabilities: ["platform:overview:read"],
       });
+
+      const [sessionOperator] = await database
+        .select({ id: operators.id })
+        .from(operators)
+        .where(eq(operators.authUserId, "auth-user-integration-1"));
+      const breakGlassService = createOperatorBreakGlassAdministrationService({
+        store: createPostgresOperatorBreakGlassAdministrationStore(database),
+        now: () => commandTime,
+      });
+      const breakGlassGrant = await breakGlassService.createGrant({
+        actor,
+        targetOperatorId: sessionOperator!.id,
+        capabilities: ["platform:models:write"],
+        durationMinutes: 15,
+        reason: "Exercise bounded incident elevation in PostgreSQL.",
+        incidentReference: "INC-CI-15",
+        approvalReference: "APR-CI-15",
+        confirmation: `GRANT BREAK-GLASS TO ${sessionOperator!.id}`,
+        correlationId: "00000000-0000-4000-8000-000000000115",
+      });
+      await expect(
+        sessionPolicyStore.resolveActiveOperator("auth-user-integration-1"),
+      ).resolves.toMatchObject({
+        effectiveCapabilities: [
+          "platform:models:write",
+          "platform:overview:read",
+        ],
+        breakGlassGrantIds: [breakGlassGrant.id],
+      });
+      await breakGlassService.revokeGrant({
+        actor,
+        grantId: breakGlassGrant.id,
+        reason: "The PostgreSQL elevation scenario is complete.",
+        correlationId: "00000000-0000-4000-8000-000000000116",
+      });
+      await breakGlassService.reviewGrant({
+        actor,
+        grantId: breakGlassGrant.id,
+        outcome: "approved",
+        summary: "The grant matched the bounded integration-test scenario.",
+        correlationId: "00000000-0000-4000-8000-000000000117",
+      });
+      await expect(
+        sessionPolicyStore.resolveActiveOperator("auth-user-integration-1"),
+      ).resolves.toMatchObject({
+        effectiveCapabilities: ["platform:overview:read"],
+      });
+      expect(await database.select().from(operatorBreakGlassGrants)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: breakGlassGrant.id }),
+        ]),
+      );
+      expect(await database.select().from(operatorBreakGlassReviews)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ grantId: breakGlassGrant.id }),
+        ]),
+      );
 
       await database
         .update(operators)

@@ -29,6 +29,8 @@ const expectedTables = [
   "model_routing_policy_targets",
   "models",
   "operator_invitations",
+  "operator_break_glass_grants",
+  "operator_break_glass_reviews",
   "operator_verification_challenges",
   "operators",
   "platform_command_results",
@@ -60,6 +62,8 @@ const expectedIndexes = [
   "operators_auth_user_id_unique",
   "operators_single_super_administrator",
   "operator_invitations_one_pending_per_operator",
+  "operator_break_glass_grants_expiry_idx",
+  "operator_break_glass_reviews_grant_unique",
   "operator_verification_challenges_one_pending_per_operator",
   "operator_verification_challenges_correlation_idx",
   "model_provider_health_provider_observed_idx",
@@ -111,6 +115,8 @@ const expectedAuthIndexes = [
 
 const expectedConstraints = [
   "operators_super_administrator_must_be_active",
+  "operator_break_glass_grants_lifetime",
+  "operator_break_glass_grants_revocation_metadata",
   "customer_ownership_transfer_observations_shape",
   "customer_ownership_transfers_distinct_users",
   "model_provider_health_expiry_after_observation",
@@ -168,6 +174,8 @@ const expectedTriggers = [
   "customer_risk_marker_revisions_immutable",
   "customer_workspace_ownership_transfers_immutable",
   "customer_workspace_ownership_transfer_observations_immutable",
+  "operator_break_glass_grants_guarded",
+  "operator_break_glass_reviews_immutable",
 ] as const;
 
 const pool = new Pool({

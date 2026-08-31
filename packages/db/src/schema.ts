@@ -155,6 +155,11 @@ export const verificationChallengeStatus = pgEnum(
   ["pending", "consumed", "expired", "locked", "superseded"],
 );
 
+export const operatorBreakGlassReviewOutcome = pgEnum(
+  "operator_break_glass_review_outcome",
+  ["approved", "concerns"],
+);
+
 export const platformConfigurationValueType = pgEnum(
   "platform_configuration_value_type",
   ["boolean", "integer", "string", "string_list"],
@@ -656,6 +661,94 @@ export const operatorRoleAssignments = pgTable(
     check(
       "operator_role_assignments_revocation_metadata",
       sql`(${table.revokedAt} IS NULL AND ${table.revokedByOperatorId} IS NULL AND ${table.revokedReason} IS NULL AND ${table.revokedCorrelationId} IS NULL) OR (${table.revokedAt} IS NOT NULL AND ${table.revokedByOperatorId} IS NOT NULL AND ${table.revokedReason} IS NOT NULL AND ${table.revokedCorrelationId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const operatorBreakGlassGrants = pgTable(
+  "operator_break_glass_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    capabilities: text("capabilities")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    reason: text("reason").notNull(),
+    incidentReference: text("incident_reference").notNull(),
+    approvalReference: text("approval_reference").notNull(),
+    grantedByOperatorId: uuid("granted_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedByOperatorId: uuid("revoked_by_operator_id").references(
+      () => operators.id,
+      { onDelete: "restrict" },
+    ),
+    revokedReason: text("revoked_reason"),
+    revokedCorrelationId: uuid("revoked_correlation_id"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("operator_break_glass_grants_operator_idx").on(table.operatorId),
+    index("operator_break_glass_grants_expiry_idx")
+      .on(table.expiresAt)
+      .where(sql`${table.revokedAt} IS NULL`),
+    index("operator_break_glass_grants_granted_by_idx").on(
+      table.grantedByOperatorId,
+    ),
+    index("operator_break_glass_grants_correlation_idx").on(
+      table.correlationId,
+    ),
+    check(
+      "operator_break_glass_grants_capabilities_nonempty",
+      sql`cardinality(${table.capabilities}) > 0`,
+    ),
+    check(
+      "operator_break_glass_grants_lifetime",
+      sql`${table.expiresAt} >= ${table.grantedAt} + interval '5 minutes' AND ${table.expiresAt} <= ${table.grantedAt} + interval '60 minutes'`,
+    ),
+    check(
+      "operator_break_glass_grants_revocation_metadata",
+      sql`(${table.revokedAt} IS NULL AND ${table.revokedByOperatorId} IS NULL AND ${table.revokedReason} IS NULL AND ${table.revokedCorrelationId} IS NULL) OR (${table.revokedAt} IS NOT NULL AND ${table.revokedByOperatorId} IS NOT NULL AND ${table.revokedReason} IS NOT NULL AND ${table.revokedCorrelationId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const operatorBreakGlassReviews = pgTable(
+  "operator_break_glass_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    grantId: uuid("grant_id")
+      .notNull()
+      .references(() => operatorBreakGlassGrants.id, { onDelete: "restrict" }),
+    reviewerOperatorId: uuid("reviewer_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    outcome: operatorBreakGlassReviewOutcome("outcome").notNull(),
+    summary: text("summary").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_break_glass_reviews_grant_unique").on(table.grantId),
+    index("operator_break_glass_reviews_reviewer_idx").on(
+      table.reviewerOperatorId,
+    ),
+    index("operator_break_glass_reviews_correlation_idx").on(
+      table.correlationId,
+    ),
+    check(
+      "operator_break_glass_reviews_summary_length",
+      sql`length(${table.summary}) BETWEEN 8 AND 1000`,
     ),
   ],
 );
@@ -2435,6 +2528,10 @@ export const platformCommands = pgTable(
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`),
+    breakGlassGrantIds: uuid("break_glass_grant_ids")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::uuid[]`),
     requestedAt: timestamp("requested_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2489,6 +2586,10 @@ export const platformCommands = pgTable(
     check(
       "platform_commands_evidence_bounded",
       sql`cardinality(${table.evidenceReferences}) <= 20`,
+    ),
+    check(
+      "platform_commands_break_glass_grants_bounded",
+      sql`cardinality(${table.breakGlassGrantIds}) <= 5`,
     ),
   ],
 );

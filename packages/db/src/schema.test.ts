@@ -17,6 +17,8 @@ import {
   customerWorkspaceOwnershipTransfers,
   customerWorkspaceProjections,
   operatorInvitations,
+  operatorBreakGlassGrants,
+  operatorBreakGlassReviews,
   operatorRoleAssignments,
   operatorRoleDefinitions,
   operators,
@@ -124,6 +126,25 @@ describe("operator onboarding schema", () => {
     ).toContain("operator_role_assignments_revocation_metadata");
   });
 
+  it("bounds temporary authority and requires one immutable review", () => {
+    const grantConfig = getTableConfig(operatorBreakGlassGrants);
+    const reviewConfig = getTableConfig(operatorBreakGlassReviews);
+
+    expect(grantConfig.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "operator_break_glass_grants_capabilities_nonempty",
+        "operator_break_glass_grants_lifetime",
+        "operator_break_glass_grants_revocation_metadata",
+      ]),
+    );
+    expect(grantConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "operator_break_glass_grants_expiry_idx",
+    );
+    expect(reviewConfig.indexes.map((entry) => entry.config.name)).toContain(
+      "operator_break_glass_reviews_grant_unique",
+    );
+  });
+
   it("separates immutable configuration revisions from current bindings", () => {
     const definitionConfig = getTableConfig(platformConfigurationDefinitions);
     const revisionConfig = getTableConfig(platformConfigurationRevisions);
@@ -183,6 +204,7 @@ describe("operator onboarding schema", () => {
         "idempotency_fingerprint",
         "approval_reference",
         "evidence_references",
+        "break_glass_grant_ids",
       ]),
     );
     expect(commandColumns).not.toEqual(

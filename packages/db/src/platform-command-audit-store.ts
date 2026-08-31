@@ -46,6 +46,7 @@ export function createPostgresPlatformCommandAuditStore(
             reason: input.reason,
             approvalReference: input.approvalReference,
             evidenceReferences: [...input.evidenceReferences],
+            breakGlassGrantIds: [...input.breakGlassGrantIds],
             requestedAt: input.requestedAt,
           })
           .onConflictDoNothing()
@@ -68,6 +69,7 @@ export function createPostgresPlatformCommandAuditStore(
               payloadFingerprint: input.payloadFingerprint,
               approvalReference: input.approvalReference,
               evidenceReferences: [...input.evidenceReferences],
+              breakGlassGrantIds: [...input.breakGlassGrantIds],
             },
             occurredAt: input.requestedAt,
           });
@@ -385,6 +387,8 @@ function sameEnvelope(
     existing.reason === input.reason &&
     existing.approvalReference === input.approvalReference &&
     JSON.stringify(existing.evidenceReferences) ===
-      JSON.stringify(input.evidenceReferences)
+      JSON.stringify(input.evidenceReferences) &&
+    JSON.stringify(existing.breakGlassGrantIds) ===
+      JSON.stringify(input.breakGlassGrantIds)
   );
 }

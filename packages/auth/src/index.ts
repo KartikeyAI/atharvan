@@ -20,6 +20,8 @@ import {
 import { createAuthMiddleware } from "better-auth/api";
 import { emailOTP } from "better-auth/plugins";
 
+export * from "./operator-break-glass";
+
 import { OnboardingCommandRejectedError } from "./errors";
 
 const defaultInvitationLifetimeMs = 24 * 60 * 60 * 1_000;

@@ -3,6 +3,7 @@ import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import {
   createAtharvanAuth,
+  createOperatorBreakGlassAdministrationService,
   createOperatorOnboardingService,
   createOperatorRoleAdministrationService,
   OnboardingCommandRejectedError,
@@ -18,6 +19,7 @@ import {
   createNeonDatabase,
   createPostgresCustomerDirectoryStore,
   createPostgresOperatorOnboardingStore,
+  createPostgresOperatorBreakGlassAdministrationStore,
   createPostgresOperatorRoleAdministrationStore,
   createPostgresOperatorSessionPolicyStore,
   createPostgresPlatformAdministrationReader,
@@ -97,6 +99,12 @@ async function createProductionAuthenticationRuntime(input: {
       databaseHandle.database,
     ),
   });
+  const breakGlassAdministrationService =
+    createOperatorBreakGlassAdministrationService({
+      store: createPostgresOperatorBreakGlassAdministrationStore(
+        databaseHandle.database,
+      ),
+    });
   const configurationStore = createPostgresPlatformConfigurationStore(
     databaseHandle.database,
   );
@@ -221,6 +229,8 @@ async function createProductionAuthenticationRuntime(input: {
     listMembershipDomains: () => administrationReader.listMembershipDomains(),
     listOperatorRoleDefinitions: () =>
       administrationReader.listOperatorRoleDefinitions(),
+    listOperatorBreakGlassGrants: () =>
+      administrationReader.listOperatorBreakGlassGrants(),
     listPlatformConfiguration: () =>
       configurationStore.listConfiguration(config.ATHARVAN_ENVIRONMENT),
     listPlatformSecretReferences: () => secretLifecycleService.listReferences(),
@@ -328,6 +338,12 @@ async function createProductionAuthenticationRuntime(input: {
         reason: command.reason,
         correlationId: command.correlationId,
       }),
+    createOperatorBreakGlassGrant: (actor, command) =>
+      breakGlassAdministrationService.createGrant({ actor, ...command }),
+    revokeOperatorBreakGlassGrant: (actor, command) =>
+      breakGlassAdministrationService.revokeGrant({ actor, ...command }),
+    reviewOperatorBreakGlassGrant: (actor, command) =>
+      breakGlassAdministrationService.reviewGrant({ actor, ...command }),
     setPlatformConfiguration: (actor, command) =>
       configurationAdministrationService.setConfiguration({
         actor,

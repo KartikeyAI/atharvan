@@ -6,6 +6,8 @@ import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 import * as schema from "./schema";
 import {
   allowedEmailDomains,
+  operatorBreakGlassGrants,
+  operatorBreakGlassReviews,
   operatorInvitations,
   operatorRoleAssignments,
   operatorRoleDefinitions,
@@ -157,6 +159,68 @@ export function createPostgresPlatformAdministrationReader(
           asc(operatorRoleDefinitions.name),
           desc(operatorRoleDefinitions.version),
         );
+    },
+
+    async listOperatorBreakGlassGrants() {
+      const [grantRows, reviewRows, operatorRows] = await Promise.all([
+        database
+          .select()
+          .from(operatorBreakGlassGrants)
+          .orderBy(desc(operatorBreakGlassGrants.grantedAt)),
+        database.select().from(operatorBreakGlassReviews),
+        database
+          .select({ id: operators.id, email: operators.email })
+          .from(operators),
+      ]);
+      const emailByOperatorId = new Map(
+        operatorRows.map((operator) => [operator.id, operator.email]),
+      );
+      const reviewByGrantId = new Map(
+        reviewRows.map((review) => [review.grantId, review]),
+      );
+      const now = new Date();
+
+      return grantRows.map((grant) => {
+        const review = reviewByGrantId.get(grant.id);
+        const status =
+          grant.revokedAt !== null
+            ? ("revoked" as const)
+            : grant.expiresAt <= now
+              ? ("expired" as const)
+              : ("active" as const);
+
+        return {
+          id: grant.id,
+          operatorId: grant.operatorId,
+          operatorEmail: emailByOperatorId.get(grant.operatorId) ?? "unknown",
+          capabilities: grant.capabilities,
+          reason: grant.reason,
+          incidentReference: grant.incidentReference,
+          approvalReference: grant.approvalReference,
+          grantedByOperatorId: grant.grantedByOperatorId,
+          grantedByEmail:
+            emailByOperatorId.get(grant.grantedByOperatorId) ?? "unknown",
+          grantedAt: grant.grantedAt.toISOString(),
+          expiresAt: grant.expiresAt.toISOString(),
+          revokedAt: grant.revokedAt?.toISOString() ?? null,
+          revokedByOperatorId: grant.revokedByOperatorId,
+          revokedReason: grant.revokedReason,
+          status,
+          review:
+            review === undefined
+              ? null
+              : {
+                  id: review.id,
+                  reviewerOperatorId: review.reviewerOperatorId,
+                  reviewerEmail:
+                    emailByOperatorId.get(review.reviewerOperatorId) ??
+                    "unknown",
+                  outcome: review.outcome,
+                  summary: review.summary,
+                  reviewedAt: review.reviewedAt.toISOString(),
+                },
+        };
+      });
     },
 
     async findActiveOperatorRoleDefinition(key) {

@@ -43,6 +43,7 @@ function createRuntime(input?: {
     listOperators: vi.fn(async () => []),
     listMembershipDomains: vi.fn(async () => []),
     listOperatorRoleDefinitions: vi.fn(async () => []),
+    listOperatorBreakGlassGrants: vi.fn(async () => []),
     listPlatformConfiguration: vi.fn(async () => ({
       environment: "development" as const,
       items: [],
@@ -166,6 +167,18 @@ function createRuntime(input?: {
     replaceOperatorRoles: vi.fn(async () => ({
       outcome: "updated" as const,
       operatorId: "operator-2",
+    })),
+    createOperatorBreakGlassGrant: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000211",
+    })),
+    revokeOperatorBreakGlassGrant: vi.fn(async () => ({
+      outcome: "updated" as const,
+      id: "00000000-0000-4000-8000-000000000211",
+    })),
+    reviewOperatorBreakGlassGrant: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000212",
     })),
     setPlatformConfiguration: vi.fn(async () => ({
       outcome: "updated" as const,
@@ -763,6 +776,96 @@ describe("Atharvan control-plane worker", () => {
         targetOperatorId: "00000000-0000-4000-8000-000000000201",
         roleKeys: ["platform_viewer", "auditor"],
       }),
+    );
+  });
+
+  it("lists and issues break-glass grants through the audited command boundary", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.listOperatorBreakGlassGrants).mockResolvedValue([]);
+    const listed = await createTestApp(runtime).request(
+      "/v1/platform/operator-break-glass-grants",
+      undefined,
+      bindings,
+    );
+    expect(listed.status).toBe(200);
+
+    const targetOperatorId = "00000000-0000-4000-8000-000000000201";
+    const response = await createTestApp(runtime).request(
+      `/v1/platform/operators/${targetOperatorId}/break-glass-grants`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "break-glass-incident-42",
+        },
+        body: JSON.stringify({
+          capabilities: ["platform:models:write"],
+          durationMinutes: 15,
+          incidentReference: "INC-42",
+          approvalReference: "APR-42",
+          reason: "Restore model routing during a live incident.",
+          confirmation: `GRANT BREAK-GLASS TO ${targetOperatorId}`,
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(201);
+    expect(runtime.beginPlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "operator.break-glass.grant",
+        approvalReference: "APR-42",
+        evidenceReferences: ["INC-42"],
+        idempotencyKey: "break-glass-incident-42",
+      }),
+    );
+    expect(runtime.createOperatorBreakGlassGrant).toHaveBeenCalledWith(
+      expect.objectContaining({ stepUpVerifiedAt: expect.any(Date) }),
+      expect.objectContaining({
+        targetOperatorId,
+        durationMinutes: 15,
+        capabilities: ["platform:models:write"],
+      }),
+    );
+  });
+
+  it("routes break-glass revocation and post-event review as separate commands", async () => {
+    const runtime = createRuntime();
+    const grantId = "00000000-0000-4000-8000-000000000211";
+    const app = createTestApp(runtime);
+    const revoked = await app.request(
+      `/v1/platform/operator-break-glass-grants/${grantId}/revoke`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reason: "The incident is contained and access is no longer needed.",
+        }),
+      },
+      bindings,
+    );
+    expect(revoked.status).toBe(200);
+    expect(runtime.revokeOperatorBreakGlassGrant).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ grantId }),
+    );
+
+    const reviewed = await app.request(
+      `/v1/platform/operator-break-glass-grants/${grantId}/reviews`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          outcome: "approved",
+          summary: "Scope and duration matched the approved incident need.",
+        }),
+      },
+      bindings,
+    );
+    expect(reviewed.status).toBe(201);
+    expect(runtime.reviewOperatorBreakGlassGrant).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ grantId, outcome: "approved" }),
     );
   });
 

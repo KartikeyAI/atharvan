@@ -5,6 +5,7 @@ import type {
   ModelProviderCatalogue,
   ModelRoutingOperations,
   OperatorDirectoryEntry,
+  OperatorBreakGlassGrantEntry,
   OperatorRoleDefinitionEntry,
   PlatformConfigurationRegistry,
   PlatformIntegrationRegistry,
@@ -105,6 +106,10 @@ export type MembershipDomainResponse = {
 
 export type OperatorRolesResponse = {
   readonly items: ReadonlyArray<OperatorRoleDefinitionEntry>;
+};
+
+export type OperatorBreakGlassGrantsResponse = {
+  readonly items: ReadonlyArray<OperatorBreakGlassGrantEntry>;
 };
 
 export type PlatformConfigurationResponse = PlatformConfigurationRegistry;

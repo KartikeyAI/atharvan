@@ -55,6 +55,7 @@ describe("platform command service", () => {
       version: 1,
       payloadFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
       idempotencyFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      breakGlassGrantIds: [],
     });
     expect(JSON.stringify(first)).not.toContain("command-key-0001");
 
@@ -73,6 +74,38 @@ describe("platform command service", () => {
     const second = vi.mocked(store.beginCommand).mock.calls[1]?.[0];
     expect(second?.payloadFingerprint).toBe(first?.payloadFingerprint);
     expect(second?.idempotencyFingerprint).toBe(first?.idempotencyFingerprint);
+  });
+
+  it("preserves temporary authority provenance in the immutable envelope", async () => {
+    const store = createStore();
+    const service = createPlatformCommandService({
+      store,
+      environment: "development",
+      now: () => now,
+    });
+    const grantId = "00000000-0000-4000-8000-000000000301";
+
+    await service.begin({
+      actor: {
+        ...actor,
+        isSuperAdministrator: false,
+        effectiveCapabilities: ["platform:models:write"],
+        breakGlassGrantIds: [grantId],
+      },
+      requiredCapability: "platform:models:write",
+      name: "platform.model.set",
+      version: 1,
+      targetType: "model",
+      targetId: "openai/gpt",
+      safePayload: { lifecycle: "active" },
+      idempotencyKey: "temporary-model-change",
+      correlationId: "00000000-0000-4000-8000-000000000302",
+      reason: "Restore model availability during an incident.",
+    });
+
+    expect(store.beginCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ breakGlassGrantIds: [grantId] }),
+    );
   });
 
   it("normalizes bounded audit searches and requires audit authority", async () => {
