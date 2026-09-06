@@ -21,6 +21,7 @@ import {
 } from "@/lib/api";
 import type {
   PlatformConfigurationEntry,
+  PlatformConfigurationRevisionEntry,
   PlatformConfigurationScope,
   PlatformConfigurationValue,
 } from "@atharvan/domain";
@@ -197,7 +198,7 @@ function ConfigurationCard({
         {open ? (
           <ConfigurationEditor item={item} onChanged={onChanged} />
         ) : null}
-        <ConfigurationHistory item={item} />
+        <ConfigurationHistory item={item} onChanged={onChanged} />
       </CardContent>
     </Card>
   );
@@ -346,7 +347,11 @@ function ConfigurationValueInput({
 
 function ConfigurationHistory({
   item,
-}: Readonly<{ item: PlatformConfigurationEntry }>) {
+  onChanged,
+}: Readonly<{
+  item: PlatformConfigurationEntry;
+  onChanged: () => void;
+}>) {
   return (
     <details className="configuration-history">
       <summary>
@@ -371,10 +376,107 @@ function ConfigurationHistory({
               <time dateTime={revision.createdAt}>
                 {new Date(revision.createdAt).toLocaleString()}
               </time>
+              {(revision.scope === "platform"
+                ? item.platformOverride?.id
+                : item.environmentOverride?.id) !== revision.id ? (
+                <ConfigurationRollback
+                  item={item}
+                  onChanged={onChanged}
+                  revision={revision}
+                />
+              ) : (
+                <Badge variant="success">Current override</Badge>
+              )}
             </li>
           ))}
         </ol>
       )}
+    </details>
+  );
+}
+
+function ConfigurationRollback({
+  item,
+  revision,
+  onChanged,
+}: Readonly<{
+  item: PlatformConfigurationEntry;
+  revision: PlatformConfigurationRevisionEntry;
+  onChanged: () => void;
+}>) {
+  const confirmation = `ROLL BACK ${item.key} TO REVISION ${revision.revisionNumber}`;
+  const [reason, setReason] = useState("");
+  const [typedConfirmation, setTypedConfirmation] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      await apiRequest(
+        `/api/platform/configuration/${encodeURIComponent(item.key)}/rollback`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            scope: revision.scope,
+            targetRevisionNumber: revision.revisionNumber,
+            confirmation: typedConfirmation,
+            reason,
+          }),
+        },
+      );
+      onChanged();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "The configuration rollback was not completed.",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const id = `${item.definitionId}-${revision.id}`;
+  return (
+    <details>
+      <summary>Restore this value</summary>
+      <form className="configuration-editor" onSubmit={submit}>
+        {error ? <Alert variant="destructive">{error}</Alert> : null}
+        <div className="field-stack field-span">
+          <Label htmlFor={`rollback-reason-${id}`}>Audit reason</Label>
+          <Input
+            id={`rollback-reason-${id}`}
+            minLength={8}
+            onChange={(event) => setReason(event.target.value)}
+            required
+            value={reason}
+          />
+        </div>
+        <div className="field-stack field-span">
+          <Label htmlFor={`rollback-confirmation-${id}`}>
+            Type <code>{confirmation}</code>
+          </Label>
+          <Input
+            autoComplete="off"
+            id={`rollback-confirmation-${id}`}
+            onChange={(event) => setTypedConfirmation(event.target.value)}
+            required
+            value={typedConfirmation}
+          />
+        </div>
+        <div className="field-span">
+          <Button
+            disabled={pending || typedConfirmation !== confirmation}
+            type="submit"
+            variant="destructive"
+          >
+            {pending ? "Restoring revision…" : "Restore revision"}
+          </Button>
+        </div>
+      </form>
     </details>
   );
 }

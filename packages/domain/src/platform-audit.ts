@@ -61,8 +61,16 @@ export interface PlatformAuditQuery {
 }
 
 export interface PlatformAuditExport {
+  readonly schemaVersion: 1;
+  readonly environment: PlatformConfigurationEnvironment;
   readonly generatedAt: string;
+  readonly rangeStart: string;
+  readonly rangeEnd: string;
   readonly format: "ndjson";
+  readonly digestAlgorithm: "sha256";
+  /** SHA-256 of the exact UTF-8 response body, encoded as lowercase hexadecimal. */
+  readonly contentSha256: string;
+  readonly contentLengthBytes: number;
   readonly itemCount: number;
   readonly truncated: boolean;
   readonly content: string;

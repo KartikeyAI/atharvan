@@ -103,6 +103,7 @@ export interface PlatformAdapterRegistryStore {
   }): Promise<PlatformAdapterRegistry>;
   setRelease(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly releaseId: string;
     readonly revisionId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -143,6 +144,7 @@ export class PlatformAdapterCommandRejectedError extends Error {
 
 export interface SetPlatformAdapterReleaseCommand {
   readonly actor: AuthenticatedOperator;
+  readonly commandId?: string;
   readonly key: string;
   readonly version: string;
   readonly displayName: string;
@@ -272,6 +274,9 @@ export function createPlatformAdapterRegistryService(input: {
 
       const result = await input.store.setRelease({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         releaseId: randomId(),
         revisionId: randomId(),
         environment: input.environment,

@@ -120,6 +120,90 @@
       "when": 1788137728217,
       "tag": "0016_operator_passkey_authentication",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788527289418,
+      "tag": "0017_scoped_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788539876538,
+      "tag": "0018_verification_email_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788548254197,
+      "tag": "0019_arth_command_exchange",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788553774540,
+      "tag": "0020_arth_directory_snapshot_ingestion",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788558592740,
+      "tag": "0021_arth_platform_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788565616329,
+      "tag": "0022_operational_alert_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788573722608,
+      "tag": "0023_platform_health_probes",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788573924336,
+      "tag": "0024_platform_health_probe_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788577056408,
+      "tag": "0025_platform_health_probe_outcomes",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788578904683,
+      "tag": "0026_transactional_email_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788581527086,
+      "tag": "0027_recipient_suppression_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788582524868,
+      "tag": "0028_operational_evidence_retention",
+      "breakpoints": true
     }
   ]
 }

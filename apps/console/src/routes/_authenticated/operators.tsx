@@ -11,6 +11,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { OperatorShell } from "@/components/operator-shell";
+import { OperatorLifecycleControls } from "@/components/operator-lifecycle-controls";
+import { ApprovalRequest } from "@/components/approval-request";
+import { PlatformOwnershipTransfer } from "@/components/platform-ownership-transfer";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -114,6 +117,9 @@ function OperatorsPage() {
             <div className="operator-layout">
               <OperatorDirectory
                 items={operators.state.data.items}
+                canManageLifecycle={
+                  operators.state.data.canManageLifecycle === true
+                }
                 onChanged={reloadAll}
                 roles={activeRoles}
               />
@@ -125,6 +131,13 @@ function OperatorsPage() {
               operators={operators.state.data.items}
               roles={activeRoles}
             />
+            {operators.state.data.canManageLifecycle &&
+            operators.state.data.viewerOperatorId ? (
+              <PlatformOwnershipTransfer
+                ownerId={operators.state.data.viewerOperatorId}
+                operators={operators.state.data.items}
+              />
+            ) : null}
           </>
         ) : null}
       </div>
@@ -134,10 +147,12 @@ function OperatorsPage() {
 
 function OperatorDirectory({
   items,
+  canManageLifecycle,
   roles,
   onChanged,
 }: Readonly<{
   items: OperatorDirectoryResponse["items"];
+  canManageLifecycle: boolean;
   roles: ReadonlyArray<OperatorRoleDefinitionEntry>;
   onChanged: () => void;
 }>) {
@@ -189,6 +204,9 @@ function OperatorDirectory({
                 </td>
                 <td>
                   <StatusBadge status={operator.status} />
+                  {operator.membershipDomainAllowed === false ? (
+                    <Badge variant="warning">Domain review required</Badge>
+                  ) : null}
                 </td>
                 <td>
                   <div className="capability-list">
@@ -235,6 +253,12 @@ function OperatorDirectory({
                     >
                       <UserCogIcon data-icon="inline-start" /> Manage roles
                     </Button>
+                  ) : null}
+                  {canManageLifecycle ? (
+                    <OperatorLifecycleControls
+                      operator={operator}
+                      onChanged={onChanged}
+                    />
                   ) : null}
                 </td>
               </tr>
@@ -785,12 +809,28 @@ function CreateBreakGlassGrant({
             />
           </div>
           <div className="field-stack">
-            <Label htmlFor="break-glass-approval">Approval reference</Label>
+            <Label htmlFor="break-glass-approval">Approval ID</Label>
             <Input
               id="break-glass-approval"
               onChange={(event) => setApprovalReference(event.target.value)}
               required
               value={approvalReference}
+            />
+            <ApprovalRequest
+              scope={
+                selectedCapabilities.length &&
+                incidentReference.trim().length >= 3
+                  ? {
+                      kind: "operator_break_glass",
+                      targetOperatorId,
+                      capabilities: selectedCapabilities,
+                      durationMinutes,
+                      incidentReference: incidentReference.trim(),
+                    }
+                  : null
+              }
+              reason={reason}
+              onRequested={setApprovalReference}
             />
           </div>
           <div className="field-stack field-span">

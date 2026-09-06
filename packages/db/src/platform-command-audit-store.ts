@@ -187,6 +187,31 @@ export function createPostgresPlatformCommandAuditStore(
         truncated,
       };
     },
+
+    async recordAuditExport(input) {
+      await database.insert(auditEvents).values({
+        actorId: input.actorId,
+        commandId: null,
+        eventType: "platform.audit.exported",
+        targetType: "platform_audit_export",
+        targetId: input.environment,
+        correlationId: input.correlationId,
+        reason: "Operator exported bounded audit evidence.",
+        evidence: {
+          schemaVersion: 1,
+          environment: input.environment,
+          rangeStart: input.rangeStart.toISOString(),
+          rangeEnd: input.rangeEnd.toISOString(),
+          filters: input.filters,
+          itemCount: input.itemCount,
+          truncated: input.truncated,
+          digestAlgorithm: "sha256",
+          contentSha256: input.contentSha256,
+          contentLengthBytes: input.contentLengthBytes,
+        },
+        occurredAt: input.generatedAt,
+      });
+    },
   };
 }
 

@@ -10,6 +10,7 @@ import {
   platformFeatureFlagRevisions,
   platformFeatureFlags,
 } from "./schema";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -79,7 +80,13 @@ export function createPostgresPlatformFeatureFlagStore(
               1,
               "created",
             );
-            return { outcome: "created", id: created.id, revisionNumber: 1 };
+            const result = {
+              outcome: "created",
+              id: created.id,
+              revisionNumber: 1,
+            } as const;
+            await recordReceipt(transaction, input, result);
+            return result;
           }
           [flag] = await transaction
             .select({
@@ -117,11 +124,13 @@ export function createPostgresPlatformFeatureFlagStore(
           return { outcome: "rejected", reason: "feature_flag_archived" };
         }
         if (matches(current, input)) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: flag.id,
             revisionNumber: flag.currentRevisionNumber,
-          };
+          } as const;
+          await recordReceipt(transaction, input, result);
+          return result;
         }
 
         const revisionNumber = flag.currentRevisionNumber + 1;
@@ -140,10 +149,43 @@ export function createPostgresPlatformFeatureFlagStore(
             ? "emergency_disabled"
             : "updated",
         );
-        return { outcome: "updated", id: flag.id, revisionNumber };
+        const result = {
+          outcome: "updated",
+          id: flag.id,
+          revisionNumber,
+        } as const;
+        await recordReceipt(transaction, input, result);
+        return result;
       });
     },
   };
+}
+
+async function recordReceipt(
+  transaction: Transaction,
+  input: SetInput,
+  result: {
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "platform.feature-flag.set",
+      targetType: "platform_feature_flag",
+      targetId: input.key,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function loadFlags(

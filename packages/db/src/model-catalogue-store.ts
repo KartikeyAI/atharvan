@@ -14,6 +14,7 @@ import {
   operators,
   platformSecretReferences,
 } from "./schema";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -31,6 +32,7 @@ export function createPostgresModelCatalogueStore(
             displayName: modelProviderRevisions.displayName,
             adapterKind: modelProviderRevisions.adapterKind,
             baseUrl: modelProviderRevisions.baseUrl,
+            healthProbe: modelProviderRevisions.healthProbe,
             credentialReferenceId: modelProviderRevisions.credentialReferenceId,
             credentialReferenceKey: platformSecretReferences.key,
             regions: modelProviderRevisions.regions,
@@ -270,11 +272,17 @@ export function createPostgresModelCatalogueStore(
               revisionNumber: 1,
               now: input.now,
             });
-            return {
+            const result = {
               outcome: "created",
               id: created.id,
               revisionNumber: 1,
-            };
+            } as const;
+            await recordModelCatalogueReceipt(transaction, input, result, {
+              name: "platform.model-provider.set",
+              targetType: "model_provider",
+              targetId: input.key,
+            });
+            return result;
           }
         }
         if (provider === undefined) throw new Error("provider_state_conflict");
@@ -284,6 +292,7 @@ export function createPostgresModelCatalogueStore(
             displayName: modelProviderRevisions.displayName,
             adapterKind: modelProviderRevisions.adapterKind,
             baseUrl: modelProviderRevisions.baseUrl,
+            healthProbe: modelProviderRevisions.healthProbe,
             credentialReferenceId: modelProviderRevisions.credentialReferenceId,
             regions: modelProviderRevisions.regions,
             maximumDataClassification:
@@ -307,11 +316,17 @@ export function createPostgresModelCatalogueStore(
             ? current.credentialReferenceId
             : input.credentialReferenceId;
         if (providerMatches(current, input, credentialReferenceId)) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: provider.id,
             revisionNumber: provider.currentRevisionNumber,
-          };
+          } as const;
+          await recordModelCatalogueReceipt(transaction, input, result, {
+            name: "platform.model-provider.set",
+            targetType: "model_provider",
+            targetId: input.key,
+          });
+          return result;
         }
 
         const revisionNumber = provider.currentRevisionNumber + 1;
@@ -337,7 +352,17 @@ export function createPostgresModelCatalogueStore(
           revisionNumber,
           now: input.now,
         });
-        return { outcome: "updated", id: provider.id, revisionNumber };
+        const result = {
+          outcome: "updated",
+          id: provider.id,
+          revisionNumber,
+        } as const;
+        await recordModelCatalogueReceipt(transaction, input, result, {
+          name: "platform.model-provider.set",
+          targetType: "model_provider",
+          targetId: input.key,
+        });
+        return result;
       });
     },
 
@@ -417,11 +442,17 @@ export function createPostgresModelCatalogueStore(
               revisionNumber: 1,
               now: input.now,
             });
-            return {
+            const result = {
               outcome: "created",
               id: created.id,
               revisionNumber: 1,
-            };
+            } as const;
+            await recordModelCatalogueReceipt(transaction, input, result, {
+              name: "platform.model.set",
+              targetType: "model",
+              targetId: `${input.providerId}/${input.key}`,
+            });
+            return result;
           }
         }
         if (model === undefined) throw new Error("model_state_conflict");
@@ -451,11 +482,17 @@ export function createPostgresModelCatalogueStore(
           .limit(1);
         if (current === undefined) throw new Error("model_state_conflict");
         if (modelMatches(current, input)) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: model.id,
             revisionNumber: model.currentRevisionNumber,
-          };
+          } as const;
+          await recordModelCatalogueReceipt(transaction, input, result, {
+            name: "platform.model.set",
+            targetType: "model",
+            targetId: `${input.providerId}/${input.key}`,
+          });
+          return result;
         }
 
         const revisionNumber = model.currentRevisionNumber + 1;
@@ -475,7 +512,17 @@ export function createPostgresModelCatalogueStore(
           revisionNumber,
           now: input.now,
         });
-        return { outcome: "updated", id: model.id, revisionNumber };
+        const result = {
+          outcome: "updated",
+          id: model.id,
+          revisionNumber,
+        } as const;
+        await recordModelCatalogueReceipt(transaction, input, result, {
+          name: "platform.model.set",
+          targetType: "model",
+          targetId: `${input.providerId}/${input.key}`,
+        });
+        return result;
       });
     },
 
@@ -527,10 +574,65 @@ export function createPostgresModelCatalogueStore(
           },
           occurredAt: input.observedAt,
         });
-        return { outcome: "created", id: input.observationId };
+        const result = {
+          outcome: "created",
+          id: input.observationId,
+        } as const;
+        if (input.commandId !== undefined) {
+          await recordTransactionalCommandSuccess(
+            transaction,
+            {
+              commandId: input.commandId,
+              actorId: input.actorId,
+              environment: input.environment,
+              name: "platform.model-provider-health.record",
+              targetType: "model_provider",
+              targetId: input.providerId,
+              correlationId: input.correlationId,
+              reason: input.reason,
+              now: input.observedAt,
+            },
+            result,
+          );
+        }
+        return result;
       });
     },
   };
+}
+
+async function recordModelCatalogueReceipt(
+  transaction: Transaction,
+  input:
+    | Parameters<ModelCatalogueStore["setProvider"]>[0]
+    | Parameters<ModelCatalogueStore["setModel"]>[0],
+  result: {
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+  command: {
+    readonly name: "platform.model-provider.set" | "platform.model.set";
+    readonly targetType: "model_provider" | "model";
+    readonly targetId: string;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: command.name,
+      targetType: command.targetType,
+      targetId: command.targetId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function insertProviderRevision(
@@ -547,6 +649,7 @@ async function insertProviderRevision(
     displayName: input.displayName,
     adapterKind: input.adapterKind,
     baseUrl: input.baseUrl,
+    healthProbe: input.healthProbe,
     credentialReferenceId,
     regions: [...input.regions],
     maximumDataClassification: input.maximumDataClassification,
@@ -648,6 +751,9 @@ function providerMatches(
     readonly displayName: string;
     readonly adapterKind: string;
     readonly baseUrl: string | null;
+    readonly healthProbe: Parameters<
+      ModelCatalogueStore["setProvider"]
+    >[0]["healthProbe"];
     readonly credentialReferenceId: string | null;
     readonly regions: ReadonlyArray<string>;
     readonly maximumDataClassification: string;
@@ -660,6 +766,7 @@ function providerMatches(
     current.displayName === input.displayName &&
     current.adapterKind === input.adapterKind &&
     current.baseUrl === input.baseUrl &&
+    JSON.stringify(current.healthProbe) === JSON.stringify(input.healthProbe) &&
     current.credentialReferenceId === credentialReferenceId &&
     arraysEqual(current.regions, input.regions) &&
     current.maximumDataClassification === input.maximumDataClassification &&

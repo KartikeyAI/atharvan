@@ -1,5 +1,6 @@
 import {
   assertPlatformCommandAuthorized,
+  normalizePlatformHttpHealthProbe,
   type AuthenticatedOperator,
   type PlatformConfigurationEnvironment,
   type PlatformIntegrationCapability,
@@ -9,6 +10,7 @@ import {
   type PlatformIntegrationProtocol,
   type PlatformIntegrationRegistry,
   type PlatformIntegrationReportedHealth,
+  type PlatformHttpHealthProbe,
 } from "@atharvan/domain";
 
 const protocols = new Set<PlatformIntegrationProtocol>([
@@ -63,6 +65,7 @@ export interface PlatformIntegrationRegistryStore {
   }): Promise<PlatformIntegrationRegistry>;
   setIntegration(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly integrationId: string;
     readonly revisionId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -74,6 +77,7 @@ export interface PlatformIntegrationRegistryStore {
     readonly adapterPackage: string;
     readonly adapterVersion: string;
     readonly documentationUrl: string | null;
+    readonly healthProbe: PlatformHttpHealthProbe | null;
     readonly authorizationUrl: string | null;
     readonly tokenUrl: string | null;
     readonly clientId: string | null;
@@ -91,6 +95,7 @@ export interface PlatformIntegrationRegistryStore {
   }): Promise<IntegrationRegistryCommandResult>;
   recordHealthObservation(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly observationId: string;
     readonly integrationId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -197,6 +202,9 @@ export function createPlatformIntegrationRegistryService(input: {
       );
       const result = await input.store.setIntegration({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         integrationId: randomId(),
         revisionId: randomId(),
         environment: input.environment,
@@ -220,6 +228,7 @@ export function createPlatformIntegrationRegistryService(input: {
           command.documentationUrl ?? null,
           "documentation_url_invalid",
         ),
+        healthProbe: requireHealthProbe(command.healthProbe ?? null),
         authorizationUrl,
         tokenUrl,
         clientId,
@@ -256,6 +265,9 @@ export function createPlatformIntegrationRegistryService(input: {
       }
       const result = await input.store.recordHealthObservation({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         observationId: randomId(),
         integrationId: requireUuid(
           command.integrationId,
@@ -290,6 +302,7 @@ export function createPlatformIntegrationRegistryService(input: {
 
 export interface SetPlatformIntegrationCommand {
   readonly actor: AuthenticatedOperator;
+  readonly commandId?: string;
   readonly key: string;
   readonly displayName: string;
   readonly protocol: PlatformIntegrationProtocol;
@@ -298,6 +311,7 @@ export interface SetPlatformIntegrationCommand {
   readonly adapterPackage: string;
   readonly adapterVersion: string;
   readonly documentationUrl?: string | null;
+  readonly healthProbe?: PlatformHttpHealthProbe | null;
   readonly authorizationUrl?: string | null;
   readonly tokenUrl?: string | null;
   readonly clientId?: string | null;
@@ -315,6 +329,7 @@ export interface SetPlatformIntegrationCommand {
 
 export interface RecordIntegrationHealthCommand {
   readonly actor: AuthenticatedOperator;
+  readonly commandId?: string;
   readonly integrationId: string;
   readonly status: PlatformIntegrationReportedHealth;
   readonly latencyMs?: number | null;
@@ -322,6 +337,18 @@ export interface RecordIntegrationHealthCommand {
   readonly errorCode?: string | null;
   readonly reason: string;
   readonly correlationId?: string;
+}
+
+function requireHealthProbe(
+  value: PlatformHttpHealthProbe | null,
+): PlatformHttpHealthProbe | null {
+  try {
+    return normalizePlatformHttpHealthProbe(value);
+  } catch (error) {
+    reject(
+      error instanceof Error ? error.message : "health_probe_contract_invalid",
+    );
+  }
 }
 
 function authorize(

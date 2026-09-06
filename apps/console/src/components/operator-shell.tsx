@@ -11,6 +11,7 @@ import {
   GaugeIcon,
   GitPullRequestArrowIcon,
   MenuIcon,
+  MailIcon,
   KeyRoundIcon,
   PuzzleIcon,
   RouteIcon,
@@ -33,6 +34,12 @@ const navigation: ReadonlyArray<{
   readonly available: boolean;
 }> = [
   { label: "Overview", href: "/", icon: GaugeIcon, available: true },
+  {
+    label: "Email delivery",
+    href: "/email-deliveries",
+    icon: MailIcon,
+    available: true,
+  },
   { label: "Operators", href: "/operators", icon: UsersIcon, available: true },
   {
     label: "Email domains",
@@ -89,10 +96,16 @@ const navigation: ReadonlyArray<{
     label: "Security",
     href: "/security",
     icon: ShieldCheckIcon,
-    available: false,
+    available: true,
   },
   { label: "Incidents", href: "/incidents", icon: SirenIcon, available: false },
   { label: "Audit", href: "/audit", icon: FileClockIcon, available: true },
+  {
+    label: "Approvals",
+    href: "/approvals",
+    icon: ShieldCheckIcon,
+    available: true,
+  },
   {
     label: "Settings",
     href: "/settings",

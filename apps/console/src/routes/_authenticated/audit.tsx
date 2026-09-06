@@ -34,7 +34,11 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { type PlatformAuditEventPageResponse, useApiResource } from "@/lib/api";
+import {
+  apiResponse,
+  type PlatformAuditEventPageResponse,
+  useApiResource,
+} from "@/lib/api";
 import type {
   PlatformAuditEventEntry,
   PlatformCommandOutcome,
@@ -68,9 +72,24 @@ const emptyFilters: AuditFilters = {
   to: "",
 };
 
+type AuditExportState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading" }
+  | { readonly status: "error"; readonly message: string }
+  | {
+      readonly status: "success";
+      readonly contentSha256: string;
+      readonly itemCount: number;
+      readonly truncated: boolean;
+      readonly filename: string;
+    };
+
 function AuditPage() {
   const [filters, setFilters] = useState<AuditFilters>(emptyFilters);
   const [query, setQuery] = useState("");
+  const [exportState, setExportState] = useState<AuditExportState>({
+    status: "idle",
+  });
   const audit = useApiResource<PlatformAuditEventPageResponse>(
     `/api/platform/audit-events${query}`,
   );
@@ -81,11 +100,51 @@ function AuditPage() {
     setQuery(buildQuery(filters));
   }
 
-  function exportAudit() {
+  async function exportAudit() {
     if (filters.from === "" || filters.to === "") return;
-    window.location.assign(
-      `/api/platform/audit-events/export${buildQuery(filters)}`,
-    );
+    setExportState({ status: "loading" });
+    try {
+      const expectedRangeStart = new Date(filters.from).toISOString();
+      const expectedRangeEnd = new Date(filters.to).toISOString();
+      const response = await apiResponse(
+        `/api/platform/audit-events/export${buildQuery(filters)}`,
+        {
+          cache: "no-store",
+          headers: { accept: "application/x-ndjson" },
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      const metadata = readAuditExportMetadata(
+        response,
+        expectedRangeStart,
+        expectedRangeEnd,
+      );
+      const content = await response.blob();
+      if (content.size !== metadata.contentLengthBytes) {
+        throw new Error("The downloaded audit evidence has an invalid length.");
+      }
+      const actualDigest = await sha256Hex(await content.arrayBuffer());
+      if (actualDigest !== metadata.contentSha256) {
+        throw new Error("The downloaded audit evidence failed verification.");
+      }
+      const filename = `atharvan-audit-${metadata.generatedAt.slice(0, 10)}-${actualDigest.slice(0, 12)}.ndjson`;
+      saveBlob(content, filename);
+      setExportState({
+        status: "success",
+        contentSha256: actualDigest,
+        itemCount: metadata.itemCount,
+        truncated: metadata.truncated,
+        filename,
+      });
+    } catch (error) {
+      setExportState({
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "The audit export could not be downloaded.",
+      });
+    }
   }
 
   return (
@@ -219,16 +278,40 @@ function AuditPage() {
                 <SearchIcon data-icon="inline-start" /> Search
               </Button>
               <Button
-                disabled={filters.from === "" || filters.to === ""}
+                disabled={
+                  filters.from === "" ||
+                  filters.to === "" ||
+                  exportState.status === "loading"
+                }
                 onClick={exportAudit}
                 type="button"
                 variant="outline"
               >
-                <DownloadIcon data-icon="inline-start" /> Export NDJSON
+                <DownloadIcon data-icon="inline-start" />
+                {exportState.status === "loading"
+                  ? "Verifying export…"
+                  : "Export NDJSON"}
               </Button>
             </CardFooter>
           </form>
         </Card>
+
+        {exportState.status === "error" ? (
+          <Alert variant="destructive">{exportState.message}</Alert>
+        ) : null}
+        {exportState.status === "success" ? (
+          <Alert>
+            <ShieldCheckIcon aria-hidden="true" />
+            <span>
+              Saved {exportState.filename} with {exportState.itemCount} verified
+              records{exportState.truncated ? " (export limit reached)" : ""}.
+              SHA-256:{" "}
+              <code className="audit-export-digest">
+                {exportState.contentSha256}
+              </code>
+            </span>
+          </Alert>
+        ) : null}
 
         {audit.state.status === "loading" ? (
           <Card className="loading-card">
@@ -425,4 +508,83 @@ function outcomeVariant(outcome: PlatformCommandOutcome | null) {
   if (outcome === "failed") return "critical" as const;
   if (outcome === "rejected") return "warning" as const;
   return "neutral" as const;
+}
+
+function readAuditExportMetadata(
+  response: Response,
+  expectedRangeStart: string,
+  expectedRangeEnd: string,
+) {
+  const contentSha256 = response.headers.get("x-atharvan-audit-content-sha256");
+  const itemCountValue = response.headers.get("x-atharvan-audit-item-count");
+  const contentLengthValue = response.headers.get(
+    "x-atharvan-audit-content-length",
+  );
+  const truncatedValue = response.headers.get("x-atharvan-audit-truncated");
+  const generatedAt = response.headers.get("x-atharvan-audit-generated-at");
+  const environment = response.headers.get("x-atharvan-audit-environment");
+  const contentDigest = response.headers.get("content-digest");
+  const itemCount = Number(itemCountValue);
+  const contentLengthBytes = Number(contentLengthValue);
+  if (
+    response.headers.get("x-atharvan-audit-schema-version") !== "1" ||
+    !response.headers
+      .get("content-type")
+      ?.toLowerCase()
+      .startsWith("application/x-ndjson") ||
+    !contentSha256 ||
+    !/^[0-9a-f]{64}$/u.test(contentSha256) ||
+    contentDigest !== `sha-256=:${hexToBase64(contentSha256)}:` ||
+    (environment !== "development" && environment !== "production") ||
+    !generatedAt ||
+    !Number.isFinite(Date.parse(generatedAt)) ||
+    response.headers.get("x-atharvan-audit-range-start") !==
+      expectedRangeStart ||
+    response.headers.get("x-atharvan-audit-range-end") !== expectedRangeEnd ||
+    itemCountValue === null ||
+    !/^\d{1,4}$/u.test(itemCountValue) ||
+    contentLengthValue === null ||
+    !/^\d{1,8}$/u.test(contentLengthValue) ||
+    !Number.isSafeInteger(contentLengthBytes) ||
+    contentLengthBytes < 0 ||
+    contentLengthBytes > 16 * 1024 * 1024 ||
+    !Number.isSafeInteger(itemCount) ||
+    itemCount < 0 ||
+    itemCount > 5_000 ||
+    (truncatedValue !== "true" && truncatedValue !== "false")
+  ) {
+    throw new Error("The audit export metadata is incomplete or incompatible.");
+  }
+  return {
+    contentSha256,
+    generatedAt,
+    contentLengthBytes,
+    itemCount,
+    truncated: truncatedValue === "true",
+  };
+}
+
+async function sha256Hex(content: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", content);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function hexToBase64(hex: string): string {
+  const bytes = Uint8Array.from(hex.match(/.{2}/gu) ?? [], (pair) =>
+    Number.parseInt(pair, 16),
+  );
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function saveBlob(content: Blob, filename: string) {
+  const url = URL.createObjectURL(content);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }

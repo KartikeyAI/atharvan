@@ -23,7 +23,7 @@ PostgreSQL never stores a secret value, ciphertext, digest, preview, or recovera
 
 Create, rotate, and revoke require the singleton Super Administrator, `platform:secrets:write`, and recent step-up authentication. Revocation additionally requires explicit `REVOKE` confirmation at the API boundary.
 
-Each mutation reserves canonical state before calling the provider outside the database transaction. Success advances the active metadata; failure records a fail-closed lifecycle state and audit event. A failed rotation does not retire the previous version metadata. Interrupted or ambiguous provider outcomes remain visible for later reconciliation instead of being presented as successful.
+Each mutation reserves canonical state before calling the provider outside the database transaction. Success advances the active metadata; failure records a fail-closed lifecycle state and audit event. A failed rotation does not retire the previous version metadata. Failed provisioning is recoverable by reconciling the exact provider name before creating or replacing material. Failed rotations and revocations can be retried with new audit evidence. Revocation is rejected while a current active model provider or platform integration revision depends on the reference.
 
 The initial provider is configured only when all three boot values are present:
 
@@ -31,13 +31,13 @@ The initial provider is configured only when all three boot values are present:
 - `CLOUDFLARE_SECRETS_STORE_ID`;
 - `CLOUDFLARE_SECRETS_STORE_API_TOKEN`.
 
-The API token must be dedicated to Secrets Store administration and must not be reused as a general deployment credential.
+The API token must be dedicated to Secrets Store administration, include read and write access for the configured store, and must not be reused as a general deployment credential. Read access is used only to reconcile opaque IDs by exact provider name; values remain unavailable.
 
 ## Consequences
 
 - Operators can replace and revoke values but cannot recover existing material.
 - Provider locators remain server-only metadata and are not returned to the console.
 - Provider failures are sanitized before they reach API responses or logs.
-- Lifecycle metadata cannot be deleted; later reconciliation work can use its status and correlation evidence.
+- Lifecycle metadata cannot be deleted; failed external operations have explicit recovery paths with new immutable version and audit records.
 - A future secret provider can implement the same port without changing domain, API, or database contracts.
 - Consumption of secrets by models, integrations, and runners will use a separate internal resolution boundary; this administration API will not gain a read-back operation.

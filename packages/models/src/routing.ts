@@ -59,6 +59,7 @@ export interface ModelRoutingStore {
   }): Promise<ModelRoutingOperations>;
   setPolicy(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly policyId: string;
     readonly revisionId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -80,6 +81,7 @@ export interface ModelRoutingStore {
   }): Promise<ModelRoutingCommandResult>;
   setControl(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly controlId: string;
     readonly revisionId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -131,6 +133,7 @@ export function createModelRoutingService(input: {
 
     async setPolicy(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly key: string;
       readonly displayName: string;
       readonly requiredCapabilities: ReadonlyArray<ModelCapability>;
@@ -149,6 +152,9 @@ export function createModelRoutingService(input: {
       const normalizedTargets = requireTargets(command.targets, randomId);
       const result = await input.store.setPolicy({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         policyId: randomId(),
         revisionId: randomId(),
         environment: input.environment,
@@ -179,6 +185,7 @@ export function createModelRoutingService(input: {
 
     async setControl(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly targetKind: ModelRoutingControlTargetKind;
       readonly targetId: string;
       readonly state: ModelRoutingControlState;
@@ -200,6 +207,9 @@ export function createModelRoutingService(input: {
       );
       const result = await input.store.setControl({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         controlId: randomId(),
         revisionId: randomId(),
         environment: input.environment,

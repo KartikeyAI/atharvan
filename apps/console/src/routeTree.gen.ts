@@ -13,8 +13,10 @@ import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAdaptersRouteImport } from './routes/_authenticated/adapters'
+import { Route as AuthenticatedApprovalsRouteImport } from './routes/_authenticated/approvals'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
+import { Route as AuthenticatedEmailDeliveriesRouteImport } from './routes/_authenticated/email-deliveries'
 import { Route as AuthenticatedFeatureFlagsRouteImport } from './routes/_authenticated/feature-flags'
 import { Route as AuthenticatedIntegrationsRouteImport } from './routes/_authenticated/integrations'
 import { Route as AuthenticatedMembershipDomainsRouteImport } from './routes/_authenticated/membership-domains'
@@ -22,6 +24,7 @@ import { Route as AuthenticatedModelRoutingRouteImport } from './routes/_authent
 import { Route as AuthenticatedModelsRouteImport } from './routes/_authenticated/models'
 import { Route as AuthenticatedOperatorsRouteImport } from './routes/_authenticated/operators'
 import { Route as AuthenticatedSecretsRouteImport } from './routes/_authenticated/secrets'
+import { Route as AuthenticatedSecurityRouteImport } from './routes/_authenticated/security'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 import { Route as SecurityPasskeysRouteImport } from './routes/security.passkeys'
@@ -46,6 +49,11 @@ const AuthenticatedAdaptersRoute = AuthenticatedAdaptersRouteImport.update({
   path: '/adapters',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedApprovalsRoute = AuthenticatedApprovalsRouteImport.update({
+  id: '/approvals',
+  path: '/approvals',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedAuditRoute = AuthenticatedAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
@@ -56,6 +64,12 @@ const AuthenticatedCustomersRoute = AuthenticatedCustomersRouteImport.update({
   path: '/customers',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedEmailDeliveriesRoute =
+  AuthenticatedEmailDeliveriesRouteImport.update({
+    id: '/email-deliveries',
+    path: '/email-deliveries',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedFeatureFlagsRoute =
   AuthenticatedFeatureFlagsRouteImport.update({
     id: '/feature-flags',
@@ -95,6 +109,11 @@ const AuthenticatedSecretsRoute = AuthenticatedSecretsRouteImport.update({
   path: '/secrets',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedSecurityRoute = AuthenticatedSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -120,8 +139,10 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/adapters': typeof AuthenticatedAdaptersRoute
+  '/approvals': typeof AuthenticatedApprovalsRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/customers': typeof AuthenticatedCustomersRoute
+  '/email-deliveries': typeof AuthenticatedEmailDeliveriesRoute
   '/feature-flags': typeof AuthenticatedFeatureFlagsRoute
   '/integrations': typeof AuthenticatedIntegrationsRoute
   '/membership-domains': typeof AuthenticatedMembershipDomainsRoute
@@ -129,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/models': typeof AuthenticatedModelsRoute
   '/operators': typeof AuthenticatedOperatorsRoute
   '/secrets': typeof AuthenticatedSecretsRoute
+  '/security': typeof AuthenticatedSecurityRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
   '/security/passkeys': typeof SecurityPasskeysRoute
@@ -137,8 +159,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/adapters': typeof AuthenticatedAdaptersRoute
+  '/approvals': typeof AuthenticatedApprovalsRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/customers': typeof AuthenticatedCustomersRoute
+  '/email-deliveries': typeof AuthenticatedEmailDeliveriesRoute
   '/feature-flags': typeof AuthenticatedFeatureFlagsRoute
   '/integrations': typeof AuthenticatedIntegrationsRoute
   '/membership-domains': typeof AuthenticatedMembershipDomainsRoute
@@ -146,6 +170,7 @@ export interface FileRoutesByTo {
   '/models': typeof AuthenticatedModelsRoute
   '/operators': typeof AuthenticatedOperatorsRoute
   '/secrets': typeof AuthenticatedSecretsRoute
+  '/security': typeof AuthenticatedSecurityRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
   '/security/passkeys': typeof SecurityPasskeysRoute
@@ -157,8 +182,10 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
   '/_authenticated/adapters': typeof AuthenticatedAdaptersRoute
+  '/_authenticated/approvals': typeof AuthenticatedApprovalsRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
+  '/_authenticated/email-deliveries': typeof AuthenticatedEmailDeliveriesRoute
   '/_authenticated/feature-flags': typeof AuthenticatedFeatureFlagsRoute
   '/_authenticated/integrations': typeof AuthenticatedIntegrationsRoute
   '/_authenticated/membership-domains': typeof AuthenticatedMembershipDomainsRoute
@@ -166,6 +193,7 @@ export interface FileRoutesById {
   '/_authenticated/models': typeof AuthenticatedModelsRoute
   '/_authenticated/operators': typeof AuthenticatedOperatorsRoute
   '/_authenticated/secrets': typeof AuthenticatedSecretsRoute
+  '/_authenticated/security': typeof AuthenticatedSecurityRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/api/$': typeof ApiSplatRoute
   '/security/passkeys': typeof SecurityPasskeysRoute
@@ -178,8 +206,10 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/adapters'
+    | '/approvals'
     | '/audit'
     | '/customers'
+    | '/email-deliveries'
     | '/feature-flags'
     | '/integrations'
     | '/membership-domains'
@@ -187,6 +217,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/operators'
     | '/secrets'
+    | '/security'
     | '/settings'
     | '/api/$'
     | '/security/passkeys'
@@ -195,8 +226,10 @@ export interface FileRouteTypes {
   to:
     | '/login'
     | '/adapters'
+    | '/approvals'
     | '/audit'
     | '/customers'
+    | '/email-deliveries'
     | '/feature-flags'
     | '/integrations'
     | '/membership-domains'
@@ -204,6 +237,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/operators'
     | '/secrets'
+    | '/security'
     | '/settings'
     | '/api/$'
     | '/security/passkeys'
@@ -214,8 +248,10 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/login'
     | '/_authenticated/adapters'
+    | '/_authenticated/approvals'
     | '/_authenticated/audit'
     | '/_authenticated/customers'
+    | '/_authenticated/email-deliveries'
     | '/_authenticated/feature-flags'
     | '/_authenticated/integrations'
     | '/_authenticated/membership-domains'
@@ -223,6 +259,7 @@ export interface FileRouteTypes {
     | '/_authenticated/models'
     | '/_authenticated/operators'
     | '/_authenticated/secrets'
+    | '/_authenticated/security'
     | '/_authenticated/settings'
     | '/api/$'
     | '/security/passkeys'
@@ -268,6 +305,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdaptersRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/approvals': {
+      id: '/_authenticated/approvals'
+      path: '/approvals'
+      fullPath: '/approvals'
+      preLoaderRoute: typeof AuthenticatedApprovalsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/audit': {
       id: '/_authenticated/audit'
       path: '/audit'
@@ -280,6 +324,13 @@ declare module '@tanstack/react-router' {
       path: '/customers'
       fullPath: '/customers'
       preLoaderRoute: typeof AuthenticatedCustomersRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/email-deliveries': {
+      id: '/_authenticated/email-deliveries'
+      path: '/email-deliveries'
+      fullPath: '/email-deliveries'
+      preLoaderRoute: typeof AuthenticatedEmailDeliveriesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/feature-flags': {
@@ -331,6 +382,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSecretsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/security': {
+      id: '/_authenticated/security'
+      path: '/security'
+      fullPath: '/security'
+      preLoaderRoute: typeof AuthenticatedSecurityRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/settings': {
       id: '/_authenticated/settings'
       path: '/settings'
@@ -364,8 +422,10 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedAdaptersRoute: typeof AuthenticatedAdaptersRoute
+  AuthenticatedApprovalsRoute: typeof AuthenticatedApprovalsRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
+  AuthenticatedEmailDeliveriesRoute: typeof AuthenticatedEmailDeliveriesRoute
   AuthenticatedFeatureFlagsRoute: typeof AuthenticatedFeatureFlagsRoute
   AuthenticatedIntegrationsRoute: typeof AuthenticatedIntegrationsRoute
   AuthenticatedMembershipDomainsRoute: typeof AuthenticatedMembershipDomainsRoute
@@ -373,14 +433,17 @@ interface AuthenticatedRouteChildren {
   AuthenticatedModelsRoute: typeof AuthenticatedModelsRoute
   AuthenticatedOperatorsRoute: typeof AuthenticatedOperatorsRoute
   AuthenticatedSecretsRoute: typeof AuthenticatedSecretsRoute
+  AuthenticatedSecurityRoute: typeof AuthenticatedSecurityRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdaptersRoute: AuthenticatedAdaptersRoute,
+  AuthenticatedApprovalsRoute: AuthenticatedApprovalsRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
+  AuthenticatedEmailDeliveriesRoute: AuthenticatedEmailDeliveriesRoute,
   AuthenticatedFeatureFlagsRoute: AuthenticatedFeatureFlagsRoute,
   AuthenticatedIntegrationsRoute: AuthenticatedIntegrationsRoute,
   AuthenticatedMembershipDomainsRoute: AuthenticatedMembershipDomainsRoute,
@@ -388,6 +451,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedModelsRoute: AuthenticatedModelsRoute,
   AuthenticatedOperatorsRoute: AuthenticatedOperatorsRoute,
   AuthenticatedSecretsRoute: AuthenticatedSecretsRoute,
+  AuthenticatedSecurityRoute: AuthenticatedSecurityRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }

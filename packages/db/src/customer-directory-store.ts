@@ -1,5 +1,7 @@
 import type { CustomerDirectoryStore } from "@atharvan/customers";
+import { consumePlatformApproval } from "./platform-approval-store";
 import type {
+  ArthCommandPayload,
   CustomerDirectoryStatus,
   CustomerInternalNote,
   CustomerOperationsContext,
@@ -10,16 +12,19 @@ import type {
   CustomerWorkspaceMembership,
   CustomerWorkspaceSummary,
 } from "@atharvan/domain";
-import { and, asc, desc, eq, ilike, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
+import { enqueueArthCommand } from "./arth-command-outbox";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   auditEvents,
   customerAccessRestrictionObservations,
   customerAccessRestrictionRevisions,
   customerAccessRestrictions,
+  customerDirectorySnapshotIngestions,
   customerDirectorySources,
   customerInternalNotes,
   customerRiskMarkerRevisions,
@@ -37,6 +42,32 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type ReconcileInput = Parameters<
   CustomerDirectoryStore["reconcileSnapshot"]
 >[0];
+type TrustedReconcileInput = Parameters<
+  CustomerDirectoryStore["reconcileTrustedSnapshot"]
+>[0];
+type SetRestrictionInput = Parameters<
+  CustomerDirectoryStore["setRestriction"]
+>[0];
+type RequestOwnershipTransferInput = Parameters<
+  CustomerDirectoryStore["requestOwnershipTransfer"]
+>[0];
+type RestrictionObservationInput = Parameters<
+  CustomerDirectoryStore["recordRestrictionObservation"]
+>[0];
+type RiskMarkerInput = Parameters<CustomerDirectoryStore["setRiskMarker"]>[0];
+type OwnershipObservationInput = Parameters<
+  CustomerDirectoryStore["recordOwnershipTransferObservation"]
+>[0];
+type SnapshotInput = Pick<
+  TrustedReconcileInput,
+  | "environment"
+  | "sourceRevision"
+  | "observedAt"
+  | "users"
+  | "workspaces"
+  | "memberships"
+  | "now"
+>;
 const staleAfterMs = 15 * 60 * 1_000;
 
 export function createPostgresCustomerDirectoryStore(
@@ -173,61 +204,98 @@ export function createPostgresCustomerDirectoryStore(
           .limit(1);
         if (operator === undefined)
           return { outcome: "rejected", reason: "operator_not_active" };
+        await lockDirectorySource(transaction, input.environment);
+        const result = await applySnapshot(transaction, input, null);
+        if (result.outcome !== "rejected" && input.commandId !== undefined) {
+          await recordTransactionalCommandSuccess(
+            transaction,
+            {
+              commandId: input.commandId,
+              actorId: input.actorId,
+              environment: input.environment,
+              name: "customer-directory.snapshot.reconcile",
+              targetType: "customer_directory",
+              targetId: input.sourceRevision,
+              correlationId: input.correlationId,
+              reason: input.reason,
+              now: input.now,
+            },
+            result,
+          );
+        }
+        return result;
+      });
+    },
 
-        const [current] = await transaction
-          .select({ sourceRevision: customerDirectorySources.sourceRevision })
-          .from(customerDirectorySources)
+    reconcileTrustedSnapshot(input) {
+      return database.transaction(async (transaction) => {
+        await lockDirectorySource(transaction, input.environment);
+        const [previous] = await transaction
+          .select({
+            payloadSha256: customerDirectorySnapshotIngestions.payloadSha256,
+            outcome: customerDirectorySnapshotIngestions.outcome,
+            resultSourceRevision:
+              customerDirectorySnapshotIngestions.resultSourceRevision,
+            userCount: customerDirectorySnapshotIngestions.userCount,
+            workspaceCount: customerDirectorySnapshotIngestions.workspaceCount,
+            membershipCount:
+              customerDirectorySnapshotIngestions.membershipCount,
+          })
+          .from(customerDirectorySnapshotIngestions)
           .where(
             and(
-              eq(customerDirectorySources.environment, input.environment),
-              eq(customerDirectorySources.source, "arth"),
+              eq(
+                customerDirectorySnapshotIngestions.environment,
+                input.environment,
+              ),
+              eq(
+                customerDirectorySnapshotIngestions.sourceRevision,
+                BigInt(input.sourceRevision),
+              ),
             ),
           )
-          .limit(1)
-          .for("update");
-        const revision = BigInt(input.sourceRevision);
-        if (current !== undefined && revision <= current.sourceRevision) {
-          return {
-            outcome: "unchanged",
-            sourceRevision: current.sourceRevision.toString(),
-          };
+          .limit(1);
+        if (previous !== undefined) {
+          if (previous.payloadSha256 !== input.payloadSha256) {
+            return {
+              outcome: "rejected",
+              reason: "source_revision_payload_conflict",
+            };
+          }
+          return previous.outcome === "updated"
+            ? {
+                outcome: "updated",
+                sourceRevision: previous.resultSourceRevision.toString(),
+                users: previous.userCount,
+                workspaces: previous.workspaceCount,
+                memberships: previous.membershipCount,
+              }
+            : {
+                outcome: "unchanged",
+                sourceRevision: previous.resultSourceRevision.toString(),
+              };
         }
 
-        await upsertUsers(transaction, input, revision);
-        await upsertWorkspaces(transaction, input, revision);
-        await upsertMemberships(transaction, input, revision);
-        await removePriorProjectionRows(
-          transaction,
-          input.environment,
-          revision,
-        );
-        await transaction
-          .insert(customerDirectorySources)
-          .values({
-            environment: input.environment,
-            source: "arth",
-            sourceRevision: revision,
-            observedAt: input.observedAt,
-            synchronizedAt: input.now,
-          })
-          .onConflictDoUpdate({
-            target: [
-              customerDirectorySources.environment,
-              customerDirectorySources.source,
-            ],
-            set: {
-              sourceRevision: revision,
-              observedAt: input.observedAt,
-              synchronizedAt: input.now,
-            },
-          });
-        return {
-          outcome: "updated",
-          sourceRevision: input.sourceRevision,
-          users: input.users.length,
-          workspaces: input.workspaces.length,
-          memberships: input.memberships.length,
-        };
+        const result = await applySnapshot(transaction, input, {
+          payloadSha256: input.payloadSha256,
+          sourceWorkloadKeyId: input.sourceWorkloadKeyId,
+        });
+        if (result.outcome === "rejected") return result;
+        await transaction.insert(customerDirectorySnapshotIngestions).values({
+          environment: input.environment,
+          sourceRevision: BigInt(input.sourceRevision),
+          resultSourceRevision: BigInt(result.sourceRevision),
+          payloadSha256: input.payloadSha256,
+          sourceWorkloadKeyId: input.sourceWorkloadKeyId,
+          requestNonce: input.requestNonce,
+          observedAt: input.observedAt,
+          receivedAt: input.now,
+          userCount: input.users.length,
+          workspaceCount: input.workspaces.length,
+          membershipCount: input.memberships.length,
+          outcome: result.outcome,
+        });
+        return result;
       });
     },
 
@@ -322,12 +390,14 @@ export function createPostgresCustomerDirectoryStore(
           .orderBy(desc(customerAccessRestrictionRevisions.revisionNumber))
           .limit(1);
         if (current?.desiredState === input.desiredState) {
-          return {
+          const result = {
             outcome: "unchanged",
             restrictionId: restriction.id,
             revisionNumber: current.revisionNumber,
             desiredState: current.desiredState,
-          };
+          } as const;
+          await recordCustomerRestrictionReceipt(transaction, input, result);
+          return result;
         }
         if (input.desiredState === "restored" && current === undefined) {
           return { outcome: "rejected", reason: "restriction_not_active" };
@@ -341,6 +411,25 @@ export function createPostgresCustomerDirectoryStore(
           actorId: input.actorId,
           correlationId: input.correlationId,
           requestedAt: input.now,
+        });
+        const arthPayload: ArthCommandPayload = {
+          kind: "customer_restriction",
+          restrictionId: restriction.id,
+          revisionNumber,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          capability: input.capability,
+          desiredState: input.desiredState,
+          requestedAt: input.now.toISOString(),
+        };
+        await enqueueArthCommand(transaction, {
+          commandId: input.commandId,
+          environment: input.environment,
+          kind: arthPayload.kind,
+          aggregateId: restriction.id,
+          aggregateRevision: revisionNumber,
+          payload: arthPayload,
+          now: input.now,
         });
         await transaction.insert(auditEvents).values({
           actorId: input.actorId,
@@ -358,12 +447,14 @@ export function createPostgresCustomerDirectoryStore(
           },
           occurredAt: input.now,
         });
-        return {
+        const result = {
           outcome: "updated",
           restrictionId: restriction.id,
           revisionNumber,
           desiredState: input.desiredState,
-        };
+        } as const;
+        await recordCustomerRestrictionReceipt(transaction, input, result);
+        return result;
       });
     },
 
@@ -427,10 +518,12 @@ export function createPostgresCustomerDirectoryStore(
           latestObservation !== undefined &&
           sourceRevision <= latestObservation.sourceRevision
         ) {
-          return {
+          const result = {
             outcome: "unchanged",
             restrictionId: input.restrictionId,
-          };
+          } as const;
+          await recordRestrictionObservationReceipt(transaction, input, result);
+          return result;
         }
         await transaction.insert(customerAccessRestrictionObservations).values({
           restrictionId: input.restrictionId,
@@ -458,7 +551,12 @@ export function createPostgresCustomerDirectoryStore(
           },
           occurredAt: input.now,
         });
-        return { outcome: "created", restrictionId: input.restrictionId };
+        const result = {
+          outcome: "created",
+          restrictionId: input.restrictionId,
+        } as const;
+        await recordRestrictionObservationReceipt(transaction, input, result);
+        return result;
       });
     },
 
@@ -504,7 +602,25 @@ export function createPostgresCustomerDirectoryStore(
           evidence: { noteId: note.id, category: input.category },
           occurredAt: input.now,
         });
-        return { outcome: "created", id: note.id };
+        const result = { outcome: "created", id: note.id } as const;
+        if (input.commandId !== undefined) {
+          await recordTransactionalCommandSuccess(
+            transaction,
+            {
+              commandId: input.commandId,
+              actorId: input.actorId,
+              environment: input.environment,
+              name: `${input.targetType}.internal-note.create`,
+              targetType: `customer_${input.targetType}`,
+              targetId: input.targetId,
+              correlationId: input.correlationId,
+              reason: input.reason,
+              now: input.now,
+            },
+            result,
+          );
+        }
+        return result;
       });
     },
 
@@ -564,11 +680,13 @@ export function createPostgresCustomerDirectoryStore(
           current.state === input.state &&
           current.summary === input.summary
         ) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: marker.id,
             revisionNumber: current.revisionNumber,
-          };
+          } as const;
+          await recordRiskMarkerReceipt(transaction, input, result);
+          return result;
         }
         const revisionNumber = (current?.revisionNumber ?? 0) + 1;
         await transaction.insert(customerRiskMarkerRevisions).values({
@@ -599,11 +717,13 @@ export function createPostgresCustomerDirectoryStore(
           },
           occurredAt: input.now,
         });
-        return {
+        const result = {
           outcome: current === undefined ? "created" : "updated",
           id: marker.id,
           revisionNumber,
-        };
+        } as const;
+        await recordRiskMarkerReceipt(transaction, input, result);
+        return result;
       });
     },
 
@@ -699,6 +819,20 @@ export function createPostgresCustomerDirectoryStore(
           }
         }
         const revisionNumber = (latest?.revisionNumber ?? 0) + 1;
+        await consumePlatformApproval(transaction, {
+          approvalId: input.approvalReference,
+          actorId: input.actorId,
+          environment: input.environment,
+          scope: {
+            kind: "workspace_ownership_transfer",
+            workspaceId: input.workspaceId,
+            expectedOwnerUserId: workspace.ownerUserSourceId,
+            sourceRevision: workspace.sourceRevision.toString(),
+            successorUserId: input.successorUserId,
+          },
+          correlationId: input.correlationId,
+          now: input.now,
+        });
         const [transfer] = await transaction
           .insert(customerWorkspaceOwnershipTransfers)
           .values({
@@ -715,11 +849,27 @@ export function createPostgresCustomerDirectoryStore(
           })
           .returning({ id: customerWorkspaceOwnershipTransfers.id });
         if (transfer === undefined) {
-          return {
-            outcome: "rejected",
-            reason: "ownership_transfer_create_failed",
-          };
+          // Throw so the transaction also rolls back approval consumption.
+          throw new Error("ownership_transfer_create_failed");
         }
+        const arthPayload: ArthCommandPayload = {
+          kind: "workspace_ownership_transfer",
+          transferId: transfer.id,
+          revisionNumber,
+          workspaceId: input.workspaceId,
+          currentOwnerUserId: workspace.ownerUserSourceId,
+          successorUserId: input.successorUserId,
+          requestedAt: input.now.toISOString(),
+        };
+        await enqueueArthCommand(transaction, {
+          commandId: input.commandId,
+          environment: input.environment,
+          kind: arthPayload.kind,
+          aggregateId: transfer.id,
+          aggregateRevision: revisionNumber,
+          payload: arthPayload,
+          now: input.now,
+        });
         await transaction.insert(auditEvents).values({
           actorId: input.actorId,
           eventType: "platform.customer_workspace_ownership.transfer_requested",
@@ -737,7 +887,13 @@ export function createPostgresCustomerDirectoryStore(
           },
           occurredAt: input.now,
         });
-        return { outcome: "created", id: transfer.id, revisionNumber };
+        const result = {
+          outcome: "created",
+          id: transfer.id,
+          revisionNumber,
+        } as const;
+        await recordOwnershipTransferReceipt(transaction, input, result);
+        return result;
       });
     },
 
@@ -787,7 +943,12 @@ export function createPostgresCustomerDirectoryStore(
           latestObservation !== undefined &&
           sourceRevision <= latestObservation.sourceRevision
         ) {
-          return { outcome: "unchanged", id: input.transferId };
+          const result = {
+            outcome: "unchanged",
+            id: input.transferId,
+          } as const;
+          await recordOwnershipObservationReceipt(transaction, input, result);
+          return result;
         }
         await transaction
           .insert(customerWorkspaceOwnershipTransferObservations)
@@ -817,10 +978,91 @@ export function createPostgresCustomerDirectoryStore(
           },
           occurredAt: input.now,
         });
-        return { outcome: "created", id: input.transferId };
+        const result = { outcome: "created", id: input.transferId } as const;
+        await recordOwnershipObservationReceipt(transaction, input, result);
+        return result;
       });
     },
   };
+}
+
+async function recordRestrictionObservationReceipt(
+  transaction: Transaction,
+  input: RestrictionObservationInput,
+  result: {
+    readonly outcome: "created" | "unchanged";
+    readonly restrictionId: string;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "customer-restriction.observation.reconcile",
+      targetType: "customer_restriction",
+      targetId: input.restrictionId,
+      correlationId: input.correlationId,
+      reason: "Reconcile the restriction state observed by Arth.",
+      now: input.now,
+    },
+    result,
+  );
+}
+
+async function recordRiskMarkerReceipt(
+  transaction: Transaction,
+  input: RiskMarkerInput,
+  result: {
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: `${input.targetType}.risk-marker.${input.state}`,
+      targetType: `customer_${input.targetType}`,
+      targetId: input.targetId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
+}
+
+async function recordOwnershipObservationReceipt(
+  transaction: Transaction,
+  input: OwnershipObservationInput,
+  result: {
+    readonly outcome: "created" | "unchanged";
+    readonly id: string;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "workspace.ownership-transfer.observation.reconcile",
+      targetType: "customer_workspace_ownership_transfer",
+      targetId: input.transferId,
+      correlationId: input.correlationId,
+      reason: "Reconcile the ownership state observed by Arth.",
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function activeOperatorExists(transaction: Transaction, actorId: string) {
@@ -901,6 +1143,96 @@ async function loadRestrictionEntry(
     observedSourceRevision: observation?.sourceRevision.toString() ?? null,
     observedAt: observation?.observedAt.toISOString() ?? null,
     reconciliationMessage: observation?.message ?? null,
+  };
+}
+
+async function lockDirectorySource(
+  transaction: Transaction,
+  environment: ReconcileInput["environment"],
+) {
+  await transaction.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${environment}, 0))`,
+  );
+}
+
+async function applySnapshot(
+  transaction: Transaction,
+  input: SnapshotInput,
+  provenance: {
+    readonly payloadSha256: string;
+    readonly sourceWorkloadKeyId: string;
+  } | null,
+): Promise<Awaited<ReturnType<CustomerDirectoryStore["reconcileSnapshot"]>>> {
+  const [current] = await transaction
+    .select({
+      sourceRevision: customerDirectorySources.sourceRevision,
+      payloadSha256: customerDirectorySources.payloadSha256,
+    })
+    .from(customerDirectorySources)
+    .where(
+      and(
+        eq(customerDirectorySources.environment, input.environment),
+        eq(customerDirectorySources.source, "arth"),
+      ),
+    )
+    .limit(1)
+    .for("update");
+  const revision = BigInt(input.sourceRevision);
+  if (current !== undefined && revision <= current.sourceRevision) {
+    if (revision === current.sourceRevision && provenance !== null) {
+      if (current.payloadSha256 === null) {
+        return {
+          outcome: "rejected",
+          reason: "source_revision_provenance_missing",
+        };
+      }
+      if (current.payloadSha256 !== provenance.payloadSha256) {
+        return {
+          outcome: "rejected",
+          reason: "source_revision_payload_conflict",
+        };
+      }
+    }
+    return {
+      outcome: "unchanged",
+      sourceRevision: current.sourceRevision.toString(),
+    };
+  }
+
+  await upsertUsers(transaction, input, revision);
+  await upsertWorkspaces(transaction, input, revision);
+  await upsertMemberships(transaction, input, revision);
+  await removePriorProjectionRows(transaction, input.environment, revision);
+  await transaction
+    .insert(customerDirectorySources)
+    .values({
+      environment: input.environment,
+      source: "arth",
+      sourceRevision: revision,
+      payloadSha256: provenance?.payloadSha256 ?? null,
+      sourceWorkloadKeyId: provenance?.sourceWorkloadKeyId ?? null,
+      observedAt: input.observedAt,
+      synchronizedAt: input.now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        customerDirectorySources.environment,
+        customerDirectorySources.source,
+      ],
+      set: {
+        sourceRevision: revision,
+        payloadSha256: provenance?.payloadSha256 ?? null,
+        sourceWorkloadKeyId: provenance?.sourceWorkloadKeyId ?? null,
+        observedAt: input.observedAt,
+        synchronizedAt: input.now,
+      },
+    });
+  return {
+    outcome: "updated",
+    sourceRevision: input.sourceRevision,
+    users: input.users.length,
+    workspaces: input.workspaces.length,
+    memberships: input.memberships.length,
   };
 }
 
@@ -1088,7 +1420,7 @@ async function inspectWorkspace(
 
 async function upsertUsers(
   transaction: Transaction,
-  input: ReconcileInput,
+  input: SnapshotInput,
   revision: bigint,
 ) {
   for (const value of input.users) {
@@ -1127,7 +1459,7 @@ async function upsertUsers(
 
 async function upsertWorkspaces(
   transaction: Transaction,
-  input: ReconcileInput,
+  input: SnapshotInput,
   revision: bigint,
 ) {
   for (const value of input.workspaces) {
@@ -1168,7 +1500,7 @@ async function upsertWorkspaces(
 
 async function upsertMemberships(
   transaction: Transaction,
-  input: ReconcileInput,
+  input: SnapshotInput,
   revision: bigint,
 ) {
   for (const value of input.memberships) {
@@ -1412,6 +1744,61 @@ async function insertReadAudit(
   input: typeof auditEvents.$inferInsert,
 ) {
   await transaction.insert(auditEvents).values(input);
+}
+
+async function recordCustomerRestrictionReceipt(
+  transaction: Transaction,
+  input: SetRestrictionInput,
+  result: {
+    readonly outcome: "updated" | "unchanged";
+    readonly restrictionId: string;
+    readonly revisionNumber: number;
+    readonly desiredState: "restricted" | "restored";
+  },
+) {
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: `${input.targetType}.${
+        input.desiredState === "restricted" ? "restrict" : "restore"
+      }-capability`,
+      targetType: `customer_${input.targetType}`,
+      targetId: input.targetId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
+}
+
+async function recordOwnershipTransferReceipt(
+  transaction: Transaction,
+  input: RequestOwnershipTransferInput,
+  result: {
+    readonly outcome: "created";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+) {
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "workspace.ownership-transfer.request",
+      targetType: "customer_workspace",
+      targetId: input.workspaceId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 function escapeLike(value: string) {

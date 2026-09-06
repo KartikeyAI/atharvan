@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { AuthenticatedOperator } from "@atharvan/domain";
+import {
+  buildPlatformOverview,
+  type AuthenticatedOperator,
+} from "@atharvan/domain";
 import { PlatformSecretProviderError } from "@atharvan/secrets";
 
 import {
@@ -22,14 +25,127 @@ function createRuntime(input?: {
   readonly strongAuthenticationAt?: Date | null;
 }): AuthenticationRuntime {
   return {
+    arthWorkloadConfigured: true,
+    alertDeliveryConfigured: true,
+    emailFeedbackConfigured: true,
+    consumeArthWorkloadNonce: vi.fn(async () => undefined),
+    reconcileArthCustomerDirectorySnapshot: vi.fn(async (input) => ({
+      outcome: "updated" as const,
+      sourceRevision: input.sourceRevision,
+      users: input.users.length,
+      workspaces: input.workspaces.length,
+      memberships: input.memberships.length,
+    })),
+    claimArthCommand: vi.fn(async () => null),
+    acknowledgeArthCommand: vi.fn(async () => ({
+      outcome: "completed" as const,
+      state: "applied" as const,
+    })),
+    close: vi.fn(async () => undefined),
+    readEmailDeliveryHealth: vi.fn(async () => ({
+      pending: 0,
+      leased: 0,
+      deadLetters: 0,
+      expired: 0,
+      bounced: 0,
+      complained: 0,
+      activeSuppressions: 0,
+      oldestPendingAt: null,
+      observedAt: new Date().toISOString(),
+    })),
+    listEmailDeliveries: vi.fn(async () => ({
+      items: [],
+      activeSuppressions: [],
+      truncated: false,
+      suppressionsTruncated: false,
+      observedAt: new Date().toISOString(),
+      providerConfigured: true,
+      feedbackConfigured: true,
+      canManage: true,
+    })),
+    manageEmailDelivery: vi.fn(async () => ({
+      outcome: "updated" as const,
+      id: "00000000-0000-4000-8000-000000000555",
+    })),
+    restoreEmailRecipient: vi.fn(async () => ({
+      outcome: "updated" as const,
+      id: "suppression-1",
+    })),
     emailDeliveryConfigured: input?.emailDeliveryConfigured ?? true,
     secretProviderConfigured: true,
+    listApprovals: vi.fn(async () => ({ items: [], truncated: false })),
+    requestApproval: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000555",
+    })),
+    decideApproval: vi.fn(async () => ({
+      outcome: "updated" as const,
+      id: "00000000-0000-4000-8000-000000000555",
+    })),
+    listOwnSessions: vi.fn(async () => ({
+      items: [],
+      truncated: false,
+      observedAt: new Date().toISOString(),
+    })),
+    revokeOwnSession: vi.fn(async () => ({ outcome: "updated" as const })),
+    readPlatformOverview: vi.fn(async () =>
+      buildPlatformOverview(
+        "development",
+        new Date("2026-09-04T00:00:00Z"),
+        [],
+      ),
+    ),
+    readArthCommandDeliveryHealth: vi.fn(async () => ({
+      observedAt: new Date("2026-09-04T00:00:00Z").toISOString(),
+      pending: 0,
+      leased: 0,
+      rejected: 0,
+      deadLetters: 0,
+      bounced: 0,
+      complained: 0,
+      oldestOutstandingAt: null,
+    })),
+    readOperationalAlertDeliveryHealth: vi.fn(async () => ({
+      observedAt: new Date("2026-09-04T00:00:00Z").toISOString(),
+      pending: 0,
+      leased: 0,
+      deadLetters: 0,
+      bounced: 0,
+      complained: 0,
+      oldestPendingAt: null,
+    })),
+    readPlatformHealthProbeQueueHealth: vi.fn(async () => ({
+      observedAt: new Date("2026-09-04T00:00:00Z").toISOString(),
+      pending: 0,
+      leased: 0,
+      retryExhausted: 0,
+      oldestOutstandingAt: null,
+    })),
+    readOperationalRetentionHealth: vi.fn(async () => ({
+      observedAt: new Date("2026-09-04T00:00:00Z").toISOString(),
+      state: "completed" as const,
+      scheduledFor: new Date("2026-09-04T00:00:00Z").toISOString(),
+      completedAt: new Date("2026-09-04T00:00:01Z").toISOString(),
+      counts: {
+        workload_request_nonces: 0,
+        health_probe_jobs: 0,
+        transactional_email_provider_events: 0,
+        verification_email_deliveries: 0,
+        operational_alert_deliveries: 0,
+        operational_alert_occurrences: 0,
+        model_health_observations: 0,
+        integration_health_observations: 0,
+      },
+      batchLimitReached: false,
+      policies: [],
+    })),
     handle: vi.fn(async () => new Response("auth-handler", { status: 202 })),
     getSession: vi.fn(async () =>
       input?.userId === null
         ? null
         : {
             userId: input?.userId ?? "auth-user-1",
+            sessionId: "current-session",
             createdAt: new Date(),
             authenticationMethod: input?.authenticationMethod ?? "passkey",
             strongAuthenticationAt:
@@ -157,8 +273,16 @@ function createRuntime(input?: {
       nextCursor: null,
     })),
     exportPlatformAuditEvents: vi.fn(async () => ({
+      schemaVersion: 1 as const,
+      environment: "development" as const,
       generatedAt: "2026-08-30T16:00:00.000Z",
+      rangeStart: "2026-08-29T16:00:00.000Z",
+      rangeEnd: "2026-08-30T16:00:00.000Z",
       format: "ndjson" as const,
+      digestAlgorithm: "sha256" as const,
+      contentSha256:
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      contentLengthBytes: 0,
       itemCount: 0,
       truncated: false,
       content: "",
@@ -174,6 +298,16 @@ function createRuntime(input?: {
     disableMembershipDomain: vi.fn(async () => ({
       outcome: "created" as const,
       id: "domain-1",
+    })),
+    transferPlatformOwnership: vi.fn(async () => ({
+      outcome: "updated" as const,
+      operatorId: "00000000-0000-4000-8000-000000000002",
+    })),
+    changeOperatorStatus: vi.fn(async () => ({
+      outcome: "updated" as const,
+      operatorId: "00000000-0000-4000-8000-000000000002",
+      status: "suspended" as const,
+      revokedSessionCount: 1,
     })),
     replaceOperatorRoles: vi.fn(async () => ({
       outcome: "updated" as const,
@@ -196,8 +330,17 @@ function createRuntime(input?: {
       key: "platform.release.channel",
       revisionNumber: 1,
     })),
+    rollbackPlatformConfiguration: vi.fn(async () => ({
+      outcome: "updated" as const,
+      key: "platform.release.channel",
+      revisionNumber: 2,
+    })),
     createPlatformSecret: vi.fn(async () => ({
       outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000301",
+    })),
+    retryPlatformSecretProvisioning: vi.fn(async () => ({
+      outcome: "updated" as const,
       id: "00000000-0000-4000-8000-000000000301",
     })),
     rotatePlatformSecret: vi.fn(async () => ({
@@ -275,6 +418,10 @@ function createRuntime(input?: {
 function createTestApp(runtime: AuthenticationRuntime) {
   return createApp({
     resolveAuthenticationRuntime: vi.fn(async () => runtime),
+    checkReadiness: vi.fn(async () => ({
+      schemaVersion: 28,
+      checkedAt: "2026-09-05T00:00:00.000Z",
+    })),
   });
 }
 
@@ -293,7 +440,7 @@ describe("Atharvan control-plane worker", () => {
     });
   });
 
-  it("validates runtime configuration before reporting readiness", async () => {
+  it("reports database and schema evidence with readiness", async () => {
     const response = await createTestApp(createRuntime()).request(
       "/health/ready",
       undefined,
@@ -305,6 +452,7 @@ describe("Atharvan control-plane worker", () => {
       service: "atharvan-control-plane",
       status: "ready",
       environment: "development",
+      schemaVersion: 28,
     });
   });
 
@@ -432,18 +580,220 @@ describe("Atharvan control-plane worker", () => {
   });
 
   it("returns explicit unknown evidence to an authorized operator", async () => {
-    const response = await createTestApp(createRuntime()).request(
+    const runtime = createRuntime();
+    const response = await createTestApp(runtime).request(
       "/v1/platform/overview",
       undefined,
       bindings,
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(runtime.readPlatformOverview).toHaveBeenCalledOnce();
     await expect(response.json()).resolves.toEqual({
+      environment: "development",
       status: "unknown",
-      observedAt: null,
+      generatedAt: "2026-09-04T00:00:00.000Z",
+      validUntil: "2026-09-04T00:00:30.000Z",
       evidence: [],
+      alerts: [],
+      unconnectedSources: [
+        "workspaces",
+        "runners",
+        "workflows",
+        "costs",
+        "incidents",
+      ],
     });
+  });
+
+  it("does not read health aggregates for an unauthorized operator", async () => {
+    for (const runtime of [
+      createRuntime({ userId: null }),
+      createRuntime({ authenticationMethod: "email_otp" }),
+      createRuntime({
+        operator: {
+          operatorId: "operator-2",
+          isSuperAdministrator: false,
+          effectiveCapabilities: ["platform:operators:read"],
+        },
+      }),
+    ]) {
+      const response = await createTestApp(runtime).request(
+        "/v1/platform/overview",
+        undefined,
+        bindings,
+      );
+      expect([401, 403]).toContain(response.status);
+      expect(runtime.readPlatformOverview).not.toHaveBeenCalled();
+    }
+  });
+
+  it("adds configuration alerts to the protected overview without exposing secrets", async () => {
+    const runtime = {
+      ...createRuntime({ emailDeliveryConfigured: false }),
+      secretProviderConfigured: false,
+    };
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/overview",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const body = (await response.json()) as {
+      alerts: Array<{ id: string; affectedCount: number | null }>;
+    };
+    expect(body.alerts.map((alert) => alert.id)).toEqual([
+      "development:email:not_configured",
+      "development:secrets:not_configured",
+    ]);
+    expect(body.alerts.every((alert) => alert.affectedCount === null)).toBe(
+      true,
+    );
+    expect(JSON.stringify(body)).not.toContain("API_KEY");
+  });
+
+  it("scopes session inventory to the authenticated identity even for a limited operator", async () => {
+    const runtime = createRuntime({
+      operator: {
+        operatorId: "operator-2",
+        isSuperAdministrator: false,
+        effectiveCapabilities: [],
+      },
+    });
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/authentication/sessions?userId=someone-else",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(runtime.listOwnSessions).toHaveBeenCalledWith({
+      userId: "auth-user-1",
+      sessionId: "current-session",
+    });
+  });
+
+  it.each([{ userId: null }, { authenticationMethod: "email_otp" as const }])(
+    "rejects session inventory without a verified active session %#",
+    async (input) => {
+      const runtime = createRuntime(input);
+      const response = await createTestApp(runtime).request(
+        "/v1/platform/authentication/sessions",
+        undefined,
+        bindings,
+      );
+      expect([401, 403]).toContain(response.status);
+      expect(runtime.listOwnSessions).not.toHaveBeenCalled();
+    },
+  );
+
+  it("requires recent passkey proof before starting a revocation command", async () => {
+    const runtime = createRuntime({
+      strongAuthenticationAt: new Date(Date.now() - 301_000),
+    });
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/authentication/sessions/other/revoke",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "Retire an unused session" }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "recent_step_up_required",
+    });
+    expect(runtime.beginPlatformCommand).not.toHaveBeenCalled();
+    expect(runtime.revokeOwnSession).not.toHaveBeenCalled();
+  });
+
+  it("protects the current session and requires a valid reason", async () => {
+    const runtime = createRuntime();
+    const app = createTestApp(runtime);
+    const current = await app.request(
+      "/v1/platform/authentication/sessions/current-session/revoke",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "Retire an unused session" }),
+      },
+      bindings,
+    );
+    expect(current.status).toBe(409);
+    const invalid = await app.request(
+      "/v1/platform/authentication/sessions/other/revoke",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "short" }),
+      },
+      bindings,
+    );
+    expect(invalid.status).toBe(400);
+    expect(runtime.revokeOwnSession).not.toHaveBeenCalled();
+  });
+
+  it("envelopes self-service revocation without accepting caller-supplied ownership", async () => {
+    const runtime = createRuntime({
+      operator: {
+        operatorId: "operator-2",
+        isSuperAdministrator: false,
+        effectiveCapabilities: [],
+      },
+    });
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/authentication/sessions/other-session/revoke",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "revoke-session-once",
+        },
+        body: JSON.stringify({
+          userId: "foreign-user",
+          reason: "Retire an unused session",
+        }),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    expect(runtime.revokeOwnSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "auth-user-1",
+        sessionId: "current-session",
+        operatorId: "operator-2",
+        targetSessionId: "other-session",
+      }),
+    );
+    expect(runtime.beginPlatformCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "operator.session.revoke",
+        requiredCapability: "platform:authentication:sessions:self",
+        idempotencyKey: "revoke-session-once",
+        safePayload: { reason: "Retire an unused session" },
+      }),
+    );
+    expect(runtime.completePlatformCommand).toHaveBeenCalledOnce();
+  });
+
+  it("returns partial source failures without substituting unknown or zero evidence", async () => {
+    const runtime = createRuntime();
+    const overview = buildPlatformOverview(
+      "development",
+      new Date("2026-09-04T00:00:00Z"),
+      [{ source: "integrations", status: "error", counts: null }],
+    );
+    vi.mocked(runtime.readPlatformOverview).mockResolvedValue(overview);
+    const response = await createTestApp(runtime).request(
+      "/v1/platform/overview",
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(overview);
   });
 
   it("searches the customer directory through a purpose-bound audited read", async () => {
@@ -1201,6 +1551,7 @@ describe("Atharvan control-plane worker", () => {
           displayName: "OpenAI",
           adapterKind: "openai",
           baseUrl: "https://api.openai.com/v1",
+          healthProbe: null,
           credentialReferenceId: "00000000-0000-4000-8000-000000000301",
           credentialReferenceKey: "models.openai",
           regions: ["global"],

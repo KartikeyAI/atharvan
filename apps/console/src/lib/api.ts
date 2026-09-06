@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   MembershipDomainEntry,
@@ -33,6 +33,16 @@ export async function apiRequest<Result>(
   path: string,
   init?: RequestInit,
 ): Promise<Result> {
+  const response = await apiResponse(path, init);
+  const body: unknown = await response.json().catch(() => null);
+  return body as Result;
+}
+
+/** Return a successful raw response for bounded downloads and non-JSON bodies. */
+export async function apiResponse(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
   const headers = new Headers(init?.headers);
   const method = init?.method?.toUpperCase() ?? "GET";
   if (init?.body !== undefined && !headers.has("content-type")) {
@@ -50,9 +60,12 @@ export async function apiRequest<Result>(
     credentials: "same-origin",
     headers,
   });
-  const body: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
+    const body: unknown = await response
+      .clone()
+      .json()
+      .catch(() => null);
     const error = isApiErrorBody(body)
       ? body
       : {
@@ -73,10 +86,11 @@ export async function apiRequest<Result>(
     throw new ApiError(response.status, error.code, error.message);
   }
 
-  return body as Result;
+  return response;
 }
 
 export function useApiResource<Result>(path: string) {
+  const request = useRef<AbortController | null>(null);
   const [state, setState] = useState<
     | { readonly status: "loading" }
     | { readonly status: "error"; readonly error: ApiError }
@@ -84,10 +98,19 @@ export function useApiResource<Result>(path: string) {
   >({ status: "loading" });
 
   const reload = useCallback(() => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     setState({ status: "loading" });
-    void apiRequest<Result>(path).then(
-      (data) => setState({ status: "success", data }),
-      (error: unknown) =>
+    void apiRequest<Result>(path, {
+      cache: "no-store",
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+    }).then(
+      (data) => {
+        if (!controller.signal.aborted) setState({ status: "success", data });
+      },
+      (error: unknown) => {
+        if (controller.signal.aborted) return;
         setState({
           status: "error",
           error:
@@ -98,17 +121,23 @@ export function useApiResource<Result>(path: string) {
                   "network_error",
                   "The control plane is unreachable.",
                 ),
-        }),
+        });
+      },
     );
   }, [path]);
 
-  useEffect(reload, [reload]);
+  useEffect(() => {
+    reload();
+    return () => request.current?.abort();
+  }, [reload]);
 
   return { state, reload };
 }
 
 export type OperatorDirectoryResponse = {
   readonly items: ReadonlyArray<OperatorDirectoryEntry>;
+  readonly viewerOperatorId?: string;
+  readonly canManageLifecycle?: boolean;
 };
 
 export type MembershipDomainResponse = {

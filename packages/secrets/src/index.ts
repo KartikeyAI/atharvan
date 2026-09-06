@@ -7,6 +7,9 @@ import {
 
 export interface PlatformSecretMaterialProvider {
   readonly configured: boolean;
+  findByName(input: {
+    readonly name: string;
+  }): Promise<{ readonly externalId: string } | null>;
   create(input: {
     readonly name: string;
     readonly value: string;
@@ -37,7 +40,19 @@ export interface PlatformSecretLifecycleStore {
     | { readonly outcome: "created" }
     | { readonly outcome: "rejected"; readonly reason: string }
   >;
+  beginProvisioningRetry(input: {
+    readonly referenceId: string;
+    readonly versionId: string;
+    readonly actorId: string;
+    readonly reason: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<
+    | { readonly outcome: "started"; readonly providerName: string }
+    | { readonly outcome: "rejected"; readonly reason: string }
+  >;
   completeCreate(input: {
+    readonly receipt?: PlatformSecretCommandReceipt;
     readonly referenceId: string;
     readonly versionId: string;
     readonly externalId: string;
@@ -70,6 +85,7 @@ export interface PlatformSecretLifecycleStore {
     | { readonly outcome: "rejected"; readonly reason: string }
   >;
   completeRotation(input: {
+    readonly receipt?: PlatformSecretCommandReceipt;
     readonly referenceId: string;
     readonly versionId: string;
     readonly actorId: string;
@@ -96,6 +112,7 @@ export interface PlatformSecretLifecycleStore {
     | { readonly outcome: "rejected"; readonly reason: string }
   >;
   completeRevocation(input: {
+    readonly receipt?: PlatformSecretCommandReceipt;
     readonly referenceId: string;
     readonly actorId: string;
     readonly reason: string;
@@ -109,6 +126,18 @@ export interface PlatformSecretLifecycleStore {
     readonly correlationId: string;
     readonly now: Date;
   }): Promise<void>;
+}
+
+export interface PlatformSecretCommandReceipt {
+  readonly commandId: string;
+  readonly name:
+    | "platform.secret.create"
+    | "platform.secret.retry_provisioning"
+    | "platform.secret.rotate"
+    | "platform.secret.revoke";
+  readonly environment: PlatformConfigurationEnvironment;
+  readonly targetId: string;
+  readonly outcome: "created" | "updated";
 }
 
 export class PlatformSecretCommandRejectedError extends Error {
@@ -151,6 +180,7 @@ export function createPlatformSecretLifecycleService(input: {
 
     async create(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly key: string;
       readonly purpose: string;
       readonly value: string;
@@ -204,6 +234,17 @@ export function createPlatformSecretLifecycleService(input: {
           comment: `Atharvan ${input.environment}: ${purpose}`,
         });
         await input.store.completeCreate({
+          ...(command.commandId === undefined
+            ? {}
+            : {
+                receipt: {
+                  commandId: command.commandId,
+                  name: "platform.secret.create" as const,
+                  environment: input.environment,
+                  targetId: key,
+                  outcome: "created" as const,
+                },
+              }),
           referenceId,
           versionId,
           externalId: created.externalId,
@@ -227,8 +268,96 @@ export function createPlatformSecretLifecycleService(input: {
       return { outcome: "created" as const, id: referenceId };
     },
 
+    async retryProvisioning(command: {
+      readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
+      readonly referenceId: string;
+      readonly value: string;
+      readonly reason: string;
+      readonly correlationId?: string;
+    }) {
+      const commandTime = now();
+      authorize(command.actor, commandTime);
+      const referenceId = requireUuid(command.referenceId);
+      const versionId = randomId();
+      const correlationId = command.correlationId ?? randomId();
+      const reason = requireText(
+        command.reason,
+        8,
+        500,
+        "command_reason_required",
+      );
+      const value = requireSecretValue(command.value);
+      const started = await input.store.beginProvisioningRetry({
+        referenceId,
+        versionId,
+        actorId: command.actor.operatorId,
+        reason,
+        correlationId,
+        now: commandTime,
+      });
+      if (started.outcome === "rejected") {
+        throw new PlatformSecretCommandRejectedError(started.reason);
+      }
+
+      try {
+        const existing = await input.provider.findByName({
+          name: started.providerName,
+        });
+        let externalId: string;
+        if (existing === null) {
+          const created = await input.provider.create({
+            name: started.providerName,
+            value,
+            comment: `Atharvan ${input.environment}: provisioning recovery`,
+          });
+          externalId = created.externalId;
+        } else {
+          await input.provider.rotate({
+            externalId: existing.externalId,
+            value,
+            comment: `Atharvan ${input.environment}: provisioning recovery`,
+          });
+          externalId = existing.externalId;
+        }
+        await input.store.completeCreate({
+          ...(command.commandId === undefined
+            ? {}
+            : {
+                receipt: {
+                  commandId: command.commandId,
+                  name: "platform.secret.retry_provisioning" as const,
+                  environment: input.environment,
+                  targetId: referenceId,
+                  outcome: "updated" as const,
+                },
+              }),
+          referenceId,
+          versionId,
+          externalId,
+          actorId: command.actor.operatorId,
+          reason,
+          correlationId,
+          now: now(),
+        });
+      } catch (error) {
+        await input.store.failCreate({
+          referenceId,
+          versionId,
+          actorId: command.actor.operatorId,
+          reason,
+          correlationId,
+          now: now(),
+        });
+        throw sanitizeProviderFailure(error);
+      }
+
+      return { outcome: "updated" as const, id: referenceId };
+    },
+
     async rotate(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly referenceId: string;
       readonly value: string;
       readonly reason: string;
@@ -265,6 +394,17 @@ export function createPlatformSecretLifecycleService(input: {
           comment: `Atharvan ${input.environment}: ${started.providerName}`,
         });
         await input.store.completeRotation({
+          ...(command.commandId === undefined
+            ? {}
+            : {
+                receipt: {
+                  commandId: command.commandId,
+                  name: "platform.secret.rotate" as const,
+                  environment: input.environment,
+                  targetId: referenceId,
+                  outcome: "updated" as const,
+                },
+              }),
           referenceId,
           versionId,
           actorId: command.actor.operatorId,
@@ -289,6 +429,7 @@ export function createPlatformSecretLifecycleService(input: {
 
     async revoke(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly referenceId: string;
       readonly reason: string;
       readonly correlationId?: string;
@@ -317,6 +458,17 @@ export function createPlatformSecretLifecycleService(input: {
       try {
         await input.provider.revoke({ externalId: started.externalId });
         await input.store.completeRevocation({
+          ...(command.commandId === undefined
+            ? {}
+            : {
+                receipt: {
+                  commandId: command.commandId,
+                  name: "platform.secret.revoke" as const,
+                  environment: input.environment,
+                  targetId: referenceId,
+                  outcome: "updated" as const,
+                },
+              }),
           referenceId,
           actorId: command.actor.operatorId,
           reason,
@@ -362,6 +514,21 @@ export function createCloudflareSecretsStoreProvider(input: {
 
   return {
     configured: true,
+    async findByName(secret) {
+      const response = await call(
+        `?search=${encodeURIComponent(secret.name)}&per_page=100`,
+        {
+          method: "GET",
+        },
+      );
+      const body: unknown = await response.json();
+      const matches = readCloudflareSecrets(body).filter(
+        (entry) => entry.name === secret.name && entry.status !== "deleted",
+      );
+      if (matches.length > 1)
+        throw new PlatformSecretProviderError("request_failed");
+      return matches[0] === undefined ? null : { externalId: matches[0].id };
+    },
     async create(secret) {
       const response = await call("", {
         method: "POST",
@@ -402,6 +569,8 @@ export function createCloudflareSecretsStoreProvider(input: {
 export const unconfiguredPlatformSecretMaterialProvider: PlatformSecretMaterialProvider =
   {
     configured: false,
+    findByName: () =>
+      Promise.reject(new PlatformSecretProviderError("unconfigured")),
     create: () =>
       Promise.reject(new PlatformSecretProviderError("unconfigured")),
     rotate: () =>
@@ -417,6 +586,27 @@ function readCloudflareCreatedId(value: unknown): string | null {
   return isRecord(candidate) && typeof candidate.id === "string"
     ? candidate.id
     : null;
+}
+
+function readCloudflareSecrets(value: unknown): ReadonlyArray<{
+  readonly id: string;
+  readonly name: string;
+  readonly status: string;
+}> {
+  if (!isRecord(value) || !Array.isArray(value.result)) {
+    throw new PlatformSecretProviderError("request_failed");
+  }
+  return value.result.map((entry) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.id !== "string" ||
+      typeof entry.name !== "string" ||
+      typeof entry.status !== "string"
+    ) {
+      throw new PlatformSecretProviderError("request_failed");
+    }
+    return { id: entry.id, name: entry.name, status: entry.status };
+  });
 }
 
 function createProviderName(

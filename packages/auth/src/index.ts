@@ -9,8 +9,12 @@ import {
   platformCapabilityWildcard,
   verifyVerificationCode,
   type AuthenticatedOperator,
+  type PlatformConfigurationEnvironment,
 } from "@atharvan/domain";
-import type { TransactionalEmailSender } from "@atharvan/email";
+import type {
+  TransactionalEmailSender,
+  FirstLoginVerificationMessage,
+} from "@atharvan/email";
 import { passkey } from "@better-auth/passkey";
 import {
   betterAuth,
@@ -22,6 +26,7 @@ import { createAuthMiddleware } from "better-auth/api";
 import { emailOTP } from "better-auth/plugins";
 
 export * from "./operator-break-glass";
+export * from "./operator-lifecycle";
 
 import { OnboardingCommandRejectedError } from "./errors";
 
@@ -62,6 +67,8 @@ export interface OperatorOnboardingStore {
 
   addAllowedEmailDomain(input: {
     readonly actorId: string;
+    readonly commandId?: string;
+    readonly commandEnvironment?: PlatformConfigurationEnvironment;
     readonly domainId: string;
     readonly normalizedDomain: string;
     readonly includeSubdomains: boolean;
@@ -73,6 +80,8 @@ export interface OperatorOnboardingStore {
 
   disableAllowedEmailDomain(input: {
     readonly actorId: string;
+    readonly commandId?: string;
+    readonly commandEnvironment?: PlatformConfigurationEnvironment;
     readonly normalizedDomain: string;
     readonly membershipLockdown: boolean;
     readonly correlationId: string;
@@ -82,6 +91,8 @@ export interface OperatorOnboardingStore {
 
   createInvitation(input: {
     readonly actorId: string;
+    readonly commandId?: string;
+    readonly commandEnvironment?: PlatformConfigurationEnvironment;
     readonly operatorId: string;
     readonly invitationId: string;
     readonly normalizedEmail: string;
@@ -163,6 +174,10 @@ export interface OperatorSessionPolicyStore {
 }
 
 export interface AtharvanAuthOptions {
+  /** Production awaits durable enqueue; a provider receipt is not fabricated for queued mail. */
+  readonly enqueueVerificationEmail?: (
+    message: FirstLoginVerificationMessage,
+  ) => Promise<void>;
   readonly database: NonNullable<BetterAuthOptions["database"]>;
   readonly policyStore: OperatorSessionPolicyStore;
   readonly emailSender: TransactionalEmailSender;
@@ -242,15 +257,20 @@ export function createAtharvanAuth(options: AtharvanAuthOptions) {
             return;
           }
 
+          const message: FirstLoginVerificationMessage = {
+            to: normalizeOperatorEmail(data.email),
+            code: data.otp,
+            expiresAt: new Date(
+              now().getTime() + betterAuthOtpLifetimeSeconds * 1_000,
+            ),
+            correlationId: crypto.randomUUID(),
+          };
+          if (options.enqueueVerificationEmail) {
+            await options.enqueueVerificationEmail(message);
+            return;
+          }
           const delivery = options.emailSender
-            .sendFirstLoginVerification({
-              to: normalizeOperatorEmail(data.email),
-              code: data.otp,
-              expiresAt: new Date(
-                now().getTime() + betterAuthOtpLifetimeSeconds * 1_000,
-              ),
-              correlationId: crypto.randomUUID(),
-            })
+            .sendFirstLoginVerification(message)
             .then(() => undefined);
 
           if (options.defer) {
@@ -290,6 +310,10 @@ export function createAtharvanAuth(options: AtharvanAuthOptions) {
       }),
     ],
     disabledPaths: [
+      "/list-sessions",
+      "/revoke-session",
+      "/revoke-sessions",
+      "/revoke-other-sessions",
       "/email-otp/check-verification-otp",
       "/email-otp/verify-email",
       "/email-otp/request-password-reset",
@@ -491,6 +515,8 @@ export function createOperatorOnboardingService(
 
     async addAllowedEmailDomain(input: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
+      readonly commandEnvironment?: PlatformConfigurationEnvironment;
       readonly domain: string;
       readonly includeSubdomains?: boolean;
       readonly isPublicDomainException?: boolean;
@@ -501,6 +527,12 @@ export function createOperatorOnboardingService(
       authorizeMembershipDomainChange(input.actor, commandTime);
       const result = await options.store.addAllowedEmailDomain({
         actorId: input.actor.operatorId,
+        ...(input.commandId === undefined
+          ? {}
+          : { commandId: input.commandId }),
+        ...(input.commandEnvironment === undefined
+          ? {}
+          : { commandEnvironment: input.commandEnvironment }),
         domainId: crypto.randomUUID(),
         normalizedDomain: normalizeOrganizationDomain(input.domain),
         includeSubdomains: input.includeSubdomains ?? false,
@@ -515,6 +547,8 @@ export function createOperatorOnboardingService(
 
     async disableAllowedEmailDomain(input: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
+      readonly commandEnvironment?: PlatformConfigurationEnvironment;
       readonly domain: string;
       readonly membershipLockdown?: boolean;
       readonly reason: string;
@@ -524,6 +558,12 @@ export function createOperatorOnboardingService(
       authorizeMembershipDomainChange(input.actor, commandTime);
       const result = await options.store.disableAllowedEmailDomain({
         actorId: input.actor.operatorId,
+        ...(input.commandId === undefined
+          ? {}
+          : { commandId: input.commandId }),
+        ...(input.commandEnvironment === undefined
+          ? {}
+          : { commandEnvironment: input.commandEnvironment }),
         normalizedDomain: normalizeOrganizationDomain(input.domain),
         membershipLockdown: input.membershipLockdown ?? false,
         correlationId: input.correlationId ?? crypto.randomUUID(),
@@ -536,6 +576,8 @@ export function createOperatorOnboardingService(
 
     async createInvitation(input: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
+      readonly commandEnvironment?: PlatformConfigurationEnvironment;
       readonly email: string;
       readonly organizationId: string;
       readonly intendedCapabilities: ReadonlyArray<string>;
@@ -566,6 +608,12 @@ export function createOperatorOnboardingService(
 
       const result = await options.store.createInvitation({
         actorId: input.actor.operatorId,
+        ...(input.commandId === undefined
+          ? {}
+          : { commandId: input.commandId }),
+        ...(input.commandEnvironment === undefined
+          ? {}
+          : { commandEnvironment: input.commandEnvironment }),
         operatorId: crypto.randomUUID(),
         invitationId: crypto.randomUUID(),
         normalizedEmail,

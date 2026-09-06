@@ -18,6 +18,8 @@ export class PlatformConfigurationRejectedError extends Error {
     readonly reason:
       | "configuration_not_found"
       | "configuration_not_mutable"
+      | "configuration_revision_not_found"
+      | "configuration_confirmation_invalid"
       | "configuration_value_invalid"
       | "configuration_key_sensitive"
       | "configuration_scope_invalid"
@@ -48,11 +50,25 @@ export interface PlatformConfigurationAdministrationStore {
     key: string,
   ): Promise<PlatformConfigurationDefinitionContract | null>;
   setConfiguration(input: {
+    readonly commandId?: string;
+    readonly commandEnvironment: PlatformConfigurationEnvironment;
     readonly actorId: string;
     readonly definition: PlatformConfigurationDefinitionContract;
     readonly scope: PlatformConfigurationScope;
     readonly environment: PlatformConfigurationEnvironment | null;
     readonly value: PlatformConfigurationValue;
+    readonly reason: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<PlatformConfigurationCommandResult>;
+  rollbackConfiguration(input: {
+    readonly commandId?: string;
+    readonly commandEnvironment: PlatformConfigurationEnvironment;
+    readonly actorId: string;
+    readonly definition: PlatformConfigurationDefinitionContract;
+    readonly scope: PlatformConfigurationScope;
+    readonly environment: PlatformConfigurationEnvironment | null;
+    readonly targetRevisionNumber: number;
     readonly reason: string;
     readonly correlationId: string;
     readonly now: Date;
@@ -68,6 +84,7 @@ export function createPlatformConfigurationAdministrationService(input: {
 
   return {
     async setConfiguration(command: {
+      readonly commandId?: string;
       readonly actor: AuthenticatedOperator;
       readonly key: string;
       readonly scope: PlatformConfigurationScope;
@@ -105,6 +122,10 @@ export function createPlatformConfigurationAdministrationService(input: {
       });
 
       return input.store.setConfiguration({
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
+        commandEnvironment: input.environment,
         actorId: command.actor.operatorId,
         definition,
         scope,
@@ -114,6 +135,77 @@ export function createPlatformConfigurationAdministrationService(input: {
         correlationId: command.correlationId ?? crypto.randomUUID(),
         now: commandTime,
       });
+    },
+
+    async rollbackConfiguration(command: {
+      readonly commandId?: string;
+      readonly actor: AuthenticatedOperator;
+      readonly key: string;
+      readonly scope: PlatformConfigurationScope;
+      readonly targetRevisionNumber: number;
+      readonly confirmation: string;
+      readonly reason: string;
+      readonly correlationId?: string;
+    }) {
+      const commandTime = now();
+      assertPlatformCommandAuthorized({
+        actor: command.actor,
+        requestedCapability: "platform:configuration:write",
+        requireSuperAdministrator: true,
+        requireRecentStepUp: true,
+        now: commandTime,
+      });
+      const key = normalizePlatformConfigurationKey(command.key);
+      const definition = await input.store.findConfigurationDefinition(key);
+      if (definition === null)
+        throw new PlatformConfigurationRejectedError("configuration_not_found");
+      if (!definition.isMutable)
+        throw new PlatformConfigurationRejectedError(
+          "configuration_not_mutable",
+        );
+      const scope = requireScope(command.scope);
+      if (
+        !Number.isSafeInteger(command.targetRevisionNumber) ||
+        command.targetRevisionNumber < 1
+      ) {
+        throw new PlatformConfigurationRejectedError(
+          "configuration_revision_not_found",
+        );
+      }
+      if (
+        command.confirmation.trim() !==
+        `ROLL BACK ${key} TO REVISION ${command.targetRevisionNumber}`
+      ) {
+        throw new PlatformConfigurationRejectedError(
+          "configuration_confirmation_invalid",
+        );
+      }
+      try {
+        return await input.store.rollbackConfiguration({
+          ...(command.commandId === undefined
+            ? {}
+            : { commandId: command.commandId }),
+          commandEnvironment: input.environment,
+          actorId: command.actor.operatorId,
+          definition,
+          scope,
+          environment: scope === "environment" ? input.environment : null,
+          targetRevisionNumber: command.targetRevisionNumber,
+          reason: requireReason(command.reason),
+          correlationId: command.correlationId ?? crypto.randomUUID(),
+          now: commandTime,
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "configuration_revision_not_found"
+        ) {
+          throw new PlatformConfigurationRejectedError(
+            "configuration_revision_not_found",
+          );
+        }
+        throw error;
+      }
     },
   };
 }

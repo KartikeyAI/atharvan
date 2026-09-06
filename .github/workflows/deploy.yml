@@ -66,9 +66,12 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Required database integration contracts
+        run: pnpm test:integration
         env:
-          ATHARVAN_RUN_DB_INTEGRATION_TESTS: "1"
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/atharvan_ci
+          ATHARVAN_TEST_DATABASE_DISPOSABLE: "1"
+          ATHARVAN_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/atharvan_ci
 
       - name: Build
         run: pnpm build
@@ -85,12 +88,21 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
       ATHARVAN_VERIFICATION_HMAC_SECRET: ${{ secrets.ATHARVAN_VERIFICATION_HMAC_SECRET }}
+      ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET: ${{ secrets.ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET }}
       ATHARVAN_SUPER_ADMIN_EMAIL: ${{ secrets.ATHARVAN_SUPER_ADMIN_EMAIL }}
       ATHARVAN_EMAIL_FROM: Atharvan <login@updates.arth.sh>
+      ATHARVAN_ALERT_EMAIL_TO: ${{ vars.ATHARVAN_ALERT_EMAIL_TO }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
       CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID }}
       CLOUDFLARE_SECRETS_STORE_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ID }}
       CLOUDFLARE_SECRETS_STORE_API_TOKEN: ${{ secrets.CLOUDFLARE_SECRETS_STORE_API_TOKEN }}
+      ATHARVAN_ARTH_CURRENT_KEY_ID: ${{ secrets.ATHARVAN_ARTH_CURRENT_KEY_ID }}
+      ATHARVAN_ARTH_CURRENT_SHARED_SECRET: ${{ secrets.ATHARVAN_ARTH_CURRENT_SHARED_SECRET }}
+      ATHARVAN_ARTH_PREVIOUS_KEY_ID: ${{ secrets.ATHARVAN_ARTH_PREVIOUS_KEY_ID }}
+      ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET: ${{ secrets.ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET }}
+      ATHARVAN_ARTH_AUDIENCE: ${{ vars.ATHARVAN_ARTH_AUDIENCE }}
+      ATHARVAN_CONTROL_PLANE_ORIGIN: ${{ vars.ATHARVAN_CONTROL_PLANE_ORIGIN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -121,11 +133,19 @@ jobs:
             ATHARVAN_SUPER_ADMIN_EMAIL
             ATHARVAN_EMAIL_FROM
             RESEND_API_KEY
+            RESEND_WEBHOOK_SECRET
           )
           optional_secrets=(
+            ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET
+            ATHARVAN_ALERT_EMAIL_TO
             CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID
             CLOUDFLARE_SECRETS_STORE_ID
             CLOUDFLARE_SECRETS_STORE_API_TOKEN
+            ATHARVAN_ARTH_CURRENT_KEY_ID
+            ATHARVAN_ARTH_CURRENT_SHARED_SECRET
+            ATHARVAN_ARTH_PREVIOUS_KEY_ID
+            ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET
+            ATHARVAN_ARTH_AUDIENCE
           )
           secret_store_values=0
           for secret_name in \
@@ -138,6 +158,22 @@ jobs:
           done
           if [[ "$secret_store_values" -ne 0 && "$secret_store_values" -ne 3 ]]; then
             echo "::error::Cloudflare Secrets Store configuration must contain all three values."
+            exit 1
+          fi
+          arth_current_values=0
+          for secret_name in ATHARVAN_ARTH_CURRENT_KEY_ID ATHARVAN_ARTH_CURRENT_SHARED_SECRET ATHARVAN_ARTH_AUDIENCE; do
+            [[ -z "${!secret_name:-}" ]] || arth_current_values=$((arth_current_values + 1))
+          done
+          if [[ "$arth_current_values" -ne 0 && "$arth_current_values" -ne 3 ]]; then
+            echo "::error::Current Arth workload configuration must contain all three values."
+            exit 1
+          fi
+          arth_previous_values=0
+          for secret_name in ATHARVAN_ARTH_PREVIOUS_KEY_ID ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET; do
+            [[ -z "${!secret_name:-}" ]] || arth_previous_values=$((arth_previous_values + 1))
+          done
+          if [[ "$arth_previous_values" -ne 0 && "$arth_previous_values" -ne 2 ]]; then
+            echo "::error::Previous Arth workload configuration must contain both values."
             exit 1
           fi
           for secret_name in "${required_secrets[@]}"; do
@@ -158,6 +194,9 @@ jobs:
       - name: Deploy development control-plane worker
         run: pnpm --filter @atharvan/worker deploy:dev
 
+      - name: Verify development control-plane readiness
+        run: node scripts/verify-deployed-readiness.mjs "$ATHARVAN_CONTROL_PLANE_ORIGIN" development 28
+
       - name: Deploy development console
         run: pnpm --filter @atharvan/console deploy:dev
 
@@ -173,12 +212,22 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
       ATHARVAN_VERIFICATION_HMAC_SECRET: ${{ secrets.ATHARVAN_VERIFICATION_HMAC_SECRET }}
+      ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET: ${{ secrets.ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET }}
       ATHARVAN_SUPER_ADMIN_EMAIL: ${{ secrets.ATHARVAN_SUPER_ADMIN_EMAIL }}
       ATHARVAN_EMAIL_FROM: Atharvan <login@updates.arth.sh>
+      ATHARVAN_PUBLIC_ORIGIN: ${{ vars.ATHARVAN_PUBLIC_ORIGIN }}
+      ATHARVAN_ALERT_EMAIL_TO: ${{ vars.ATHARVAN_ALERT_EMAIL_TO }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
       CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID }}
       CLOUDFLARE_SECRETS_STORE_ID: ${{ secrets.CLOUDFLARE_SECRETS_STORE_ID }}
       CLOUDFLARE_SECRETS_STORE_API_TOKEN: ${{ secrets.CLOUDFLARE_SECRETS_STORE_API_TOKEN }}
+      ATHARVAN_ARTH_CURRENT_KEY_ID: ${{ secrets.ATHARVAN_ARTH_CURRENT_KEY_ID }}
+      ATHARVAN_ARTH_CURRENT_SHARED_SECRET: ${{ secrets.ATHARVAN_ARTH_CURRENT_SHARED_SECRET }}
+      ATHARVAN_ARTH_PREVIOUS_KEY_ID: ${{ secrets.ATHARVAN_ARTH_PREVIOUS_KEY_ID }}
+      ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET: ${{ secrets.ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET }}
+      ATHARVAN_ARTH_AUDIENCE: ${{ vars.ATHARVAN_ARTH_AUDIENCE }}
+      ATHARVAN_CONTROL_PLANE_ORIGIN: ${{ vars.ATHARVAN_CONTROL_PLANE_ORIGIN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -206,14 +255,23 @@ jobs:
             DATABASE_URL
             BETTER_AUTH_SECRET
             ATHARVAN_VERIFICATION_HMAC_SECRET
+            ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET
             ATHARVAN_SUPER_ADMIN_EMAIL
             ATHARVAN_EMAIL_FROM
-          )
-          optional_secrets=(
+            ATHARVAN_PUBLIC_ORIGIN
+            ATHARVAN_ALERT_EMAIL_TO
             RESEND_API_KEY
+            RESEND_WEBHOOK_SECRET
             CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID
             CLOUDFLARE_SECRETS_STORE_ID
             CLOUDFLARE_SECRETS_STORE_API_TOKEN
+            ATHARVAN_ARTH_CURRENT_KEY_ID
+            ATHARVAN_ARTH_CURRENT_SHARED_SECRET
+            ATHARVAN_ARTH_AUDIENCE
+          )
+          optional_secrets=(
+            ATHARVAN_ARTH_PREVIOUS_KEY_ID
+            ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET
           )
           secret_store_values=0
           for secret_name in \
@@ -226,6 +284,14 @@ jobs:
           done
           if [[ "$secret_store_values" -ne 0 && "$secret_store_values" -ne 3 ]]; then
             echo "::error::Cloudflare Secrets Store configuration must contain all three values."
+            exit 1
+          fi
+          arth_previous_values=0
+          for secret_name in ATHARVAN_ARTH_PREVIOUS_KEY_ID ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET; do
+            [[ -z "${!secret_name:-}" ]] || arth_previous_values=$((arth_previous_values + 1))
+          done
+          if [[ "$arth_previous_values" -ne 0 && "$arth_previous_values" -ne 2 ]]; then
+            echo "::error::Previous Arth workload configuration must contain both values."
             exit 1
           fi
           for secret_name in "${required_secrets[@]}"; do
@@ -245,6 +311,9 @@ jobs:
 
       - name: Deploy production control-plane worker
         run: pnpm --filter @atharvan/worker deploy:production
+
+      - name: Verify production control-plane readiness
+        run: node scripts/verify-deployed-readiness.mjs "$ATHARVAN_CONTROL_PLANE_ORIGIN" production 28
 
       - name: Deploy production console
         run: pnpm --filter @atharvan/console deploy:production

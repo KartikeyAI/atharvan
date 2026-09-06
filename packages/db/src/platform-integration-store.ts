@@ -4,6 +4,8 @@ import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
+import { enqueueArthCommand } from "./arth-command-outbox";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   auditEvents,
   operators,
@@ -36,6 +38,7 @@ export function createPostgresPlatformIntegrationRegistryStore(
             adapterPackage: platformIntegrationRevisions.adapterPackage,
             adapterVersion: platformIntegrationRevisions.adapterVersion,
             documentationUrl: platformIntegrationRevisions.documentationUrl,
+            healthProbe: platformIntegrationRevisions.healthProbe,
             authorizationUrl: platformIntegrationRevisions.authorizationUrl,
             tokenUrl: platformIntegrationRevisions.tokenUrl,
             clientId: platformIntegrationRevisions.clientId,
@@ -259,7 +262,32 @@ export function createPostgresPlatformIntegrationRegistryStore(
               1,
               "created",
             );
-            return { outcome: "created", id: created.id, revisionNumber: 1 };
+            await enqueueArthCommand(transaction, {
+              commandId: input.commandId,
+              environment: input.environment,
+              kind: "platform_integration_control",
+              aggregateId: created.id,
+              aggregateRevision: 1,
+              payload: {
+                kind: "platform_integration_control",
+                integrationId: created.id,
+                integrationKey: input.key,
+                revisionNumber: 1,
+                lifecycle: input.lifecycle,
+                operationalState: input.operationalState,
+                maintenanceExpiresAt:
+                  input.maintenanceExpiresAt?.toISOString() ?? null,
+                requestedAt: input.now.toISOString(),
+              },
+              now: input.now,
+            });
+            const result = {
+              outcome: "created",
+              id: created.id,
+              revisionNumber: 1,
+            } as const;
+            await recordIntegrationReceipt(transaction, input, result);
+            return result;
           }
           [integration] = await transaction
             .select({
@@ -321,11 +349,13 @@ export function createPostgresPlatformIntegrationRegistryStore(
             webhookSecretReferenceId,
           )
         ) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: integration.id,
             revisionNumber: integration.currentRevisionNumber,
-          };
+          } as const;
+          await recordIntegrationReceipt(transaction, input, result);
+          return result;
         }
         const revisionNumber = integration.currentRevisionNumber + 1;
         await insertRevision(
@@ -348,7 +378,32 @@ export function createPostgresPlatformIntegrationRegistryStore(
           revisionNumber,
           "updated",
         );
-        return { outcome: "updated", id: integration.id, revisionNumber };
+        await enqueueArthCommand(transaction, {
+          commandId: input.commandId,
+          environment: input.environment,
+          kind: "platform_integration_control",
+          aggregateId: integration.id,
+          aggregateRevision: revisionNumber,
+          payload: {
+            kind: "platform_integration_control",
+            integrationId: integration.id,
+            integrationKey: input.key,
+            revisionNumber,
+            lifecycle: input.lifecycle,
+            operationalState: input.operationalState,
+            maintenanceExpiresAt:
+              input.maintenanceExpiresAt?.toISOString() ?? null,
+            requestedAt: input.now.toISOString(),
+          },
+          now: input.now,
+        });
+        const result = {
+          outcome: "updated",
+          id: integration.id,
+          revisionNumber,
+        } as const;
+        await recordIntegrationReceipt(transaction, input, result);
+        return result;
       });
     },
 
@@ -400,7 +455,28 @@ export function createPostgresPlatformIntegrationRegistryStore(
           },
           occurredAt: input.observedAt,
         });
-        return { outcome: "created", id: input.observationId };
+        const result = {
+          outcome: "created",
+          id: input.observationId,
+        } as const;
+        if (input.commandId !== undefined) {
+          await recordTransactionalCommandSuccess(
+            transaction,
+            {
+              commandId: input.commandId,
+              actorId: input.actorId,
+              environment: input.environment,
+              name: "platform.integration-health.record",
+              targetType: "platform_integration",
+              targetId: input.integrationId,
+              correlationId: input.correlationId,
+              reason: input.reason,
+              now: input.observedAt,
+            },
+            result,
+          );
+        }
+        return result;
       });
     },
   };
@@ -425,6 +501,7 @@ async function insertRevision(
     adapterPackage: input.adapterPackage,
     adapterVersion: input.adapterVersion,
     documentationUrl: input.documentationUrl,
+    healthProbe: input.healthProbe,
     authorizationUrl: input.authorizationUrl,
     tokenUrl: input.tokenUrl,
     clientId: input.clientId,
@@ -461,6 +538,33 @@ async function insertAudit(
     evidence: { previousRevisionNumber, revisionNumber },
     occurredAt: input.now,
   });
+}
+
+async function recordIntegrationReceipt(
+  transaction: Transaction,
+  input: SetInput,
+  result: {
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "platform.integration.set",
+      targetType: "platform_integration",
+      targetId: input.key,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function isActiveOperator(transaction: Transaction, actorId: string) {
@@ -506,6 +610,7 @@ function matches(
     current.adapterPackage === input.adapterPackage &&
     current.adapterVersion === input.adapterVersion &&
     current.documentationUrl === input.documentationUrl &&
+    JSON.stringify(current.healthProbe) === JSON.stringify(input.healthProbe) &&
     current.authorizationUrl === input.authorizationUrl &&
     current.tokenUrl === input.tokenUrl &&
     current.clientId === input.clientId &&

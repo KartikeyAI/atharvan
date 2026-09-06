@@ -18,6 +18,7 @@ import {
   platformConfigurationDefinitions,
   platformConfigurationRevisions,
 } from "./schema";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -113,7 +114,25 @@ export function createPostgresPlatformConfigurationStore(
           current !== undefined &&
           configurationValuesEqual(current.value, input.value)
         ) {
-          return { outcome: "unchanged", key: definition.key } as const;
+          const result = { outcome: "unchanged", key: definition.key } as const;
+          if (input.commandId !== undefined) {
+            await recordTransactionalCommandSuccess(
+              transaction,
+              {
+                commandId: input.commandId,
+                actorId: input.actorId,
+                environment: input.commandEnvironment,
+                name: "platform.configuration.set",
+                targetType: "platform_configuration",
+                targetId: definition.key,
+                correlationId: input.correlationId,
+                reason: input.reason,
+                now: input.now,
+              },
+              result,
+            );
+          }
+          return result;
         }
 
         const [revisionAggregate] = await transaction
@@ -182,11 +201,226 @@ export function createPostgresPlatformConfigurationStore(
           occurredAt: input.now,
         });
 
-        return {
+        const result = {
           outcome: "updated",
           key: definition.key,
           revisionNumber,
         } as const;
+        if (input.commandId !== undefined) {
+          await recordTransactionalCommandSuccess(
+            transaction,
+            {
+              commandId: input.commandId,
+              actorId: input.actorId,
+              environment: input.commandEnvironment,
+              name: "platform.configuration.set",
+              targetType: "platform_configuration",
+              targetId: definition.key,
+              correlationId: input.correlationId,
+              reason: input.reason,
+              now: input.now,
+            },
+            result,
+          );
+        }
+        return result;
+      });
+    },
+
+    async rollbackConfiguration(input) {
+      return database.transaction(async (transaction) => {
+        const [actor] = await transaction
+          .select({ id: operators.id })
+          .from(operators)
+          .where(
+            and(
+              eq(operators.id, input.actorId),
+              eq(operators.status, "active"),
+              eq(operators.isSuperAdministrator, true),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (actor === undefined) throw new Error("operator_command_forbidden");
+
+        const [definition] = await transaction
+          .select({
+            id: platformConfigurationDefinitions.id,
+            key: platformConfigurationDefinitions.key,
+            isMutable: platformConfigurationDefinitions.isMutable,
+          })
+          .from(platformConfigurationDefinitions)
+          .where(
+            and(
+              eq(platformConfigurationDefinitions.id, input.definition.id),
+              eq(platformConfigurationDefinitions.key, input.definition.key),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (definition === undefined)
+          throw new Error("configuration_not_found");
+        if (!definition.isMutable) throw new Error("configuration_not_mutable");
+
+        const bindingCondition = configurationBindingCondition({
+          definitionId: definition.id,
+          scope: input.scope,
+          environment: input.environment,
+        });
+        const [current] = await transaction
+          .select({
+            bindingId: platformConfigurationBindings.id,
+            revisionId: platformConfigurationRevisions.id,
+            revisionNumber: platformConfigurationRevisions.revisionNumber,
+            value: platformConfigurationRevisions.value,
+          })
+          .from(platformConfigurationBindings)
+          .innerJoin(
+            platformConfigurationRevisions,
+            eq(
+              platformConfigurationRevisions.id,
+              platformConfigurationBindings.currentRevisionId,
+            ),
+          )
+          .where(bindingCondition)
+          .limit(1)
+          .for("update");
+        const [target] = await transaction
+          .select({
+            id: platformConfigurationRevisions.id,
+            value: platformConfigurationRevisions.value,
+          })
+          .from(platformConfigurationRevisions)
+          .where(
+            and(
+              eq(platformConfigurationRevisions.definitionId, definition.id),
+              eq(
+                platformConfigurationRevisions.revisionNumber,
+                input.targetRevisionNumber,
+              ),
+              eq(platformConfigurationRevisions.scope, input.scope),
+              input.environment === null
+                ? isNull(platformConfigurationRevisions.environment)
+                : eq(
+                    platformConfigurationRevisions.environment,
+                    input.environment,
+                  ),
+            ),
+          )
+          .limit(1);
+        if (target === undefined)
+          throw new Error("configuration_revision_not_found");
+        if (
+          current !== undefined &&
+          configurationValuesEqual(current.value, target.value)
+        ) {
+          const result = { outcome: "unchanged", key: definition.key } as const;
+          if (input.commandId !== undefined) {
+            await recordTransactionalCommandSuccess(
+              transaction,
+              {
+                commandId: input.commandId,
+                actorId: input.actorId,
+                environment: input.commandEnvironment,
+                name: "platform.configuration.rollback",
+                targetType: "platform_configuration",
+                targetId: definition.key,
+                correlationId: input.correlationId,
+                reason: input.reason,
+                now: input.now,
+              },
+              result,
+            );
+          }
+          return result;
+        }
+
+        const [revisionAggregate] = await transaction
+          .select({
+            maximumRevision: max(platformConfigurationRevisions.revisionNumber),
+          })
+          .from(platformConfigurationRevisions)
+          .where(
+            eq(platformConfigurationRevisions.definitionId, definition.id),
+          );
+        const revisionNumber =
+          Number(revisionAggregate?.maximumRevision ?? 0) + 1;
+        const [revision] = await transaction
+          .insert(platformConfigurationRevisions)
+          .values({
+            definitionId: definition.id,
+            revisionNumber,
+            scope: input.scope,
+            environment: input.environment,
+            value: target.value,
+            createdByOperatorId: input.actorId,
+            reason: input.reason,
+            correlationId: input.correlationId,
+            createdAt: input.now,
+          })
+          .returning({ id: platformConfigurationRevisions.id });
+        if (revision === undefined)
+          throw new Error("configuration_revision_not_created");
+
+        if (current === undefined) {
+          await transaction.insert(platformConfigurationBindings).values({
+            definitionId: definition.id,
+            scope: input.scope,
+            environment: input.environment,
+            currentRevisionId: revision.id,
+            updatedByOperatorId: input.actorId,
+            updatedAt: input.now,
+          });
+        } else {
+          await transaction
+            .update(platformConfigurationBindings)
+            .set({
+              currentRevisionId: revision.id,
+              updatedByOperatorId: input.actorId,
+              updatedAt: input.now,
+            })
+            .where(eq(platformConfigurationBindings.id, current.bindingId));
+        }
+        await transaction.insert(auditEvents).values({
+          actorId: input.actorId,
+          eventType: "platform.configuration.rolled_back",
+          targetType: "platform_configuration",
+          targetId: definition.key,
+          correlationId: input.correlationId,
+          reason: input.reason,
+          evidence: {
+            scope: input.scope,
+            environment: input.environment,
+            previousRevisionNumber: current?.revisionNumber ?? null,
+            sourceRevisionNumber: input.targetRevisionNumber,
+            resultingRevisionNumber: revisionNumber,
+            resultingValue: target.value,
+          },
+          occurredAt: input.now,
+        });
+        const result = {
+          outcome: "updated",
+          key: definition.key,
+          revisionNumber,
+        } as const;
+        if (input.commandId !== undefined) {
+          await recordTransactionalCommandSuccess(
+            transaction,
+            {
+              commandId: input.commandId,
+              actorId: input.actorId,
+              environment: input.commandEnvironment,
+              name: "platform.configuration.rollback",
+              targetType: "platform_configuration",
+              targetId: definition.key,
+              correlationId: input.correlationId,
+              reason: input.reason,
+              now: input.now,
+            },
+            result,
+          );
+        }
+        return result;
       });
     },
 

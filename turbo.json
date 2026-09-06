@@ -14,7 +14,14 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["ATHARVAN_RUN_DB_INTEGRATION_TESTS", "DATABASE_URL"],
+      "env": [
+        "ATHARVAN_RUN_DB_INTEGRATION_TESTS",
+        "ATHARVAN_RUN_SESSION_DB_TESTS",
+        "ATHARVAN_RUN_OVERVIEW_READONLY",
+        "ATHARVAN_TEST_DATABASE_URL",
+        "ATHARVAN_TEST_DATABASE_DISPOSABLE",
+        "DATABASE_URL"
+      ],
       "outputs": ["coverage/**"]
     },
     "typecheck": {

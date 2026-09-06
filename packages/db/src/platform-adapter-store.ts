@@ -4,6 +4,8 @@ import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
+import { enqueueArthCommand } from "./arth-command-outbox";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   auditEvents,
   operators,
@@ -140,7 +142,19 @@ export function createPostgresPlatformAdapterRegistryStore(
               1,
               "created",
             );
-            return { outcome: "created", id: created.id, revisionNumber: 1 };
+            await enqueueAdapterControlCommand(
+              transaction,
+              input,
+              created.id,
+              1,
+            );
+            const result = {
+              outcome: "created",
+              id: created.id,
+              revisionNumber: 1,
+            } as const;
+            await recordAdapterReceipt(transaction, input, result);
+            return result;
           }
           [release] = await transaction
             .select({
@@ -187,11 +201,13 @@ export function createPostgresPlatformAdapterRegistryStore(
           };
         }
         if (matches(current, input)) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: release.id,
             revisionNumber: release.currentRevisionNumber,
-          };
+          } as const;
+          await recordAdapterReceipt(transaction, input, result);
+          return result;
         }
         const revisionNumber = release.currentRevisionNumber + 1;
         await insertRevision(transaction, input, release.id, revisionNumber);
@@ -207,10 +223,77 @@ export function createPostgresPlatformAdapterRegistryStore(
           revisionNumber,
           "updated",
         );
-        return { outcome: "updated", id: release.id, revisionNumber };
+        await enqueueAdapterControlCommand(
+          transaction,
+          input,
+          release.id,
+          revisionNumber,
+        );
+        const result = {
+          outcome: "updated",
+          id: release.id,
+          revisionNumber,
+        } as const;
+        await recordAdapterReceipt(transaction, input, result);
+        return result;
       });
     },
   };
+}
+
+async function enqueueAdapterControlCommand(
+  transaction: Transaction,
+  input: SetInput,
+  releaseId: string,
+  revisionNumber: number,
+) {
+  await enqueueArthCommand(transaction, {
+    commandId: input.commandId,
+    environment: input.environment,
+    kind: "platform_adapter_release_control",
+    aggregateId: releaseId,
+    aggregateRevision: revisionNumber,
+    payload: {
+      kind: "platform_adapter_release_control",
+      releaseId,
+      adapterKey: input.key,
+      adapterVersion: input.version,
+      revisionNumber,
+      lifecycle: input.lifecycle,
+      releaseChannel: input.releaseChannel,
+      signatureStatus: input.signatureStatus,
+      securityReviewStatus: input.securityReviewStatus,
+      requestedAt: input.now.toISOString(),
+    },
+    now: input.now,
+  });
+}
+
+async function recordAdapterReceipt(
+  transaction: Transaction,
+  input: SetInput,
+  result: {
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "platform.adapter-release.set",
+      targetType: "platform_adapter_release",
+      targetId: `${input.key}@${input.version}`,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function insertRevision(

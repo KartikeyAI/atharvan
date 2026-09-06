@@ -24,6 +24,7 @@ function createStore(): PlatformCommandAuditStore {
     completeCommand: vi.fn(async () => ({ state: "completed" as const })),
     listAuditEvents: vi.fn(async () => ({ items: [], nextCursor: null })),
     exportAuditEvents: vi.fn(async () => ({ items: [], truncated: false })),
+    recordAuditExport: vi.fn(async () => undefined),
   };
 }
 
@@ -150,18 +151,29 @@ describe("platform command service", () => {
           from: "2026-08-29T00:00:00.000Z",
           to: "2026-08-30T00:00:00.000Z",
         },
+        "00000000-0000-4000-8000-000000000401",
       ),
     ).rejects.toThrow("recent_step_up_required");
-    await expect(service.exportAuditEvents(actor, {})).rejects.toEqual(
+    await expect(
+      service.exportAuditEvents(
+        actor,
+        {},
+        "00000000-0000-4000-8000-000000000402",
+      ),
+    ).rejects.toEqual(
       expect.objectContaining<Partial<PlatformCommandRejectedError>>({
         reason: "audit_export_range_required",
       }),
     );
     await expect(
-      service.exportAuditEvents(actor, {
-        from: "2026-08-29T00:00:00.000Z",
-        to: "2026-08-30T00:00:00.000Z",
-      }),
+      service.exportAuditEvents(
+        actor,
+        {
+          from: "2026-08-29T00:00:00.000Z",
+          to: "2026-08-30T00:00:00.000Z",
+        },
+        "00000000-0000-4000-8000-000000000403",
+      ),
     ).resolves.toMatchObject({ format: "ndjson", itemCount: 0 });
   });
 });

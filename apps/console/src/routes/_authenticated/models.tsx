@@ -159,6 +159,11 @@ function ProviderEditor({
   const [displayName, setDisplayName] = useState("");
   const [adapterKind, setAdapterKind] = useState("openai");
   const [baseUrl, setBaseUrl] = useState("");
+  const [probeUrl, setProbeUrl] = useState("");
+  const [probeMethod, setProbeMethod] = useState<"GET" | "HEAD">("GET");
+  const [probeStatuses, setProbeStatuses] = useState("200");
+  const [probeTimeoutMs, setProbeTimeoutMs] = useState("5000");
+  const [probeIntervalSeconds, setProbeIntervalSeconds] = useState("300");
   const [credentialReferenceId, setCredentialReferenceId] = useState("");
   const [regions, setRegions] = useState("global");
   const [maximumDataClassification, setMaximumDataClassification] =
@@ -182,6 +187,16 @@ function ProviderEditor({
           displayName,
           adapterKind,
           baseUrl: baseUrl.trim() === "" ? null : baseUrl,
+          healthProbe:
+            probeUrl.trim() === ""
+              ? null
+              : {
+                  url: probeUrl,
+                  method: probeMethod,
+                  expectedStatusCodes: parseList(probeStatuses).map(Number),
+                  timeoutMs: Number(probeTimeoutMs),
+                  intervalSeconds: Number(probeIntervalSeconds),
+                },
           ...(secretSelectionAvailable
             ? {
                 credentialReferenceId:
@@ -303,6 +318,84 @@ function ProviderEditor({
                   : "Credential changes are unavailable; an existing binding is preserved."}
               </FieldDescription>
             </Field>
+            <Field className="field-span">
+              <FieldLabel htmlFor="provider-probe-url">
+                Automated health probe URL
+              </FieldLabel>
+              <Input
+                id="provider-probe-url"
+                onChange={(event) => setProbeUrl(event.target.value)}
+                placeholder="https://status.example.com/health"
+                type="url"
+                value={probeUrl}
+              />
+              <FieldDescription>
+                Optional. Active providers are probed on the selected schedule.
+              </FieldDescription>
+            </Field>
+            {probeUrl.trim() !== "" ? (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="provider-probe-method">
+                    Method
+                  </FieldLabel>
+                  <select
+                    className="input"
+                    id="provider-probe-method"
+                    onChange={(event) =>
+                      setProbeMethod(event.target.value as "GET" | "HEAD")
+                    }
+                    value={probeMethod}
+                  >
+                    <option value="GET">GET</option>
+                    <option value="HEAD">HEAD</option>
+                  </select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="provider-probe-statuses">
+                    Healthy status codes
+                  </FieldLabel>
+                  <Input
+                    id="provider-probe-statuses"
+                    onChange={(event) => setProbeStatuses(event.target.value)}
+                    placeholder="200, 204"
+                    required
+                    value={probeStatuses}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="provider-probe-timeout">
+                    Timeout (ms)
+                  </FieldLabel>
+                  <Input
+                    id="provider-probe-timeout"
+                    max={10000}
+                    min={500}
+                    onChange={(event) => setProbeTimeoutMs(event.target.value)}
+                    required
+                    type="number"
+                    value={probeTimeoutMs}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="provider-probe-interval">
+                    Interval (seconds)
+                  </FieldLabel>
+                  <Input
+                    id="provider-probe-interval"
+                    max={3600}
+                    min={60}
+                    onChange={(event) =>
+                      setProbeIntervalSeconds(event.target.value)
+                    }
+                    required
+                    step={60}
+                    type="number"
+                    value={probeIntervalSeconds}
+                  />
+                </Field>
+              </>
+            ) : null}
             <Field>
               <FieldLabel htmlFor="provider-regions">Regions</FieldLabel>
               <Input
@@ -708,6 +801,26 @@ function ProviderCard({
               {provider.health.observedAt
                 ? new Date(provider.health.observedAt).toLocaleString()
                 : "Never observed"}
+            </dd>
+          </div>
+          <div>
+            <dt>Evidence source</dt>
+            <dd>{provider.health.source?.replaceAll("_", " ") ?? "None"}</dd>
+          </div>
+          <div>
+            <dt>Probe response</dt>
+            <dd>
+              {provider.health.httpStatusCode === null
+                ? (provider.health.errorCode?.replaceAll("_", " ") ?? "None")
+                : `${provider.health.httpStatusCode} · ${provider.health.latencyMs ?? 0} ms`}
+            </dd>
+          </div>
+          <div>
+            <dt>Automated probe</dt>
+            <dd>
+              {provider.healthProbe
+                ? `Every ${provider.healthProbe.intervalSeconds / 60} min`
+                : "Disabled"}
             </dd>
           </div>
         </dl>

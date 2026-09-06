@@ -4,6 +4,8 @@ import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
+import { enqueueArthCommand } from "./arth-command-outbox";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   auditEvents,
   modelOperationalControlRevisions,
@@ -23,6 +25,8 @@ import {
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Queryable = Database | Transaction;
+type SetPolicyInput = Parameters<ModelRoutingStore["setPolicy"]>[0];
+type SetControlInput = Parameters<ModelRoutingStore["setControl"]>[0];
 
 export function createPostgresModelRoutingStore(
   database: Database,
@@ -172,11 +176,13 @@ export function createPostgresModelRoutingStore(
               previousRevisionNumber: null,
               revisionNumber: 1,
             });
-            return {
+            const result = {
               outcome: "created",
               id: created.id,
               revisionNumber: 1,
-            };
+            } as const;
+            await recordModelPolicyReceipt(transaction, input, result);
+            return result;
           }
         }
         if (policy === undefined) throw new Error("routing_policy_conflict");
@@ -188,11 +194,13 @@ export function createPostgresModelRoutingStore(
         );
         if (current === null) throw new Error("routing_policy_conflict");
         if (policyMatches(current, input)) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: policy.id,
             revisionNumber: policy.currentRevisionNumber,
-          };
+          } as const;
+          await recordModelPolicyReceipt(transaction, input, result);
+          return result;
         }
         const revisionNumber = policy.currentRevisionNumber + 1;
         await insertPolicyRevision(
@@ -213,7 +221,13 @@ export function createPostgresModelRoutingStore(
           previousRevisionNumber: policy.currentRevisionNumber,
           revisionNumber,
         });
-        return { outcome: "updated", id: policy.id, revisionNumber };
+        const result = {
+          outcome: "updated",
+          id: policy.id,
+          revisionNumber,
+        } as const;
+        await recordModelPolicyReceipt(transaction, input, result);
+        return result;
       });
     },
 
@@ -222,14 +236,13 @@ export function createPostgresModelRoutingStore(
         if (!(await isActiveOperator(transaction, input.actorId))) {
           return { outcome: "rejected", reason: "operator_not_active" };
         }
-        if (
-          !(await targetExists(
-            transaction,
-            input.environment,
-            input.targetKind,
-            input.targetId,
-          ))
-        ) {
+        const targetIdentity = await readTargetIdentity(
+          transaction,
+          input.environment,
+          input.targetKind,
+          input.targetId,
+        );
+        if (targetIdentity === undefined) {
           return { outcome: "rejected", reason: "routing_target_not_found" };
         }
 
@@ -283,11 +296,34 @@ export function createPostgresModelRoutingStore(
               previousRevisionNumber: null,
               revisionNumber: 1,
             });
-            return {
+            await enqueueArthCommand(transaction, {
+              commandId: input.commandId,
+              environment: input.environment,
+              kind: "model_routing_control",
+              aggregateId: created.id,
+              aggregateRevision: 1,
+              payload: {
+                kind: "model_routing_control",
+                controlId: created.id,
+                revisionNumber: 1,
+                targetKind: input.targetKind,
+                targetId: input.targetId,
+                providerKey: targetIdentity.providerKey,
+                targetKey: targetIdentity.targetKey,
+                state: input.state,
+                maintenanceExpiresAt:
+                  input.maintenanceExpiresAt?.toISOString() ?? null,
+                requestedAt: input.now.toISOString(),
+              },
+              now: input.now,
+            });
+            const result = {
               outcome: "created",
               id: created.id,
               revisionNumber: 1,
-            };
+            } as const;
+            await recordModelControlReceipt(transaction, input, result);
+            return result;
           }
         }
         if (control === undefined) throw new Error("routing_control_conflict");
@@ -313,11 +349,13 @@ export function createPostgresModelRoutingStore(
           current.state === input.state &&
           dateEqual(current.maintenanceExpiresAt, input.maintenanceExpiresAt)
         ) {
-          return {
+          const result = {
             outcome: "unchanged",
             id: control.id,
             revisionNumber: control.currentRevisionNumber,
-          };
+          } as const;
+          await recordModelControlReceipt(transaction, input, result);
+          return result;
         }
         const revisionNumber = control.currentRevisionNumber + 1;
         await insertControlRevision(
@@ -338,7 +376,34 @@ export function createPostgresModelRoutingStore(
           previousRevisionNumber: control.currentRevisionNumber,
           revisionNumber,
         });
-        return { outcome: "updated", id: control.id, revisionNumber };
+        await enqueueArthCommand(transaction, {
+          commandId: input.commandId,
+          environment: input.environment,
+          kind: "model_routing_control",
+          aggregateId: control.id,
+          aggregateRevision: revisionNumber,
+          payload: {
+            kind: "model_routing_control",
+            controlId: control.id,
+            revisionNumber,
+            targetKind: input.targetKind,
+            targetId: input.targetId,
+            providerKey: targetIdentity.providerKey,
+            targetKey: targetIdentity.targetKey,
+            state: input.state,
+            maintenanceExpiresAt:
+              input.maintenanceExpiresAt?.toISOString() ?? null,
+            requestedAt: input.now.toISOString(),
+          },
+          now: input.now,
+        });
+        const result = {
+          outcome: "updated",
+          id: control.id,
+          revisionNumber,
+        } as const;
+        await recordModelControlReceipt(transaction, input, result);
+        return result;
       });
     },
 
@@ -474,6 +539,33 @@ export function createPostgresModelRoutingStore(
       };
     },
   };
+}
+
+async function recordModelPolicyReceipt(
+  transaction: Transaction,
+  input: SetPolicyInput,
+  result: {
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "platform.model-routing.policy.set",
+      targetType: "model_routing_policy",
+      targetId: input.key,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function listCurrentPolicyTargets(
@@ -884,7 +976,7 @@ async function insertRoutingAudit(
   });
 }
 
-async function targetExists(
+async function readTargetIdentity(
   transaction: Transaction,
   environment: "development" | "production" | "test",
   targetKind: "provider" | "model",
@@ -892,7 +984,7 @@ async function targetExists(
 ) {
   if (targetKind === "provider") {
     const [provider] = await transaction
-      .select({ id: modelProviders.id })
+      .select({ key: modelProviders.key })
       .from(modelProviders)
       .where(
         and(
@@ -901,17 +993,46 @@ async function targetExists(
         ),
       )
       .limit(1);
-    return provider !== undefined;
+    return provider === undefined
+      ? undefined
+      : { providerKey: provider.key, targetKey: provider.key };
   }
   const [model] = await transaction
-    .select({ id: models.id })
+    .select({ providerKey: modelProviders.key, targetKey: models.key })
     .from(models)
     .innerJoin(modelProviders, eq(modelProviders.id, models.providerId))
     .where(
       and(eq(models.id, targetId), eq(modelProviders.environment, environment)),
     )
     .limit(1);
-  return model !== undefined;
+  return model;
+}
+
+async function recordModelControlReceipt(
+  transaction: Transaction,
+  input: SetControlInput,
+  result: {
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.environment,
+      name: "platform.model-routing.control.set",
+      targetType: `model_routing_${input.targetKind}`,
+      targetId: input.targetId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function isActiveOperator(transaction: Transaction, actorId: string) {

@@ -1,4 +1,8 @@
 import type { PlatformConfigurationEnvironment } from "./platform-configuration";
+import type {
+  PlatformHealthObservationSource,
+  PlatformHttpHealthProbe,
+} from "./platform-health";
 
 export type PlatformIntegrationProtocol =
   "oauth2" | "api_key" | "service_account" | "webhook";
@@ -31,7 +35,7 @@ export interface PlatformIntegrationHealthObservation {
   readonly id: string;
   readonly state: PlatformIntegrationHealthState;
   readonly reportedStatus: PlatformIntegrationReportedHealth | null;
-  readonly source: "operator_probe" | null;
+  readonly source: PlatformHealthObservationSource | null;
   readonly latencyMs: number | null;
   readonly httpStatusCode: number | null;
   readonly errorCode: string | null;
@@ -49,6 +53,7 @@ export interface PlatformIntegrationRegistryEntry {
   readonly adapterPackage: string;
   readonly adapterVersion: string;
   readonly documentationUrl: string | null;
+  readonly healthProbe: PlatformHttpHealthProbe | null;
   readonly authorizationUrl: string | null;
   readonly tokenUrl: string | null;
   readonly clientId: string | null;

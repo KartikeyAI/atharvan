@@ -29,6 +29,13 @@ Command acceptance, completion, and replay append audit events. Existing domain-
 
 Audit search uses bounded keyset pagination. NDJSON export requires `platform:audit:export`, recent step-up authentication, explicit start/end timestamps, and a maximum 31-day range. Exports report truncation rather than silently presenting a partial file as complete.
 
+The exact export bytes have a SHA-256 digest exposed through standard and
+Atharvan-specific response metadata. The browser verifies that digest before
+saving. Export access appends immutable evidence containing the actor, normalized
+scope, range, count, truncation state, request correlation, and digest before the
+response is released. The hash supports later byte-integrity checks but is not a
+digital signature.
+
 ## Consequences
 
 - Existing material Worker mutations share one command and retry boundary.

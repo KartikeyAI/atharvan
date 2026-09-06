@@ -16,6 +16,17 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type {
+  AlertDeliveryKind,
+  OperationalAlertDeliveryState,
+  ResendEmailEventType,
+  TransactionalEmailLocale,
+  TransactionalEmailTemplateVersion,
+  VerificationDeliveryState,
+} from "@atharvan/email";
+
+import type {
+  ArthCommandPayload,
+  PlatformApprovalScope,
   PlatformAdapterCapabilityDeclaration,
   PlatformAdapterCommandDeclaration,
   PlatformAdapterConfigurationField,
@@ -23,7 +34,9 @@ import type {
   PlatformConfigurationValidation,
   PlatformConfigurationValue,
   PlatformFeatureFlagRule,
+  PlatformHttpHealthProbe,
   PlatformJsonValue,
+  OperationalRetentionCounts,
 } from "@atharvan/domain";
 
 export const authSchema = pgSchema("auth");
@@ -215,6 +228,17 @@ export const platformCommandOutcome = pgEnum("platform_command_outcome", [
   "rejected",
   "failed",
 ]);
+export const arthCommandKind = pgEnum("arth_command_kind", [
+  "customer_restriction",
+  "workspace_ownership_transfer",
+] as const);
+export const arthCommandDeliveryState = pgEnum("arth_command_delivery_state", [
+  "pending",
+  "leased",
+  "applied",
+  "rejected",
+  "dead_letter",
+] as const);
 
 export const platformSecretReferenceStatus = pgEnum(
   "platform_secret_reference_status",
@@ -270,7 +294,7 @@ export const modelProviderHealthStatus = pgEnum(
 
 export const modelProviderHealthSource = pgEnum(
   "model_provider_health_source",
-  ["operator_probe"],
+  ["operator_probe", "scheduled_probe"],
 );
 
 export const modelRoutingControlState = pgEnum("model_routing_control_state", [
@@ -311,7 +335,7 @@ export const platformIntegrationHealthStatus = pgEnum(
 
 export const platformIntegrationHealthSource = pgEnum(
   "platform_integration_health_source",
-  ["operator_probe"],
+  ["operator_probe", "scheduled_probe"],
 );
 
 export const platformAdapterCategory = pgEnum("platform_adapter_category", [
@@ -378,6 +402,11 @@ export const customerWorkspaceLifecycle = pgEnum(
 export const customerMembershipLifecycle = pgEnum(
   "customer_membership_lifecycle",
   ["invited", "active", "suspended", "removed"],
+);
+
+export const customerDirectoryIngestionOutcome = pgEnum(
+  "customer_directory_ingestion_outcome",
+  ["updated", "unchanged"],
 );
 
 export const customerRestrictionTargetType = pgEnum(
@@ -1148,6 +1177,7 @@ export const modelProviderRevisions = pgTable(
     displayName: text("display_name").notNull(),
     adapterKind: modelProviderAdapterKind("adapter_kind").notNull(),
     baseUrl: text("base_url"),
+    healthProbe: jsonb("health_probe").$type<PlatformHttpHealthProbe>(),
     credentialReferenceId: uuid("credential_reference_id").references(
       () => platformSecretReferences.id,
       { onDelete: "restrict" },
@@ -1196,6 +1226,10 @@ export const modelProviderRevisions = pgTable(
     check(
       "model_provider_revisions_base_url_https",
       sql`${table.baseUrl} IS NULL OR ${table.baseUrl} ~ '^https://[^[:space:]@]+$'`,
+    ),
+    check(
+      "model_provider_revisions_health_probe_valid",
+      sql`${table.healthProbe} IS NULL OR platform_http_health_probe_valid(${table.healthProbe})`,
     ),
   ],
 );
@@ -1310,9 +1344,10 @@ export const modelProviderHealthObservations = pgTable(
     latencyMs: integer("latency_ms"),
     httpStatusCode: integer("http_status_code"),
     errorCode: text("error_code"),
-    recordedByOperatorId: uuid("recorded_by_operator_id")
-      .notNull()
-      .references(() => operators.id, { onDelete: "restrict" }),
+    recordedByOperatorId: uuid("recorded_by_operator_id").references(
+      () => operators.id,
+      { onDelete: "restrict" },
+    ),
     reason: text("reason").notNull(),
     correlationId: uuid("correlation_id").notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
@@ -1349,6 +1384,10 @@ export const modelProviderHealthObservations = pgTable(
     check(
       "model_provider_health_expiry_after_observation",
       sql`${table.expiresAt} > ${table.observedAt}`,
+    ),
+    check(
+      "model_provider_health_source_actor_consistent",
+      sql`(${table.source}::text = 'operator_probe' AND ${table.recordedByOperatorId} IS NOT NULL) OR (${table.source}::text = 'scheduled_probe' AND ${table.recordedByOperatorId} IS NULL)`,
     ),
   ],
 );
@@ -1403,6 +1442,7 @@ export const platformIntegrationRevisions = pgTable(
     adapterPackage: text("adapter_package").notNull(),
     adapterVersion: text("adapter_version").notNull(),
     documentationUrl: text("documentation_url"),
+    healthProbe: jsonb("health_probe").$type<PlatformHttpHealthProbe>(),
     authorizationUrl: text("authorization_url"),
     tokenUrl: text("token_url"),
     clientId: text("client_id"),
@@ -1490,6 +1530,10 @@ export const platformIntegrationRevisions = pgTable(
       "platform_integration_revisions_maintenance_metadata",
       sql`(${table.operationalState} = 'maintenance' AND ${table.maintenanceExpiresAt} IS NOT NULL) OR (${table.operationalState} <> 'maintenance' AND ${table.maintenanceExpiresAt} IS NULL)`,
     ),
+    check(
+      "platform_integration_revisions_health_probe_valid",
+      sql`${table.healthProbe} IS NULL OR platform_http_health_probe_valid(${table.healthProbe})`,
+    ),
   ],
 );
 
@@ -1505,9 +1549,10 @@ export const platformIntegrationHealthObservations = pgTable(
     latencyMs: integer("latency_ms"),
     httpStatusCode: integer("http_status_code"),
     errorCode: text("error_code"),
-    recordedByOperatorId: uuid("recorded_by_operator_id")
-      .notNull()
-      .references(() => operators.id, { onDelete: "restrict" }),
+    recordedByOperatorId: uuid("recorded_by_operator_id").references(
+      () => operators.id,
+      { onDelete: "restrict" },
+    ),
     reason: text("reason").notNull(),
     correlationId: uuid("correlation_id").notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
@@ -1544,6 +1589,109 @@ export const platformIntegrationHealthObservations = pgTable(
     check(
       "platform_integration_health_expiry_after_observation",
       sql`${table.expiresAt} > ${table.observedAt}`,
+    ),
+    check(
+      "platform_integration_health_source_actor_consistent",
+      sql`(${table.source}::text = 'operator_probe' AND ${table.recordedByOperatorId} IS NOT NULL) OR (${table.source}::text = 'scheduled_probe' AND ${table.recordedByOperatorId} IS NULL)`,
+    ),
+  ],
+);
+
+export const platformHealthProbeJobs = pgTable(
+  "platform_health_probe_jobs",
+  {
+    id: uuid("id").primaryKey(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    providerId: uuid("provider_id").references(() => modelProviders.id, {
+      onDelete: "restrict",
+    }),
+    integrationId: uuid("integration_id").references(
+      () => platformIntegrations.id,
+      { onDelete: "restrict" },
+    ),
+    targetRevisionNumber: integer("target_revision_number").notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    probe: jsonb("probe").$type<PlatformHttpHealthProbe>().notNull(),
+    state: text("state")
+      .$type<"pending" | "leased" | "completed" | "superseded">()
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    completionReason: text("completion_reason").$type<
+      "observation_recorded" | "target_revision_changed" | "retry_exhausted"
+    >(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("platform_health_probe_jobs_provider_window_unique")
+      .on(
+        table.environment,
+        table.providerId,
+        table.targetRevisionNumber,
+        table.scheduledFor,
+      )
+      .where(sql`${table.providerId} IS NOT NULL`),
+    uniqueIndex("platform_health_probe_jobs_integration_window_unique")
+      .on(
+        table.environment,
+        table.integrationId,
+        table.targetRevisionNumber,
+        table.scheduledFor,
+      )
+      .where(sql`${table.integrationId} IS NOT NULL`),
+    index("platform_health_probe_jobs_claim_idx").on(
+      table.environment,
+      table.state,
+      table.nextAttemptAt,
+      table.scheduledFor,
+    ),
+    index("platform_health_probe_jobs_retention_idx").on(
+      table.environment,
+      table.state,
+      table.completedAt,
+    ),
+    check(
+      "platform_health_probe_jobs_single_target",
+      sql`(${table.providerId} IS NOT NULL) <> (${table.integrationId} IS NOT NULL)`,
+    ),
+    check(
+      "platform_health_probe_jobs_revision_positive",
+      sql`${table.targetRevisionNumber} > 0`,
+    ),
+    check(
+      "platform_health_probe_jobs_attempts_bounds",
+      sql`${table.attempts} BETWEEN 0 AND 5`,
+    ),
+    check(
+      "platform_health_probe_jobs_state_valid",
+      sql`${table.state} IN ('pending', 'leased', 'completed', 'superseded')`,
+    ),
+    check(
+      "platform_health_probe_jobs_lease_consistent",
+      sql`(${table.state} = 'leased' AND ${table.leaseToken} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL AND ${table.completedAt} IS NULL) OR (${table.state} <> 'leased' AND ${table.leaseToken} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "platform_health_probe_jobs_completion_consistent",
+      sql`(${table.state} IN ('completed', 'superseded') AND ${table.completedAt} IS NOT NULL AND ${table.completionReason} IS NOT NULL) OR (${table.state} IN ('pending', 'leased') AND ${table.completedAt} IS NULL AND ${table.completionReason} IS NULL)`,
+    ),
+    check(
+      "platform_health_probe_jobs_completion_reason_valid",
+      sql`(${table.state} = 'completed' AND ${table.completionReason} = 'observation_recorded') OR (${table.state} = 'superseded' AND ${table.completionReason} IN ('target_revision_changed', 'retry_exhausted')) OR (${table.state} IN ('pending', 'leased') AND ${table.completionReason} IS NULL)`,
+    ),
+    check(
+      "platform_health_probe_jobs_contract_valid",
+      sql`platform_http_health_probe_valid(${table.probe})`,
     ),
   ],
 );
@@ -2026,6 +2174,8 @@ export const customerDirectorySources = pgTable(
     environment: platformConfigurationEnvironment("environment").notNull(),
     source: text("source").notNull(),
     sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    payloadSha256: text("payload_sha256"),
+    sourceWorkloadKeyId: text("source_workload_key_id"),
     observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
     synchronizedAt: timestamp("synchronized_at", { withTimezone: true })
       .notNull()
@@ -2043,6 +2193,64 @@ export const customerDirectorySources = pgTable(
     check(
       "customer_directory_sources_revision_positive",
       sql`${table.sourceRevision} > 0`,
+    ),
+    check(
+      "customer_directory_sources_provenance_shape",
+      sql`(${table.payloadSha256} IS NULL AND ${table.sourceWorkloadKeyId} IS NULL) OR (${table.payloadSha256} ~ '^[0-9a-f]{64}$' AND ${table.sourceWorkloadKeyId} ~ '^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$')`,
+    ),
+  ],
+);
+
+export const customerDirectorySnapshotIngestions = pgTable(
+  "customer_directory_snapshot_ingestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    resultSourceRevision: bigint("result_source_revision", {
+      mode: "bigint",
+    }).notNull(),
+    payloadSha256: text("payload_sha256").notNull(),
+    sourceWorkloadKeyId: text("source_workload_key_id").notNull(),
+    requestNonce: uuid("request_nonce").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    userCount: integer("user_count").notNull(),
+    workspaceCount: integer("workspace_count").notNull(),
+    membershipCount: integer("membership_count").notNull(),
+    outcome: customerDirectoryIngestionOutcome("outcome").notNull(),
+  },
+  (table) => [
+    uniqueIndex("customer_directory_ingestion_revision_unique").on(
+      table.environment,
+      table.sourceRevision,
+    ),
+    uniqueIndex("customer_directory_ingestion_nonce_unique").on(
+      table.environment,
+      table.sourceWorkloadKeyId,
+      table.requestNonce,
+    ),
+    index("customer_directory_ingestion_received_idx").on(
+      table.environment,
+      table.receivedAt,
+    ),
+    check(
+      "customer_directory_ingestion_revision_positive",
+      sql`${table.sourceRevision} > 0 AND ${table.resultSourceRevision} > 0`,
+    ),
+    check(
+      "customer_directory_ingestion_payload_sha256",
+      sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "customer_directory_ingestion_key_id_valid",
+      sql`${table.sourceWorkloadKeyId} ~ '^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$'`,
+    ),
+    check(
+      "customer_directory_ingestion_counts_nonnegative",
+      sql`${table.userCount} >= 0 AND ${table.workspaceCount} >= 0 AND ${table.membershipCount} >= 0`,
     ),
   ],
 );
@@ -2290,9 +2498,10 @@ export const customerAccessRestrictionObservations = pgTable(
     synchronizedAt: timestamp("synchronized_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
-    actorId: uuid("actor_id")
-      .notNull()
-      .references(() => operators.id, { onDelete: "restrict" }),
+    actorId: uuid("actor_id").references(() => operators.id, {
+      onDelete: "restrict",
+    }),
+    sourceWorkloadKeyId: text("source_workload_key_id"),
     correlationId: uuid("correlation_id").notNull(),
   },
   (table) => [
@@ -2319,6 +2528,10 @@ export const customerAccessRestrictionObservations = pgTable(
     check(
       "customer_access_restriction_observations_message_bounded",
       sql`${table.message} IS NULL OR length(btrim(${table.message})) BETWEEN 1 AND 500`,
+    ),
+    check(
+      "customer_access_restriction_observations_actor_shape",
+      sql`(${table.actorId} IS NOT NULL AND ${table.sourceWorkloadKeyId} IS NULL) OR (${table.actorId} IS NULL AND ${table.sourceWorkloadKeyId} ~ '^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,79}$')`,
     ),
   ],
 );
@@ -2509,9 +2722,10 @@ export const customerWorkspaceOwnershipTransferObservations = pgTable(
     synchronizedAt: timestamp("synchronized_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
-    actorId: uuid("actor_id")
-      .notNull()
-      .references(() => operators.id, { onDelete: "restrict" }),
+    actorId: uuid("actor_id").references(() => operators.id, {
+      onDelete: "restrict",
+    }),
+    sourceWorkloadKeyId: text("source_workload_key_id"),
     correlationId: uuid("correlation_id").notNull(),
   },
   (table) => [
@@ -2537,6 +2751,10 @@ export const customerWorkspaceOwnershipTransferObservations = pgTable(
     check(
       "customer_ownership_transfer_observations_message_bounded",
       sql`${table.message} IS NULL OR length(btrim(${table.message})) BETWEEN 1 AND 500`,
+    ),
+    check(
+      "customer_ownership_transfer_observations_actor_shape",
+      sql`(${table.actorId} IS NOT NULL AND ${table.sourceWorkloadKeyId} IS NULL) OR (${table.actorId} IS NULL AND ${table.sourceWorkloadKeyId} ~ '^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,79}$')`,
     ),
   ],
 );
@@ -2660,6 +2878,215 @@ export const platformCommandResults = pgTable(
   ],
 );
 
+export const arthCommandOutbox = pgTable(
+  "arth_command_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    commandId: uuid("command_id")
+      .notNull()
+      .references(() => platformCommands.id, { onDelete: "restrict" }),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    kind: text("kind").$type<ArthCommandPayload["kind"]>().notNull(),
+    aggregateId: uuid("aggregate_id").notNull(),
+    aggregateRevision: integer("aggregate_revision").notNull(),
+    payload: jsonb("payload").$type<ArthCommandPayload>().notNull(),
+    payloadSha256: text("payload_sha256").notNull(),
+    state: arthCommandDeliveryState("state").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    availableAt: timestamp("available_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    claimedByKeyId: text("claimed_by_key_id"),
+    acknowledgementFingerprint: text("acknowledgement_fingerprint"),
+    acknowledgedSourceRevision: bigint("acknowledged_source_revision", {
+      mode: "bigint",
+    }),
+    observedAt: timestamp("observed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("arth_command_outbox_command_unique").on(table.commandId),
+    uniqueIndex("arth_command_outbox_aggregate_revision_unique").on(
+      table.kind,
+      table.aggregateId,
+      table.aggregateRevision,
+    ),
+    index("arth_command_outbox_claim_idx").on(
+      table.environment,
+      table.state,
+      table.availableAt,
+      table.createdAt,
+    ),
+    index("arth_command_outbox_lease_idx").on(
+      table.state,
+      table.leaseExpiresAt,
+    ),
+    check(
+      "arth_command_outbox_revision_positive",
+      sql`${table.aggregateRevision} > 0`,
+    ),
+    check(
+      "arth_command_outbox_kind",
+      sql`${table.kind} IN ('customer_restriction', 'workspace_ownership_transfer', 'model_routing_control', 'platform_integration_control', 'platform_adapter_release_control')`,
+    ),
+    check(
+      "arth_command_outbox_payload_object",
+      sql`jsonb_typeof(${table.payload}) = 'object'`,
+    ),
+    check(
+      "arth_command_outbox_payload_sha256",
+      sql`${table.payloadSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "arth_command_outbox_payload_identity",
+      sql`${table.payload}->>'kind' = ${table.kind}::text AND ${table.payload}->>'revisionNumber' ~ '^[1-9][0-9]*$' AND (${table.payload}->>'revisionNumber')::integer = ${table.aggregateRevision} AND ((${table.kind} = 'customer_restriction' AND ${table.payload}->>'restrictionId' = ${table.aggregateId}::text) OR (${table.kind} = 'workspace_ownership_transfer' AND ${table.payload}->>'transferId' = ${table.aggregateId}::text) OR (${table.kind} = 'model_routing_control' AND ${table.payload}->>'controlId' = ${table.aggregateId}::text) OR (${table.kind} = 'platform_integration_control' AND ${table.payload}->>'integrationId' = ${table.aggregateId}::text) OR (${table.kind} = 'platform_adapter_release_control' AND ${table.payload}->>'releaseId' = ${table.aggregateId}::text))`,
+    ),
+    check(
+      "arth_command_outbox_attempts_bounded",
+      sql`${table.attempts} BETWEEN 0 AND 10`,
+    ),
+    check(
+      "arth_command_outbox_expiry_valid",
+      sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + interval '8 days'`,
+    ),
+    check(
+      "arth_command_outbox_lease_shape",
+      sql`(${table.state} = 'leased' AND ${table.leaseToken} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL AND ${table.claimedByKeyId} IS NOT NULL) OR (${table.state} <> 'leased' AND ${table.leaseToken} IS NULL AND ${table.leaseExpiresAt} IS NULL AND ${table.claimedByKeyId} IS NULL)`,
+    ),
+    check(
+      "arth_command_outbox_completion_shape",
+      sql`(${table.state} IN ('applied', 'rejected') AND ${table.acknowledgementFingerprint} IS NOT NULL AND ${table.acknowledgedSourceRevision} IS NOT NULL AND ${table.observedAt} IS NOT NULL AND ${table.completedAt} IS NOT NULL) OR (${table.state} NOT IN ('applied', 'rejected') AND ${table.acknowledgementFingerprint} IS NULL AND ${table.acknowledgedSourceRevision} IS NULL AND ${table.observedAt} IS NULL AND ${table.completedAt} IS NULL)`,
+    ),
+    check(
+      "arth_command_outbox_ack_fingerprint_sha256",
+      sql`${table.acknowledgementFingerprint} IS NULL OR ${table.acknowledgementFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "arth_command_outbox_source_revision_positive",
+      sql`${table.acknowledgedSourceRevision} IS NULL OR ${table.acknowledgedSourceRevision} > 0`,
+    ),
+    check(
+      "arth_command_outbox_error_bounded",
+      sql`${table.lastErrorCode} IS NULL OR ${table.lastErrorCode} ~ '^[a-z][a-z0-9_]{2,79}$'`,
+    ),
+  ],
+);
+
+export const arthWorkloadRequestNonces = pgTable(
+  "arth_workload_request_nonces",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    keyId: text("key_id").notNull(),
+    nonce: uuid("nonce").notNull(),
+    requestTimestamp: timestamp("request_timestamp", {
+      withTimezone: true,
+    }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("arth_workload_request_nonce_unique").on(
+      table.environment,
+      table.keyId,
+      table.nonce,
+    ),
+    index("arth_workload_request_nonce_expiry_idx").on(table.expiresAt),
+    check(
+      "arth_workload_request_key_id_valid",
+      sql`${table.keyId} ~ '^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,79}$'`,
+    ),
+    check(
+      "arth_workload_request_nonce_expiry_valid",
+      sql`${table.expiresAt} > ${table.receivedAt} AND ${table.expiresAt} <= ${table.receivedAt} + interval '6 minutes'`,
+    ),
+  ],
+);
+
+export const operationalRetentionRuns = pgTable(
+  "operational_retention_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    state: text("state")
+      .$type<"pending" | "running" | "completed" | "failed">()
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    counts: jsonb("counts").$type<OperationalRetentionCounts>(),
+    batchLimitReached: boolean("batch_limit_reached"),
+    errorCode: text("error_code"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operational_retention_runs_window_unique").on(
+      table.environment,
+      table.scheduledFor,
+    ),
+    index("operational_retention_runs_due_idx").on(
+      table.environment,
+      table.state,
+      table.nextAttemptAt,
+    ),
+    index("operational_retention_runs_history_idx").on(
+      table.environment,
+      table.scheduledFor,
+    ),
+    check(
+      "operational_retention_runs_hour_window",
+      sql`${table.scheduledFor} = date_trunc('hour', ${table.scheduledFor})`,
+    ),
+    check(
+      "operational_retention_runs_attempts_bounded",
+      sql`${table.attempts} BETWEEN 0 AND 5`,
+    ),
+    check(
+      "operational_retention_runs_lease_shape",
+      sql`(${table.state} = 'running' AND ${table.leaseToken} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL) OR (${table.state} <> 'running' AND ${table.leaseToken} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "operational_retention_runs_completion_shape",
+      sql`(${table.state} = 'completed' AND ${table.counts} IS NOT NULL AND ${table.batchLimitReached} IS NOT NULL AND ${table.errorCode} IS NULL AND ${table.completedAt} IS NOT NULL) OR (${table.state} = 'failed' AND ${table.counts} IS NULL AND ${table.batchLimitReached} IS NULL AND ${table.errorCode} IS NOT NULL AND ${table.completedAt} IS NOT NULL) OR (${table.state} IN ('pending','running') AND ${table.counts} IS NULL AND ${table.batchLimitReached} IS NULL AND ${table.errorCode} IS NULL AND ${table.completedAt} IS NULL)`,
+    ),
+    check(
+      "operational_retention_runs_error_code_valid",
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} ~ '^[a-z][a-z0-9_]{2,79}$'`,
+    ),
+    check(
+      "operational_retention_runs_completion_time_valid",
+      sql`${table.completedAt} IS NULL OR ${table.completedAt} >= ${table.scheduledFor}`,
+    ),
+    check(
+      "operational_retention_runs_counts_valid",
+      sql`${table.counts} IS NULL OR (jsonb_typeof(${table.counts}) = 'object' AND jsonb_typeof(${table.counts}->'workload_request_nonces') = 'number' AND (${table.counts}->>'workload_request_nonces')::integer BETWEEN 0 AND 1000 AND jsonb_typeof(${table.counts}->'health_probe_jobs') = 'number' AND (${table.counts}->>'health_probe_jobs')::integer BETWEEN 0 AND 1000 AND jsonb_typeof(${table.counts}->'transactional_email_provider_events') = 'number' AND (${table.counts}->>'transactional_email_provider_events')::integer BETWEEN 0 AND 1000 AND jsonb_typeof(${table.counts}->'verification_email_deliveries') = 'number' AND (${table.counts}->>'verification_email_deliveries')::integer BETWEEN 0 AND 1000 AND jsonb_typeof(${table.counts}->'operational_alert_deliveries') = 'number' AND (${table.counts}->>'operational_alert_deliveries')::integer BETWEEN 0 AND 1000 AND jsonb_typeof(${table.counts}->'operational_alert_occurrences') = 'number' AND (${table.counts}->>'operational_alert_occurrences')::integer BETWEEN 0 AND 1000 AND jsonb_typeof(${table.counts}->'model_health_observations') = 'number' AND (${table.counts}->>'model_health_observations')::integer BETWEEN 0 AND 1000 AND jsonb_typeof(${table.counts}->'integration_health_observations') = 'number' AND (${table.counts}->>'integration_health_observations')::integer BETWEEN 0 AND 1000)`,
+    ),
+  ],
+);
+
 export const auditEvents = pgTable(
   "audit_events",
   {
@@ -2690,5 +3117,422 @@ export const auditEvents = pgTable(
       .where(sql`${table.commandId} IS NOT NULL`),
     index("audit_events_correlation_idx").on(table.correlationId),
     index("audit_events_occurred_at_idx").on(table.occurredAt),
+  ],
+);
+
+export const verificationEmailDeliveries = pgTable(
+  "verification_email_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    // No FK to auth.verification: authentication consumes/deletes the challenge.
+    verificationId: text("verification_id").notNull(),
+    encryptedPayload: text("encrypted_payload"),
+    state: text("state")
+      .$type<VerificationDeliveryState>()
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    correlationId: uuid("correlation_id").notNull(),
+    providerMessageId: text("provider_message_id"),
+    recipientFingerprint: text("recipient_fingerprint").notNull(),
+    templateVersion: text("template_version")
+      .$type<TransactionalEmailTemplateVersion>()
+      .notNull()
+      .default("v1"),
+    templateLocale: text("template_locale")
+      .$type<TransactionalEmailLocale>()
+      .notNull()
+      .default("en"),
+    reason: text("reason").notNull().default("queued"),
+  },
+  (table) => [
+    uniqueIndex("verification_email_delivery_challenge_unique").on(
+      table.environment,
+      table.verificationId,
+    ),
+    index("verification_email_delivery_due_idx").on(
+      table.environment,
+      table.state,
+      table.nextAttemptAt,
+    ),
+    index("verification_email_delivery_expiry_idx").on(
+      table.environment,
+      table.expiresAt,
+    ),
+    index("verification_email_delivery_history_idx").on(
+      table.environment,
+      table.createdAt,
+      table.id,
+    ),
+    index("verification_email_delivery_health_idx").on(
+      table.environment,
+      table.state,
+      table.updatedAt,
+    ),
+    uniqueIndex("verification_email_delivery_provider_message_unique")
+      .on(table.environment, table.providerMessageId)
+      .where(sql`${table.providerMessageId} IS NOT NULL`),
+    check(
+      "verification_email_delivery_state",
+      sql`${table.state} IN ('pending','leased','accepted','delivered','bounced','complained','expired','cancelled','dead_letter')`,
+    ),
+    check(
+      "verification_email_delivery_attempts",
+      sql`${table.attempts} BETWEEN 0 AND 5`,
+    ),
+    // The original auth deadline is immutable; allow one minute of app/DB clock skew on insertion.
+    check(
+      "verification_email_delivery_expiry",
+      sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + interval '11 minutes'`,
+    ),
+    check(
+      "verification_email_delivery_lease",
+      sql`(${table.state} = 'leased' AND ${table.leaseToken} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL) OR (${table.state} <> 'leased' AND ${table.leaseToken} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "verification_email_delivery_payload",
+      sql`(${table.state} IN ('pending','leased')) = (${table.encryptedPayload} IS NOT NULL)`,
+    ),
+    check(
+      "verification_email_delivery_receipt",
+      sql`(${table.state} IN ('accepted','delivered','bounced','complained')) = (${table.providerMessageId} IS NOT NULL)`,
+    ),
+    check(
+      "verification_email_delivery_communication_identity",
+      sql`length(${table.recipientFingerprint}) BETWEEN 6 AND 128 AND ${table.templateVersion} IN ('v1','v2') AND ${table.templateLocale} IN ('en','hi')`,
+    ),
+  ],
+);
+
+export const platformApprovals = pgTable(
+  "platform_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    requesterId: uuid("requester_id")
+      .notNull()
+      .references(() => operators.id),
+    scope: jsonb("scope").$type<PlatformApprovalScope>().notNull(),
+    scopeIdentity: text("scope_identity").notNull(),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    status: text("status")
+      .$type<"pending" | "approved" | "rejected" | "revoked" | "consumed">()
+      .notNull()
+      .default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    decidedBy: uuid("decided_by").references(() => operators.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionReason: text("decision_reason"),
+    revokedBy: uuid("revoked_by").references(() => operators.id),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedReason: text("revoked_reason"),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    consumedCorrelationId: uuid("consumed_correlation_id"),
+  },
+  (table) => [
+    index("platform_approvals_environment_created_idx").on(
+      table.environment,
+      table.createdAt,
+      table.id,
+    ),
+    index("platform_approvals_requester_idx").on(
+      table.requesterId,
+      table.createdAt,
+    ),
+    check(
+      "platform_approvals_expiry",
+      sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + interval '30 minutes'`,
+    ),
+    check(
+      "platform_approvals_status",
+      sql`${table.status} IN ('pending', 'approved', 'rejected', 'revoked', 'consumed')`,
+    ),
+    check(
+      "platform_approvals_independent",
+      sql`${table.decidedBy} IS NULL OR ${table.decidedBy} <> ${table.requesterId}`,
+    ),
+    check(
+      "platform_approvals_decision_evidence",
+      sql`${table.status} NOT IN ('approved', 'rejected', 'consumed') OR (${table.decidedBy} IS NOT NULL AND ${table.decidedAt} IS NOT NULL AND ${table.decisionReason} IS NOT NULL)`,
+    ),
+    check(
+      "platform_approvals_consumption_evidence",
+      sql`(${table.status} = 'consumed') = (${table.consumedAt} IS NOT NULL AND ${table.consumedCorrelationId} IS NOT NULL)`,
+    ),
+    check(
+      "platform_approvals_revocation_evidence",
+      sql`${table.status} <> 'revoked' OR (${table.revokedBy} IS NOT NULL AND ${table.revokedAt} IS NOT NULL AND ${table.revokedReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const operationalAlertOccurrences = pgTable(
+  "operational_alert_occurrences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    alertKey: text("alert_key").notNull(),
+    source: text("source").notNull(),
+    code: text("code").notNull(),
+    severity: text("severity").$type<"critical" | "warning">().notNull(),
+    affectedCount: integer("affected_count"),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    nextStep: text("next_step").notNull(),
+    status: text("status")
+      .$type<"open" | "resolved">()
+      .notNull()
+      .default("open"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operational_alert_occurrences_open_unique")
+      .on(table.environment, table.alertKey)
+      .where(sql`${table.resolvedAt} IS NULL`),
+    index("operational_alert_occurrences_history_idx").on(
+      table.environment,
+      table.firstSeenAt,
+      table.id,
+    ),
+    index("operational_alert_occurrences_retention_idx").on(
+      table.environment,
+      table.status,
+      table.resolvedAt,
+    ),
+    check(
+      "operational_alert_occurrences_status",
+      sql`${table.status} IN ('open','resolved')`,
+    ),
+    check(
+      "operational_alert_occurrences_severity",
+      sql`${table.severity} IN ('critical','warning')`,
+    ),
+    check(
+      "operational_alert_occurrences_identity",
+      sql`length(${table.alertKey}) BETWEEN 3 AND 240 AND length(${table.source}) BETWEEN 1 AND 64 AND length(${table.code}) BETWEEN 1 AND 64`,
+    ),
+    check(
+      "operational_alert_occurrences_content",
+      sql`length(${table.title}) BETWEEN 1 AND 200 AND length(${table.description}) BETWEEN 1 AND 1000 AND length(${table.nextStep}) BETWEEN 1 AND 1000`,
+    ),
+    check(
+      "operational_alert_occurrences_count",
+      sql`${table.affectedCount} IS NULL OR ${table.affectedCount} >= 0`,
+    ),
+    check(
+      "operational_alert_occurrences_times",
+      sql`${table.lastSeenAt} >= ${table.firstSeenAt} AND ((${table.status} = 'open' AND ${table.resolvedAt} IS NULL) OR (${table.status} = 'resolved' AND ${table.resolvedAt} IS NOT NULL AND ${table.resolvedAt} >= ${table.lastSeenAt}))`,
+    ),
+  ],
+);
+
+export const operationalAlertDeliveries = pgTable(
+  "operational_alert_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    occurrenceId: uuid("occurrence_id")
+      .notNull()
+      .references(() => operationalAlertOccurrences.id, {
+        onDelete: "restrict",
+      }),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    kind: text("kind").$type<AlertDeliveryKind>().notNull(),
+    state: text("state")
+      .$type<OperationalAlertDeliveryState>()
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    providerMessageId: text("provider_message_id"),
+    recipientFingerprint: text("recipient_fingerprint").notNull(),
+    templateVersion: text("template_version")
+      .$type<TransactionalEmailTemplateVersion>()
+      .notNull()
+      .default("v1"),
+    templateLocale: text("template_locale")
+      .$type<TransactionalEmailLocale>()
+      .notNull()
+      .default("en"),
+    reason: text("reason").notNull().default("queued"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operational_alert_deliveries_transition_unique").on(
+      table.occurrenceId,
+      table.kind,
+    ),
+    index("operational_alert_deliveries_due_idx").on(
+      table.environment,
+      table.state,
+      table.nextAttemptAt,
+    ),
+    index("operational_alert_deliveries_history_idx").on(
+      table.environment,
+      table.createdAt,
+      table.id,
+    ),
+    uniqueIndex("operational_alert_deliveries_provider_message_unique")
+      .on(table.environment, table.providerMessageId)
+      .where(sql`${table.providerMessageId} IS NOT NULL`),
+    check(
+      "operational_alert_deliveries_kind",
+      sql`${table.kind} IN ('triggered','resolved')`,
+    ),
+    check(
+      "operational_alert_deliveries_state",
+      sql`${table.state} IN ('pending','leased','accepted','delivered','bounced','complained','dead_letter')`,
+    ),
+    check(
+      "operational_alert_deliveries_attempts",
+      sql`${table.attempts} BETWEEN 0 AND 8`,
+    ),
+    check(
+      "operational_alert_deliveries_lease",
+      sql`(${table.state} = 'leased' AND ${table.leaseToken} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL) OR (${table.state} <> 'leased' AND ${table.leaseToken} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "operational_alert_deliveries_receipt",
+      sql`(${table.state} IN ('accepted','delivered','bounced','complained')) = (${table.providerMessageId} IS NOT NULL)`,
+    ),
+    check(
+      "operational_alert_deliveries_communication_identity",
+      sql`length(${table.recipientFingerprint}) BETWEEN 6 AND 128 AND ${table.templateVersion} IN ('v1','v2') AND ${table.templateLocale} IN ('en','hi')`,
+    ),
+  ],
+);
+
+export const transactionalEmailProviderEvents = pgTable(
+  "transactional_email_provider_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    provider: text("provider").notNull().default("resend"),
+    providerEventId: text("provider_event_id").notNull(),
+    providerMessageId: text("provider_message_id").notNull(),
+    eventType: text("event_type").$type<ResendEmailEventType>().notNull(),
+    verificationDeliveryId: uuid("verification_delivery_id").references(
+      () => verificationEmailDeliveries.id,
+      { onDelete: "restrict" },
+    ),
+    operationalAlertDeliveryId: uuid(
+      "operational_alert_delivery_id",
+    ).references(() => operationalAlertDeliveries.id, { onDelete: "restrict" }),
+    payloadDigest: text("payload_digest").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("transactional_email_provider_events_identity_unique").on(
+      table.provider,
+      table.providerEventId,
+    ),
+    index("transactional_email_provider_events_message_idx").on(
+      table.environment,
+      table.providerMessageId,
+      table.occurredAt,
+    ),
+    index("transactional_email_provider_events_history_idx").on(
+      table.environment,
+      table.receivedAt,
+      table.id,
+    ),
+    check(
+      "transactional_email_provider_events_type_valid",
+      sql`${table.eventType} IN ('email.sent','email.delivered','email.delivery_delayed','email.failed','email.bounced','email.complained','email.suppressed')`,
+    ),
+    check(
+      "transactional_email_provider_events_target_valid",
+      sql`NOT (${table.verificationDeliveryId} IS NOT NULL AND ${table.operationalAlertDeliveryId} IS NOT NULL)`,
+    ),
+    check(
+      "transactional_email_provider_events_digest_valid",
+      sql`${table.payloadDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+export const transactionalEmailRecipientSuppressions = pgTable(
+  "transactional_email_recipient_suppressions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    recipientFingerprint: text("recipient_fingerprint").notNull(),
+    reason: text("reason")
+      .$type<"bounced" | "complained" | "failed" | "suppressed">()
+      .notNull(),
+    sourceEventId: uuid("source_event_id")
+      .notNull()
+      .references(() => transactionalEmailProviderEvents.id, {
+        onDelete: "restrict",
+      }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    liftedAt: timestamp("lifted_at", { withTimezone: true }),
+    liftedByOperatorId: uuid("lifted_by_operator_id").references(
+      () => operators.id,
+      { onDelete: "restrict" },
+    ),
+    liftReason: text("lift_reason"),
+    liftCorrelationId: uuid("lift_correlation_id"),
+  },
+  (table) => [
+    uniqueIndex("transactional_email_recipient_suppressions_identity_unique")
+      .on(table.environment, table.recipientFingerprint)
+      .where(sql`${table.liftedAt} IS NULL`),
+    index("transactional_email_recipient_suppressions_source_idx").on(
+      table.sourceEventId,
+    ),
+    check(
+      "transactional_email_recipient_suppressions_reason_valid",
+      sql`${table.reason} IN ('bounced','complained','failed','suppressed')`,
+    ),
+    check(
+      "transactional_email_recipient_suppressions_fingerprint_valid",
+      sql`length(${table.recipientFingerprint}) BETWEEN 6 AND 128`,
+    ),
+    check(
+      "transactional_email_recipient_suppressions_lifecycle_valid",
+      sql`(${table.liftedAt} IS NULL AND ${table.liftedByOperatorId} IS NULL AND ${table.liftReason} IS NULL AND ${table.liftCorrelationId} IS NULL) OR (${table.liftedAt} IS NOT NULL AND ${table.liftedByOperatorId} IS NOT NULL AND length(${table.liftReason}) BETWEEN 8 AND 500 AND ${table.liftCorrelationId} IS NOT NULL AND ${table.liftedAt} >= ${table.createdAt})`,
+    ),
   ],
 );

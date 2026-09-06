@@ -9,14 +9,16 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "migration:check": "drizzle-kit check --config drizzle.config.ts",
+    "migration:check": "drizzle-kit check --config drizzle.config.ts && tsx src/verify-readiness-head.ts",
     "migration:generate": "drizzle-kit generate --config drizzle.config.ts",
     "migration:verify": "tsx src/verify-migration.ts",
     "migrate": "tsx src/migrate.ts",
     "test": "vitest run",
+    "test:integration": "tsx src/run-integration-tests.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@atharvan/email": "workspace:*",
     "@atharvan/adapters": "workspace:*",
     "@atharvan/auth": "workspace:*",
     "@atharvan/commands": "workspace:*",
@@ -32,6 +34,7 @@
     "pg": "8.23.0"
   },
   "devDependencies": {
+    "@types/node": "24.13.3",
     "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.10",
     "tsx": "4.23.12",

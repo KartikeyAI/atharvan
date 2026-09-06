@@ -287,6 +287,26 @@ describe("Better Auth passkey policy", () => {
 });
 
 describe("Better Auth operator login", () => {
+  it.each([
+    "/list-sessions",
+    "/revoke-session",
+    "/revoke-sessions",
+    "/revoke-other-sessions",
+  ])(
+    "disables the native %s path so session controls cannot bypass audit",
+    async (path) => {
+      const auth = createTestAuth(
+        createSessionPolicyStore(true),
+        createEmailSender(),
+      );
+      const response = await auth.handler(
+        path === "/list-sessions"
+          ? new Request(`https://auth.atharvan.example/api/auth${path}`)
+          : authRequest(path, { token: "never-exposed" }),
+      );
+      expect(response.status).toBe(404);
+    },
+  );
   it("does not issue an OTP or create a user outside onboarding policy", async () => {
     const emailSender = createEmailSender();
     const policyStore = createSessionPolicyStore(false);

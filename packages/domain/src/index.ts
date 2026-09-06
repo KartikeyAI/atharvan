@@ -11,20 +11,8 @@ export interface AuthenticatedOperator {
   readonly breakGlassGrantIds?: ReadonlyArray<string>;
 }
 
-export type PlatformHealthStatus =
-  "healthy" | "degraded" | "action-required" | "unknown";
-
-export interface PlatformOverview {
-  readonly status: PlatformHealthStatus;
-  readonly observedAt: string | null;
-  readonly evidence: ReadonlyArray<never>;
-}
-
-export const unknownPlatformOverview: PlatformOverview = Object.freeze({
-  status: "unknown",
-  observedAt: null,
-  evidence: [],
-});
+export * from "./platform-overview";
+export * from "./operational-alerts";
 
 export function isCustomerPrivateCapability(capability: string): boolean {
   return capability.startsWith(customerPrivateCapabilityPrefix);
@@ -128,12 +116,19 @@ export function assertDelegableOperatorCapabilities(
 
 export * from "./operator-onboarding";
 export * from "./operator-authentication";
+export * from "./operator-sessions";
+export * from "./operator-lifecycle";
+export * from "./email-delivery";
+export * from "./operational-retention";
+export * from "./arth-command-delivery";
+export * from "./platform-approvals";
 export * from "./customer-directory";
 export * from "./platform-administration";
 export * from "./platform-adapters";
 export * from "./platform-audit";
 export * from "./platform-configuration";
 export * from "./platform-feature-flags";
+export * from "./platform-health";
 export * from "./platform-integrations";
 export * from "./platform-model-routing";
 export * from "./platform-models";

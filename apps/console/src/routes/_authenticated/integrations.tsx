@@ -161,6 +161,11 @@ function IntegrationEditor({
   const [adapterPackage, setAdapterPackage] = useState("@arth/");
   const [adapterVersion, setAdapterVersion] = useState("1.0.0");
   const [documentationUrl, setDocumentationUrl] = useState("");
+  const [probeUrl, setProbeUrl] = useState("");
+  const [probeMethod, setProbeMethod] = useState<"GET" | "HEAD">("GET");
+  const [probeStatuses, setProbeStatuses] = useState("200");
+  const [probeTimeoutMs, setProbeTimeoutMs] = useState("5000");
+  const [probeIntervalSeconds, setProbeIntervalSeconds] = useState("300");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
   const [tokenUrl, setTokenUrl] = useState("");
   const [clientId, setClientId] = useState("");
@@ -203,6 +208,16 @@ function IntegrationEditor({
           adapterPackage,
           adapterVersion,
           documentationUrl: emptyToNull(documentationUrl),
+          healthProbe:
+            probeUrl.trim() === ""
+              ? null
+              : {
+                  url: probeUrl,
+                  method: probeMethod,
+                  expectedStatusCodes: parseList(probeStatuses).map(Number),
+                  timeoutMs: Number(probeTimeoutMs),
+                  intervalSeconds: Number(probeIntervalSeconds),
+                },
           authorizationUrl: oauth ? emptyToNull(authorizationUrl) : null,
           tokenUrl: oauth ? emptyToNull(tokenUrl) : null,
           clientId: oauth ? emptyToNull(clientId) : null,
@@ -365,6 +380,84 @@ function IntegrationEditor({
                 value={documentationUrl}
               />
             </Field>
+            <Field className="field-span">
+              <FieldLabel htmlFor="integration-probe-url">
+                Automated health probe URL
+              </FieldLabel>
+              <Input
+                id="integration-probe-url"
+                onChange={(event) => setProbeUrl(event.target.value)}
+                placeholder="https://api.example.com/health"
+                type="url"
+                value={probeUrl}
+              />
+              <FieldDescription>
+                Optional. Active, enabled integrations are probed automatically.
+              </FieldDescription>
+            </Field>
+            {probeUrl.trim() !== "" ? (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="integration-probe-method">
+                    Method
+                  </FieldLabel>
+                  <select
+                    className="input"
+                    id="integration-probe-method"
+                    onChange={(event) =>
+                      setProbeMethod(event.target.value as "GET" | "HEAD")
+                    }
+                    value={probeMethod}
+                  >
+                    <option value="GET">GET</option>
+                    <option value="HEAD">HEAD</option>
+                  </select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="integration-probe-statuses">
+                    Healthy status codes
+                  </FieldLabel>
+                  <Input
+                    id="integration-probe-statuses"
+                    onChange={(event) => setProbeStatuses(event.target.value)}
+                    placeholder="200, 204"
+                    required
+                    value={probeStatuses}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="integration-probe-timeout">
+                    Timeout (ms)
+                  </FieldLabel>
+                  <Input
+                    id="integration-probe-timeout"
+                    max={10000}
+                    min={500}
+                    onChange={(event) => setProbeTimeoutMs(event.target.value)}
+                    required
+                    type="number"
+                    value={probeTimeoutMs}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="integration-probe-interval">
+                    Interval (seconds)
+                  </FieldLabel>
+                  <Input
+                    id="integration-probe-interval"
+                    max={3600}
+                    min={60}
+                    onChange={(event) =>
+                      setProbeIntervalSeconds(event.target.value)
+                    }
+                    required
+                    step={60}
+                    type="number"
+                    value={probeIntervalSeconds}
+                  />
+                </Field>
+              </>
+            ) : null}
             {protocol === "oauth2" ? (
               <>
                 <Field>
@@ -658,6 +751,30 @@ function IntegrationCard({
               <Badge variant={healthVariant(integration.health.state)}>
                 {integration.health.state}
               </Badge>
+            </dd>
+          </div>
+          <div>
+            <dt>Automated probe</dt>
+            <dd>
+              {integration.healthProbe
+                ? `Every ${integration.healthProbe.intervalSeconds / 60} min`
+                : "Disabled"}
+            </dd>
+          </div>
+          <div>
+            <dt>Health evidence</dt>
+            <dd>
+              {integration.health.observedAt
+                ? `${integration.health.source?.replaceAll("_", " ")} · ${new Date(integration.health.observedAt).toLocaleString()}`
+                : "Never observed"}
+            </dd>
+          </div>
+          <div>
+            <dt>Probe response</dt>
+            <dd>
+              {integration.health.httpStatusCode === null
+                ? (integration.health.errorCode?.replaceAll("_", " ") ?? "None")
+                : `${integration.health.httpStatusCode} · ${integration.health.latencyMs ?? 0} ms`}
             </dd>
           </div>
           <div>

@@ -1,4 +1,5 @@
 import type { PlatformAdministrationReader } from "@atharvan/domain";
+import { isOperatorEmailDomainAllowed } from "@atharvan/domain";
 import { asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
@@ -19,7 +20,7 @@ export function createPostgresPlatformAdministrationReader(
 ): PlatformAdministrationReader {
   return {
     async listOperators() {
-      const [operatorRows, invitationRows, roleAssignmentRows] =
+      const [operatorRows, invitationRows, roleAssignmentRows, domainRows] =
         await Promise.all([
           database
             .select({
@@ -64,6 +65,10 @@ export function createPostgresPlatformAdministrationReader(
             )
             .where(isNull(operatorRoleAssignments.revokedAt))
             .orderBy(asc(operatorRoleDefinitions.name)),
+          database
+            .select()
+            .from(allowedEmailDomains)
+            .where(eq(allowedEmailDomains.isActive, true)),
         ]);
       const latestInvitationByOperator = new Map<
         string,
@@ -97,6 +102,10 @@ export function createPostgresPlatformAdministrationReader(
           id: operator.id,
           email: operator.email,
           emailDomain: operator.emailDomain,
+          membershipDomainAllowed: isOperatorEmailDomainAllowed(
+            operator.email,
+            domainRows,
+          ),
           status: operator.status,
           isSuperAdministrator: operator.isSuperAdministrator,
           effectiveCapabilities: operator.isSuperAdministrator

@@ -1,12 +1,20 @@
-import type { PlatformSecretLifecycleStore } from "@atharvan/secrets";
-import { and, desc, eq } from "drizzle-orm";
+import type {
+  PlatformSecretCommandReceipt,
+  PlatformSecretLifecycleStore,
+} from "@atharvan/secrets";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   auditEvents,
+  modelProviderRevisions,
+  modelProviders,
   operators,
+  platformIntegrationRevisions,
+  platformIntegrations,
   platformSecretReferences,
   platformSecretVersions,
 } from "./schema";
@@ -120,6 +128,55 @@ export function createPostgresPlatformSecretStore(
       });
     },
 
+    async beginProvisioningRetry(input) {
+      return database.transaction(async (transaction) => {
+        await requireActiveSuperAdministrator(transaction, input.actorId);
+        const [reference] = await transaction
+          .select({ providerName: platformSecretReferences.providerName })
+          .from(platformSecretReferences)
+          .where(
+            and(
+              eq(platformSecretReferences.id, input.referenceId),
+              eq(platformSecretReferences.status, "provisioning_failed"),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (reference === undefined) {
+          return {
+            outcome: "rejected",
+            reason: "secret_reference_not_recoverable",
+          } as const;
+        }
+        const [latest] = await transaction
+          .select({ versionNumber: platformSecretVersions.versionNumber })
+          .from(platformSecretVersions)
+          .where(eq(platformSecretVersions.referenceId, input.referenceId))
+          .orderBy(desc(platformSecretVersions.versionNumber))
+          .limit(1)
+          .for("update");
+        if (latest === undefined) throw new Error("secret_state_conflict");
+        await transaction.insert(platformSecretVersions).values({
+          id: input.versionId,
+          referenceId: input.referenceId,
+          versionNumber: latest.versionNumber + 1,
+          status: "pending",
+          createdByOperatorId: input.actorId,
+          reason: input.reason,
+          correlationId: input.correlationId,
+          createdAt: input.now,
+        });
+        await transaction
+          .update(platformSecretReferences)
+          .set({ status: "provisioning", updatedAt: input.now })
+          .where(eq(platformSecretReferences.id, input.referenceId));
+        return {
+          outcome: "started",
+          providerName: reference.providerName,
+        } as const;
+      });
+    },
+
     async completeCreate(input) {
       await database.transaction(async (transaction) => {
         const [reference] = await transaction
@@ -134,6 +191,20 @@ export function createPostgresPlatformSecretStore(
           .limit(1)
           .for("update");
         if (reference === undefined) throw new Error("secret_state_conflict");
+
+        const [pending] = await transaction
+          .select({ versionNumber: platformSecretVersions.versionNumber })
+          .from(platformSecretVersions)
+          .where(
+            and(
+              eq(platformSecretVersions.id, input.versionId),
+              eq(platformSecretVersions.referenceId, input.referenceId),
+              eq(platformSecretVersions.status, "pending"),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (pending === undefined) throw new Error("secret_state_conflict");
 
         await transaction
           .update(platformSecretVersions)
@@ -150,20 +221,27 @@ export function createPostgresPlatformSecretStore(
           .set({
             status: "active",
             providerSecretId: input.externalId,
-            currentVersionNumber: 1,
+            currentVersionNumber: pending.versionNumber,
             updatedAt: input.now,
           })
           .where(eq(platformSecretReferences.id, input.referenceId));
         await transaction.insert(auditEvents).values({
           actorId: input.actorId,
-          eventType: "platform.secret.created",
+          eventType:
+            pending.versionNumber === 1
+              ? "platform.secret.created"
+              : "platform.secret.provisioning_recovered",
           targetType: "platform_secret_reference",
           targetId: input.referenceId,
           correlationId: input.correlationId,
           reason: input.reason,
-          evidence: { resultingStatus: "active", versionNumber: 1 },
+          evidence: {
+            resultingStatus: "active",
+            versionNumber: pending.versionNumber,
+          },
           occurredAt: input.now,
         });
+        await recordSecretCommandReceipt(transaction, input);
       });
     },
 
@@ -214,7 +292,10 @@ export function createPostgresPlatformSecretStore(
           .where(
             and(
               eq(platformSecretReferences.id, input.referenceId),
-              eq(platformSecretReferences.status, "active"),
+              inArray(platformSecretReferences.status, [
+                "active",
+                "rotation_failed",
+              ]),
             ),
           )
           .limit(1)
@@ -229,10 +310,18 @@ export function createPostgresPlatformSecretStore(
             reason: "secret_reference_not_active",
           } as const;
         }
+        const [latest] = await transaction
+          .select({ versionNumber: platformSecretVersions.versionNumber })
+          .from(platformSecretVersions)
+          .where(eq(platformSecretVersions.referenceId, input.referenceId))
+          .orderBy(desc(platformSecretVersions.versionNumber))
+          .limit(1)
+          .for("update");
+        if (latest === undefined) throw new Error("secret_state_conflict");
         await transaction.insert(platformSecretVersions).values({
           id: input.versionId,
           referenceId: input.referenceId,
-          versionNumber: reference.currentVersionNumber + 1,
+          versionNumber: latest.versionNumber + 1,
           status: "pending",
           createdByOperatorId: input.actorId,
           reason: input.reason,
@@ -305,6 +394,7 @@ export function createPostgresPlatformSecretStore(
           },
           occurredAt: input.now,
         });
+        await recordSecretCommandReceipt(transaction, input);
       });
     },
 
@@ -352,7 +442,10 @@ export function createPostgresPlatformSecretStore(
           .where(
             and(
               eq(platformSecretReferences.id, input.referenceId),
-              eq(platformSecretReferences.status, "active"),
+              inArray(platformSecretReferences.status, [
+                "active",
+                "revocation_failed",
+              ]),
             ),
           )
           .limit(1)
@@ -361,6 +454,70 @@ export function createPostgresPlatformSecretStore(
           return {
             outcome: "rejected",
             reason: "secret_reference_not_active",
+          } as const;
+        }
+        const [modelDependency] = await transaction
+          .select({ id: modelProviders.id })
+          .from(modelProviders)
+          .innerJoin(
+            modelProviderRevisions,
+            and(
+              eq(modelProviderRevisions.providerId, modelProviders.id),
+              eq(
+                modelProviderRevisions.revisionNumber,
+                modelProviders.currentRevisionNumber,
+              ),
+            ),
+          )
+          .where(
+            and(
+              eq(
+                modelProviderRevisions.credentialReferenceId,
+                input.referenceId,
+              ),
+              eq(modelProviderRevisions.lifecycle, "active"),
+            ),
+          )
+          .limit(1);
+        const [integrationDependency] = await transaction
+          .select({ id: platformIntegrations.id })
+          .from(platformIntegrations)
+          .innerJoin(
+            platformIntegrationRevisions,
+            and(
+              eq(
+                platformIntegrationRevisions.integrationId,
+                platformIntegrations.id,
+              ),
+              eq(
+                platformIntegrationRevisions.revisionNumber,
+                platformIntegrations.currentRevisionNumber,
+              ),
+            ),
+          )
+          .where(
+            and(
+              eq(platformIntegrationRevisions.lifecycle, "active"),
+              or(
+                eq(
+                  platformIntegrationRevisions.clientSecretReferenceId,
+                  input.referenceId,
+                ),
+                eq(
+                  platformIntegrationRevisions.webhookSecretReferenceId,
+                  input.referenceId,
+                ),
+              ),
+            ),
+          )
+          .limit(1);
+        if (
+          modelDependency !== undefined ||
+          integrationDependency !== undefined
+        ) {
+          return {
+            outcome: "rejected",
+            reason: "secret_reference_in_use",
           } as const;
         }
         await transaction
@@ -411,6 +568,7 @@ export function createPostgresPlatformSecretStore(
           evidence: { resultingStatus: "revoked" },
           occurredAt: input.now,
         });
+        await recordSecretCommandReceipt(transaction, input);
       });
     },
 
@@ -438,6 +596,35 @@ export function createPostgresPlatformSecretStore(
       });
     },
   };
+}
+
+async function recordSecretCommandReceipt(
+  transaction: Parameters<Parameters<Database["transaction"]>[0]>[0],
+  input: {
+    readonly receipt?: PlatformSecretCommandReceipt;
+    readonly actorId: string;
+    readonly referenceId: string;
+    readonly reason: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  },
+) {
+  if (input.receipt === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.receipt.commandId,
+      actorId: input.actorId,
+      environment: input.receipt.environment,
+      name: input.receipt.name,
+      targetType: "platform_secret",
+      targetId: input.receipt.targetId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    { outcome: input.receipt.outcome, id: input.referenceId },
+  );
 }
 
 async function requireActiveSuperAdministrator(

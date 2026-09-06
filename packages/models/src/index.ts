@@ -1,5 +1,6 @@
 import {
   assertPlatformCommandAuthorized,
+  normalizePlatformHttpHealthProbe,
   type AuthenticatedOperator,
   type ModelCapability,
   type ModelCatalogueLifecycle,
@@ -9,6 +10,7 @@ import {
   type ModelProviderCatalogue,
   type ModelProviderReportedHealth,
   type PlatformConfigurationEnvironment,
+  type PlatformHttpHealthProbe,
 } from "@atharvan/domain";
 
 const adapterKinds = new Set<ModelProviderAdapterKind>([
@@ -64,6 +66,7 @@ export interface ModelCatalogueStore {
   }): Promise<ModelProviderCatalogue>;
   setProvider(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly providerId: string;
     readonly revisionId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -71,6 +74,7 @@ export interface ModelCatalogueStore {
     readonly displayName: string;
     readonly adapterKind: ModelProviderAdapterKind;
     readonly baseUrl: string | null;
+    readonly healthProbe: PlatformHttpHealthProbe | null;
     readonly credentialReferenceId: string | null | undefined;
     readonly regions: ReadonlyArray<string>;
     readonly maximumDataClassification: ModelDataClassification;
@@ -81,6 +85,7 @@ export interface ModelCatalogueStore {
   }): Promise<ModelCatalogueCommandResult>;
   setModel(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly modelId: string;
     readonly revisionId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -102,6 +107,7 @@ export interface ModelCatalogueStore {
   }): Promise<ModelCatalogueCommandResult>;
   recordHealthObservation(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly observationId: string;
     readonly providerId: string;
     readonly environment: PlatformConfigurationEnvironment;
@@ -154,10 +160,12 @@ export function createModelCatalogueService(input: {
 
     async setProvider(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly key: string;
       readonly displayName: string;
       readonly adapterKind: ModelProviderAdapterKind;
       readonly baseUrl?: string | null;
+      readonly healthProbe?: PlatformHttpHealthProbe | null;
       readonly credentialReferenceId?: string | null;
       readonly regions: ReadonlyArray<string>;
       readonly maximumDataClassification: ModelDataClassification;
@@ -169,6 +177,9 @@ export function createModelCatalogueService(input: {
       authorize(command.actor, commandTime, true);
       const result = await input.store.setProvider({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         providerId: randomId(),
         revisionId: randomId(),
         environment: input.environment,
@@ -185,6 +196,7 @@ export function createModelCatalogueService(input: {
           "provider_adapter_invalid",
         ),
         baseUrl: requireBaseUrl(command.baseUrl ?? null),
+        healthProbe: requireHealthProbe(command.healthProbe ?? null),
         credentialReferenceId:
           command.credentialReferenceId === undefined
             ? undefined
@@ -209,6 +221,7 @@ export function createModelCatalogueService(input: {
 
     async setModel(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly providerId: string;
       readonly key: string;
       readonly displayName: string;
@@ -251,6 +264,9 @@ export function createModelCatalogueService(input: {
 
       const result = await input.store.setModel({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         modelId: randomId(),
         revisionId: randomId(),
         environment: input.environment,
@@ -303,6 +319,7 @@ export function createModelCatalogueService(input: {
 
     async recordHealthObservation(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly providerId: string;
       readonly status: ModelProviderReportedHealth;
       readonly latencyMs?: number | null;
@@ -338,6 +355,9 @@ export function createModelCatalogueService(input: {
       }
       const result = await input.store.recordHealthObservation({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         observationId: randomId(),
         providerId: requireUuid(command.providerId, "provider_id_invalid"),
         environment: input.environment,
@@ -393,6 +413,18 @@ function requireBaseUrl(value: string | null): string | null {
     return parsed.toString().replace(/\/$/, "");
   } catch {
     throw new ModelCatalogueCommandRejectedError("provider_base_url_invalid");
+  }
+}
+
+function requireHealthProbe(
+  value: PlatformHttpHealthProbe | null,
+): PlatformHttpHealthProbe | null {
+  try {
+    return normalizePlatformHttpHealthProbe(value);
+  } catch (error) {
+    throw new ModelCatalogueCommandRejectedError(
+      error instanceof Error ? error.message : "health_probe_contract_invalid",
+    );
   }
 }
 

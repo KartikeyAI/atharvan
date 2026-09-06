@@ -231,7 +231,9 @@ function SecretReferenceCard({
   disabled: boolean;
   onChanged: () => void;
 }>) {
-  const [mode, setMode] = useState<"rotate" | "revoke" | null>(null);
+  const [mode, setMode] = useState<"recover" | "rotate" | "revoke" | null>(
+    null,
+  );
   return (
     <Card className="secret-card">
       <CardHeader className="table-card-header">
@@ -263,8 +265,21 @@ function SecretReferenceCard({
           </div>
         </dl>
         <div className="configuration-actions">
+          {reference.status === "provisioning_failed" ? (
+            <Button
+              disabled={disabled}
+              onClick={() => setMode(mode === "recover" ? null : "recover")}
+              type="button"
+            >
+              <RefreshCwIcon data-icon="inline-start" /> Recover provisioning
+            </Button>
+          ) : null}
           <Button
-            disabled={disabled || reference.status !== "active"}
+            disabled={
+              disabled ||
+              (reference.status !== "active" &&
+                reference.status !== "rotation_failed")
+            }
             onClick={() => setMode(mode === "rotate" ? null : "rotate")}
             type="button"
             variant="outline"
@@ -272,7 +287,11 @@ function SecretReferenceCard({
             <RotateCwIcon data-icon="inline-start" /> Rotate
           </Button>
           <Button
-            disabled={disabled || reference.status !== "active"}
+            disabled={
+              disabled ||
+              (reference.status !== "active" &&
+                reference.status !== "revocation_failed")
+            }
             onClick={() => setMode(mode === "revoke" ? null : "revoke")}
             type="button"
             variant="destructive"
@@ -280,6 +299,13 @@ function SecretReferenceCard({
             <Trash2Icon data-icon="inline-start" /> Revoke
           </Button>
         </div>
+        {mode === "recover" ? (
+          <SecretMutationForm
+            action="recover"
+            onChanged={onChanged}
+            reference={reference}
+          />
+        ) : null}
         {mode === "rotate" ? (
           <SecretMutationForm
             action="rotate"
@@ -325,7 +351,7 @@ function SecretMutationForm({
   reference,
   onChanged,
 }: Readonly<{
-  action: "rotate" | "revoke";
+  action: "recover" | "rotate" | "revoke";
   reference: PlatformSecretReferenceEntry;
   onChanged: () => void;
 }>) {
@@ -341,11 +367,11 @@ function SecretMutationForm({
     setError(null);
     try {
       await apiRequest(
-        `/api/platform/secret-references/${encodeURIComponent(reference.id)}/${action}`,
+        `/api/platform/secret-references/${encodeURIComponent(reference.id)}/${action === "recover" ? "retry-provisioning" : action}`,
         {
           method: "POST",
           body: JSON.stringify(
-            action === "rotate" ? { value, reason } : { reason, confirmation },
+            action === "revoke" ? { reason, confirmation } : { value, reason },
           ),
         },
       );
@@ -367,14 +393,14 @@ function SecretMutationForm({
   return (
     <form autoComplete="off" className="configuration-editor" onSubmit={submit}>
       {error ? <Alert variant="destructive">{error}</Alert> : null}
-      {action === "rotate" ? (
+      {action !== "revoke" ? (
         <div className="field-stack field-span">
-          <Label htmlFor={`rotate-value-${reference.id}`}>
-            Replacement value
+          <Label htmlFor={`${action}-value-${reference.id}`}>
+            {action === "recover" ? "Secret value" : "Replacement value"}
           </Label>
           <Input
             autoComplete="new-password"
-            id={`rotate-value-${reference.id}`}
+            id={`${action}-value-${reference.id}`}
             onChange={(event) => setValue(event.target.value)}
             required
             spellCheck={false}
@@ -416,7 +442,9 @@ function SecretMutationForm({
             ? "Submitting…"
             : action === "rotate"
               ? "Rotate credential"
-              : "Revoke permanently"}
+              : action === "recover"
+                ? "Recover provisioning"
+                : "Revoke permanently"}
         </Button>
       </div>
     </form>

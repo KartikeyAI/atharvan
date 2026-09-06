@@ -13,6 +13,7 @@ import type {
 import type { ExtractTablesWithRelations } from "drizzle-orm/relations";
 
 import * as schema from "./schema";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   allowedEmailDomains,
   auditEvents,
@@ -115,12 +116,62 @@ export function createPostgresOperatorOnboardingStore(
           .for("update");
 
         if (existing !== undefined) {
+          if (!existing.isActive) {
+            await transaction
+              .update(allowedEmailDomains)
+              .set({
+                isActive: true,
+                includeSubdomains: input.includeSubdomains,
+                isPublicDomainException: input.isPublicDomainException,
+                reason: input.reason,
+                disabledByOperatorId: null,
+                disabledAt: null,
+                updatedAt: input.now,
+              })
+              .where(eq(allowedEmailDomains.id, existing.id));
+            await transaction.insert(auditEvents).values({
+              actorId: input.actorId,
+              eventType: "platform.membership_domain.reactivated",
+              targetType: "allowed_email_domain",
+              targetId: existing.id,
+              correlationId: input.correlationId,
+              reason: input.reason,
+              evidence: {
+                domain: input.normalizedDomain,
+                includeSubdomains: input.includeSubdomains,
+                isPublicDomainException: input.isPublicDomainException,
+              },
+              occurredAt: input.now,
+            });
+            const result = { outcome: "created", id: existing.id } as const;
+            await recordOnboardingCommandReceipt(
+              transaction,
+              input,
+              "membership-domain.add",
+              "membership_domain",
+              input.normalizedDomain,
+              result,
+            );
+            return result;
+          }
           if (
             existing.isActive &&
             existing.includeSubdomains === input.includeSubdomains &&
             existing.isPublicDomainException === input.isPublicDomainException
           ) {
-            return { outcome: "already_exists", id: existing.id };
+            const result = {
+              outcome: "already_exists",
+              id: existing.id,
+            } as const;
+            await recordOnboardingCommandReceipt(
+              transaction,
+              input,
+              "membership-domain.add",
+              "membership_domain",
+              input.normalizedDomain,
+              result,
+            );
+            return result;
           }
 
           return {
@@ -154,7 +205,16 @@ export function createPostgresOperatorOnboardingStore(
           occurredAt: input.now,
         });
 
-        return { outcome: "created", id: input.domainId };
+        const result = { outcome: "created", id: input.domainId } as const;
+        await recordOnboardingCommandReceipt(
+          transaction,
+          input,
+          "membership-domain.add",
+          "membership_domain",
+          input.normalizedDomain,
+          result,
+        );
+        return result;
       });
     },
 
@@ -218,7 +278,16 @@ export function createPostgresOperatorOnboardingStore(
           occurredAt: input.now,
         });
 
-        return { outcome: "created", id: target.id };
+        const result = { outcome: "created", id: target.id } as const;
+        await recordOnboardingCommandReceipt(
+          transaction,
+          input,
+          "membership-domain.disable",
+          "membership_domain",
+          input.normalizedDomain,
+          result,
+        );
+        return result;
       });
     },
 
@@ -347,7 +416,16 @@ export function createPostgresOperatorOnboardingStore(
           occurredAt: input.now,
         });
 
-        return { outcome: "created", id: input.invitationId };
+        const result = { outcome: "created", id: input.invitationId } as const;
+        await recordOnboardingCommandReceipt(
+          transaction,
+          input,
+          "operator.invitation.create",
+          "operator_invitation",
+          input.normalizedEmail,
+          result,
+        );
+        return result;
       });
     },
 
@@ -746,6 +824,43 @@ export function createPostgresOperatorOnboardingStore(
       });
     },
   };
+}
+
+async function recordOnboardingCommandReceipt(
+  transaction: DatabaseTransaction,
+  input: {
+    readonly actorId: string;
+    readonly commandId?: string;
+    readonly commandEnvironment?: "development" | "production" | "test";
+    readonly correlationId: string;
+    readonly reason: string;
+    readonly now: Date;
+  },
+  name: string,
+  targetType: string,
+  targetId: string,
+  result: {
+    readonly outcome: "created" | "already_exists";
+    readonly id: string;
+  },
+) {
+  if (input.commandId === undefined || input.commandEnvironment === undefined)
+    return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.commandEnvironment,
+      name,
+      targetType,
+      targetId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 type DatabaseTransaction = PgTransaction<

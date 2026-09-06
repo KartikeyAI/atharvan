@@ -1,5 +1,31 @@
 @import "tailwindcss";
 
+.alert-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: color-mix(in oklch, var(--foreground) 30%, transparent);
+}
+
+.alert-dialog-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 50;
+  transform: translate(-50%, -50%);
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--card);
+  color: var(--foreground);
+}
+
 :root {
   color-scheme: light;
   --background: oklch(0.99 0 0);
@@ -1277,6 +1303,10 @@ button {
   white-space: pre-wrap;
 }
 
+.audit-export-digest {
+  overflow-wrap: anywhere;
+}
+
 .customer-search-grid,
 .customer-status-details,
 .customer-permission-grid {
@@ -1857,5 +1887,223 @@ button {
   .data-table th,
   .data-table td {
     padding: 11px 14px;
+  }
+}
+
+.health-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  gap: 1rem;
+}
+
+.session-page,
+.session-list,
+.session-revoke-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.session-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 1rem;
+  margin: 0 0 1rem;
+}
+
+.session-details dt {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.session-details dd {
+  margin: 0.375rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.operational-alert-filters,
+.operational-alert-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.operational-alert-heading {
+  justify-content: space-between;
+}
+
+.operational-alert-list {
+  display: grid;
+  gap: 1rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.operational-alert-list li {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.operational-alert-list h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.operational-alert-list p,
+.operational-alert-empty {
+  margin: 0.75rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.operational-alert-list summary {
+  cursor: pointer;
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.operational-alert-list summary:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 4px;
+}
+
+.health-overview-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.health-overview-grid .card-header {
+  align-items: flex-start;
+}
+
+.health-overview-grid .card-footer {
+  justify-content: flex-start;
+}
+
+.health-overview-grid .model-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 640px) {
+  .health-overview-grid .model-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.overview-snapshot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.health-history-content,
+.health-history-series {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.health-history-content {
+  gap: 1.25rem;
+}
+
+.health-history-series p,
+.health-history-heading span,
+.health-history-range {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.health-history-heading,
+.health-history-range,
+.health-history-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.health-history-timeline {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(4px, 1fr));
+  gap: 3px;
+  min-height: 1.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-history-point {
+  min-width: 0;
+  border-radius: 3px;
+  background: var(--unknown);
+}
+
+.health-history-point.is-healthy,
+.health-history-key.is-healthy {
+  background: var(--success);
+}
+
+.health-history-point.is-partial,
+.health-history-key.is-partial {
+  background: color-mix(in oklch, var(--warning) 55%, var(--muted));
+}
+
+.health-history-point.is-degraded,
+.health-history-key.is-degraded {
+  background: var(--warning);
+}
+
+.health-history-point.is-action-required,
+.health-history-key.is-action-required,
+.health-history-point.is-error,
+.health-history-key.is-error {
+  background: var(--destructive);
+}
+
+.health-history-point.is-unknown,
+.health-history-key.is-unknown {
+  background: var(--unknown);
+}
+
+.health-history-legend {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.health-history-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.health-history-key {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 2px;
+}
+
+@media (max-width: 640px) {
+  .health-history-timeline {
+    gap: 2px;
+  }
+
+  .health-history-range {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
   }
 }

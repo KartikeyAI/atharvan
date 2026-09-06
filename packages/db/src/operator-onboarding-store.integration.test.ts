@@ -4,9 +4,15 @@ import {
 } from "@atharvan/auth";
 import { createPlatformAdapterRegistryService } from "@atharvan/adapters";
 import { createPlatformConfigurationAdministrationService } from "@atharvan/config";
-import { createPlatformCommandService } from "@atharvan/commands";
+import {
+  createPlatformCommandService,
+  approvalScopeIdentity,
+} from "@atharvan/commands";
 import { createCustomerDirectoryService } from "@atharvan/customers";
-import type { AuthenticatedOperator } from "@atharvan/domain";
+import type {
+  AuthenticatedOperator,
+  PlatformApprovalScope,
+} from "@atharvan/domain";
 import { createPlatformFeatureFlagService } from "@atharvan/flags";
 import { createPlatformIntegrationRegistryService } from "@atharvan/integrations";
 import {
@@ -14,7 +20,7 @@ import {
   createModelRoutingService,
 } from "@atharvan/models";
 import { createPlatformSecretLifecycleService } from "@atharvan/secrets";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
@@ -49,19 +55,22 @@ import {
   platformSecretReferences,
   platformSecretVersions,
   platformCommands,
+  platformApprovals,
+  operatorRoleAssignments,
+  operatorRoleDefinitions,
   session,
   user,
 } from "./schema";
 import * as schema from "./schema";
+import { integrationDatabaseFromEnvironment } from "./integration-environment";
 
-const databaseUrl = process.env.DATABASE_URL;
 const integrationTestsEnabled =
-  process.env.ATHARVAN_RUN_DB_INTEGRATION_TESTS === "1" &&
-  databaseUrl !== undefined;
+  process.env.ATHARVAN_RUN_DB_INTEGRATION_TESTS === "1";
 const describeDatabase = integrationTestsEnabled ? describe : describe.skip;
 
 describeDatabase("PostgreSQL operator onboarding store", () => {
   it("enforces allowlisting and permits only one concurrent code activation", async () => {
+    const databaseUrl = integrationDatabaseFromEnvironment();
     const pool = new Pool({ connectionString: databaseUrl, max: 4 });
     const database = drizzle({ client: pool, schema });
     const store = createPostgresOperatorOnboardingStore(database);
@@ -99,6 +108,53 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         effectiveCapabilities: ["platform:*"],
         stepUpVerifiedAt: commandTime,
       };
+      // Fixture setup only; approval lifecycle API scenarios require separate coverage.
+      const [reviewer] = await database
+        .insert(operators)
+        .values({
+          email: "reviewer@atharvan-ci.example",
+          emailDomain: "atharvan-ci.example",
+          status: "active",
+          activatedAt: commandTime,
+        })
+        .returning({ id: operators.id });
+      const [securityRole] = await database
+        .select({ id: operatorRoleDefinitions.id })
+        .from(operatorRoleDefinitions)
+        .where(
+          and(
+            eq(operatorRoleDefinitions.key, "security_operator"),
+            eq(operatorRoleDefinitions.isActive, true),
+          ),
+        );
+      await database.insert(operatorRoleAssignments).values({
+        operatorId: reviewer!.id,
+        roleDefinitionId: securityRole!.id,
+        assignedByOperatorId: actor.operatorId,
+        reason: "Prepare the independent approval fixture.",
+        correlationId: crypto.randomUUID(),
+        assignedAt: commandTime,
+      });
+      async function approvalFixture(scope: PlatformApprovalScope) {
+        const [approval] = await database
+          .insert(platformApprovals)
+          .values({
+            environment: "development",
+            requesterId: actor.operatorId,
+            scope,
+            scopeIdentity: approvalScopeIdentity(scope),
+            reason: "Approve the exact integration test fixture scope.",
+            correlationId: crypto.randomUUID(),
+            status: "approved",
+            createdAt: commandTime,
+            expiresAt: new Date(commandTime.getTime() + 30 * 60_000),
+            decidedBy: reviewer!.id,
+            decidedAt: commandTime,
+            decisionReason: "Independent integration fixture decision.",
+          })
+          .returning({ id: platformApprovals.id });
+        return approval!.id;
+      }
       const configurationStore =
         createPostgresPlatformConfigurationStore(database);
       const configurationService =
@@ -165,6 +221,7 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
 
       const secretMaterialProvider = {
         configured: true,
+        findByName: vi.fn(async () => null),
         create: vi.fn(async () => ({ externalId: "provider-secret-id" })),
         rotate: vi.fn(async () => undefined),
         revoke: vi.fn(async () => undefined),
@@ -675,6 +732,31 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         now: () => commandTime,
         randomId: () => "00000000-0000-4000-8000-000000000128",
       });
+      const createCustomerCommandEnvelope = async (
+        id: string,
+        name: string,
+        targetType: string,
+        targetId: string,
+      ) => {
+        await database.insert(platformCommands).values({
+          id,
+          environment: "development",
+          name,
+          version: 1,
+          actorId: actor.operatorId,
+          targetType,
+          targetId,
+          expectedTargetVersion: null,
+          payloadFingerprint: "a".repeat(64),
+          idempotencyFingerprint: id.replaceAll("-", "").padEnd(64, "0"),
+          correlationId: id,
+          reason: "Exercise the durable Arth command exchange.",
+          approvalReference: null,
+          evidenceReferences: [],
+          breakGlassGrantIds: [],
+          requestedAt: commandTime,
+        });
+      };
       const customerSnapshot = {
         actor,
         sourceRevision: "42",
@@ -775,7 +857,14 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
           }),
         ]),
       );
+      await createCustomerCommandEnvelope(
+        "00000000-0000-4000-8000-000000000231",
+        "workspace.restrict-capability",
+        "customer_workspace",
+        "arth-workspace-integration-1",
+      );
       const restricted = await customerDirectoryService.setRestriction({
+        commandId: "00000000-0000-4000-8000-000000000231",
         actor,
         targetType: "workspace",
         targetId: "arth-workspace-integration-1",
@@ -793,6 +882,12 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
       if (restricted.outcome !== "updated") {
         throw new Error("integration_restriction_not_created");
       }
+      await createCustomerCommandEnvelope(
+        "00000000-0000-4000-8000-000000000232",
+        "workspace.restore-capability",
+        "customer_workspace",
+        "arth-workspace-integration-1",
+      );
       await expect(
         customerDirectoryService.listRestrictions({
           actor,
@@ -829,6 +924,7 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
       });
       await expect(
         customerDirectoryService.setRestriction({
+          commandId: "00000000-0000-4000-8000-000000000232",
           actor,
           targetType: "workspace",
           targetId: "arth-workspace-integration-1",
@@ -890,11 +986,34 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         reason: "Track the verified ownership recovery risk.",
         correlationId: "00000000-0000-4000-8000-000000000137",
       });
+      const [workspaceForApproval] = await database
+        .select()
+        .from(customerWorkspaceProjections)
+        .where(
+          eq(
+            customerWorkspaceProjections.sourceId,
+            "arth-workspace-integration-1",
+          ),
+        );
+      const transferApprovalId = await approvalFixture({
+        kind: "workspace_ownership_transfer",
+        workspaceId: "arth-workspace-integration-1",
+        expectedOwnerUserId: workspaceForApproval!.ownerUserSourceId!,
+        sourceRevision: workspaceForApproval!.sourceRevision.toString(),
+        successorUserId: "arth-user-integration-2",
+      });
+      await createCustomerCommandEnvelope(
+        "00000000-0000-4000-8000-000000000233",
+        "workspace.ownership-transfer.request",
+        "customer_workspace",
+        "arth-workspace-integration-1",
+      );
       const transfer = await customerDirectoryService.requestOwnershipTransfer({
+        commandId: "00000000-0000-4000-8000-000000000233",
         actor,
         workspaceId: "arth-workspace-integration-1",
         successorUserId: "arth-user-integration-2",
-        approvalReference: "APR-INTEGRATION-42",
+        approvalReference: transferApprovalId,
         confirmation:
           "TRANSFER arth-workspace-integration-1 TO arth-user-integration-2",
         reason: "Recover ownership after verified owner departure.",
@@ -1257,8 +1376,18 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
       );
 
       const breakGlassService = createOperatorBreakGlassAdministrationService({
-        store: createPostgresOperatorBreakGlassAdministrationStore(database),
+        store: createPostgresOperatorBreakGlassAdministrationStore(
+          database,
+          "development",
+        ),
         now: () => commandTime,
+      });
+      const breakGlassApprovalId = await approvalFixture({
+        kind: "operator_break_glass",
+        targetOperatorId: sessionOperator!.id,
+        capabilities: ["platform:models:write"],
+        durationMinutes: 15,
+        incidentReference: "INC-CI-15",
       });
       const breakGlassGrant = await breakGlassService.createGrant({
         actor,
@@ -1267,7 +1396,7 @@ describeDatabase("PostgreSQL operator onboarding store", () => {
         durationMinutes: 15,
         reason: "Exercise bounded incident elevation in PostgreSQL.",
         incidentReference: "INC-CI-15",
-        approvalReference: "APR-CI-15",
+        approvalReference: breakGlassApprovalId,
         confirmation: `GRANT BREAK-GLASS TO ${sessionOperator!.id}`,
         correlationId: "00000000-0000-4000-8000-000000000115",
       });

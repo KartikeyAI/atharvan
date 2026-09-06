@@ -29,6 +29,7 @@ export interface PlatformFeatureFlagStore {
     readonly now: Date;
   }): Promise<PlatformFeatureFlagEntry | null>;
   setFlag(input: {
+    readonly commandId?: string;
     readonly actorId: string;
     readonly flagId: string;
     readonly revisionId: string;
@@ -56,6 +57,7 @@ export class PlatformFeatureFlagCommandRejectedError extends Error {
 }
 
 export interface SetPlatformFeatureFlagCommand {
+  readonly commandId?: string;
   readonly actor: AuthenticatedOperator;
   readonly key: string;
   readonly displayName: string;
@@ -115,6 +117,9 @@ export function createPlatformFeatureFlagService(input: {
       }
 
       const result = await input.store.setFlag({
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         actorId: command.actor.operatorId,
         flagId: randomId(),
         revisionId: randomId(),

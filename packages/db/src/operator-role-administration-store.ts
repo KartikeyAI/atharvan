@@ -4,6 +4,7 @@ import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   auditEvents,
   operatorRoleAssignments,
@@ -103,7 +104,12 @@ export function createPostgresOperatorRoleAdministrationStore(
           currentKeys.length === nextKeys.length &&
           [...currentKeys].sort().every((key, index) => key === nextKeys[index])
         ) {
-          return { outcome: "unchanged", operatorId: target.id };
+          const result = {
+            outcome: "unchanged",
+            operatorId: target.id,
+          } as const;
+          await recordOperatorRoleReceipt(transaction, input, result);
+          return result;
         }
 
         const nextKeySet = new Set(nextKeys);
@@ -155,8 +161,42 @@ export function createPostgresOperatorRoleAdministrationStore(
           occurredAt: input.now,
         });
 
-        return { outcome: "updated", operatorId: target.id };
+        const result = {
+          outcome: "updated",
+          operatorId: target.id,
+        } as const;
+        await recordOperatorRoleReceipt(transaction, input, result);
+        return result;
       });
     },
   };
+}
+
+async function recordOperatorRoleReceipt(
+  transaction: Parameters<
+    Parameters<PgDatabase<PgQueryResultHKT, typeof schema>["transaction"]>[0]
+  >[0],
+  input: Parameters<OperatorRoleAdministrationStore["replaceOperatorRoles"]>[0],
+  result: {
+    readonly outcome: "updated" | "unchanged";
+    readonly operatorId: string;
+  },
+) {
+  if (input.commandId === undefined || input.commandEnvironment === undefined)
+    return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment: input.commandEnvironment,
+      name: "operator.roles.replace",
+      targetType: "operator",
+      targetId: input.targetOperatorId,
+      correlationId: input.correlationId,
+      reason: input.reason,
+      now: input.now,
+    },
+    result,
+  );
 }

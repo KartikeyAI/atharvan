@@ -46,7 +46,7 @@ function MembershipDomainsPage() {
             onClick={() => setShowAdd((visible) => !visible)}
             type="button"
           >
-            <PlusIcon aria-hidden="true" /> Add domain
+            <PlusIcon aria-hidden="true" /> Add or restore domain
           </Button>
         </section>
 
@@ -192,7 +192,7 @@ function AddDomain({ onCreated }: Readonly<{ onCreated: () => void }>) {
           <Globe2Icon />
         </div>
         <div>
-          <h2>Add an organization domain</h2>
+          <h2>Add or restore an organization domain</h2>
           <p>A fresh verified session is required for this sensitive change.</p>
         </div>
       </CardHeader>

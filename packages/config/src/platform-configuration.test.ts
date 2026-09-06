@@ -73,6 +73,7 @@ describe("platform configuration contracts", () => {
         key: "platform.session.maximum_age_minutes",
         revisionNumber: 2,
       })),
+      rollbackConfiguration: vi.fn(),
     };
     const service = createPlatformConfigurationAdministrationService({
       store,
@@ -103,6 +104,7 @@ describe("platform configuration contracts", () => {
     const store = {
       findConfigurationDefinition: vi.fn(),
       setConfiguration: vi.fn(),
+      rollbackConfiguration: vi.fn(),
     };
     const service = createPlatformConfigurationAdministrationService({
       store,

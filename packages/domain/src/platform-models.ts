@@ -1,4 +1,8 @@
 import type { PlatformConfigurationEnvironment } from "./platform-configuration";
+import type {
+  PlatformHealthObservationSource,
+  PlatformHttpHealthProbe,
+} from "./platform-health";
 
 export type ModelProviderAdapterKind =
   | "openai"
@@ -34,7 +38,7 @@ export interface ModelProviderHealthObservation {
   readonly id: string;
   readonly state: ModelProviderHealthState;
   readonly reportedStatus: ModelProviderReportedHealth | null;
-  readonly source: "operator_probe" | null;
+  readonly source: PlatformHealthObservationSource | null;
   readonly latencyMs: number | null;
   readonly httpStatusCode: number | null;
   readonly errorCode: string | null;
@@ -66,6 +70,7 @@ export interface ModelProviderCatalogueEntry {
   readonly displayName: string;
   readonly adapterKind: ModelProviderAdapterKind;
   readonly baseUrl: string | null;
+  readonly healthProbe: PlatformHttpHealthProbe | null;
   readonly credentialReferenceId: string | null;
   readonly credentialReferenceKey: string | null;
   readonly regions: ReadonlyArray<string>;

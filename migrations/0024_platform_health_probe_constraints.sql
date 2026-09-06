@@ -1,0 +1,4 @@
+CREATE INDEX "platform_health_probe_jobs_retention_idx" ON "platform_health_probe_jobs" USING btree ("environment","state","completed_at");--> statement-breakpoint
+ALTER TABLE "model_provider_revisions" ADD CONSTRAINT "model_provider_revisions_health_probe_valid" CHECK ("model_provider_revisions"."health_probe" IS NULL OR platform_http_health_probe_valid("model_provider_revisions"."health_probe"));--> statement-breakpoint
+ALTER TABLE "platform_health_probe_jobs" ADD CONSTRAINT "platform_health_probe_jobs_contract_valid" CHECK (platform_http_health_probe_valid("platform_health_probe_jobs"."probe"));--> statement-breakpoint
+ALTER TABLE "platform_integration_revisions" ADD CONSTRAINT "platform_integration_revisions_health_probe_valid" CHECK ("platform_integration_revisions"."health_probe" IS NULL OR platform_http_health_probe_valid("platform_integration_revisions"."health_probe"));

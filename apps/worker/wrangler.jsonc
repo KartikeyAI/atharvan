@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "atharvan-control-plane",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-28",
+  "compatibility_date": "2026-09-05",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
@@ -10,6 +10,7 @@
   },
   "env": {
     "dev": {
+      "triggers": { "crons": ["* * * * *"] },
       "name": "atharvan-control-plane-dev",
       "vars": {
         "ATHARVAN_ENVIRONMENT": "development",
@@ -17,10 +18,10 @@
       },
     },
     "production": {
+      "triggers": { "crons": ["* * * * *"] },
       "name": "atharvan-control-plane-production",
       "vars": {
         "ATHARVAN_ENVIRONMENT": "production",
-        "ATHARVAN_PUBLIC_ORIGIN": "https://atharvan.invalid",
       },
     },
   },

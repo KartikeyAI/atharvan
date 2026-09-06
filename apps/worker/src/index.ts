@@ -3,13 +3,21 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 
 import { OnboardingCommandRejectedError } from "@atharvan/auth";
+import type {
+  ChangeOperatorStatusCommand,
+  OperatorLifecycleResult,
+} from "@atharvan/domain";
 import {
   PlatformCommandRejectedError,
+  parseApprovalScope,
+  approvalCapability,
+  type ApprovalActorContext,
   type BeginPlatformCommand,
   type PlatformCommandBeginResult,
 } from "@atharvan/commands";
 import { PlatformAdapterCommandRejectedError } from "@atharvan/adapters";
 import {
+  parseAuthenticationRuntimeConfig,
   parseRuntimeConfig,
   PlatformConfigurationRejectedError,
 } from "@atharvan/config";
@@ -20,10 +28,16 @@ import {
   type CustomerDirectorySnapshotMembership,
   type CustomerDirectorySnapshotUser,
   type CustomerDirectorySnapshotWorkspace,
+  type ReconcileTrustedCustomerDirectorySnapshotCommand,
 } from "@atharvan/customers";
 import {
   operatorHasCapability,
-  unknownPlatformOverview,
+  ownSessionCapability,
+  type OperatorSessionIdentity,
+  type OperatorSessionInventory,
+  type RevokeOwnSessionInput,
+  buildOperationalAlerts,
+  type PlatformOverview,
   type AuthenticatedOperator,
   type CustomerDirectoryInspection,
   type CustomerDirectorySearchResult,
@@ -82,6 +96,7 @@ import {
   type PlatformIntegrationProtocol,
   type PlatformIntegrationRegistry,
   type PlatformIntegrationReportedHealth,
+  type PlatformHttpHealthProbe,
   type PlatformJsonValue,
   type PlatformSecretReferenceEntry,
 } from "@atharvan/domain";
@@ -95,8 +110,30 @@ import {
   PlatformSecretCommandRejectedError,
   PlatformSecretProviderError,
 } from "@atharvan/secrets";
+import {
+  ArthCommandExchangeError,
+  checkPostgresReadiness,
+  createPostgresTransactionalEmailEventStore,
+  runWithNeonDatabase,
+} from "@atharvan/db";
+import { verifyResendEmailWebhook } from "@atharvan/email";
 
 import { resolveProductionAuthenticationRuntime } from "./auth-runtime";
+import {
+  authenticateArthWorkloadRequest,
+  ArthWorkloadAuthenticationError,
+} from "./arth-workload-auth";
+import {
+  createTraceContext,
+  formatTraceparent,
+  normalizeTelemetryLabel,
+  normalizeTelemetryPath,
+  type TraceContext,
+  writeTelemetry,
+} from "./telemetry";
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export interface RuntimeBindings {
   readonly ATHARVAN_ENVIRONMENT: "development" | "production" | "test";
@@ -104,19 +141,107 @@ export interface RuntimeBindings {
   readonly DATABASE_URL?: string;
   readonly BETTER_AUTH_SECRET?: string;
   readonly ATHARVAN_VERIFICATION_HMAC_SECRET?: string;
+  readonly ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET?: string;
   readonly ATHARVAN_SUPER_ADMIN_EMAIL?: string;
   readonly ATHARVAN_EMAIL_FROM?: string;
+  readonly ATHARVAN_ALERT_EMAIL_TO?: string;
   readonly RESEND_API_KEY?: string;
+  readonly RESEND_WEBHOOK_SECRET?: string;
   readonly CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID?: string;
   readonly CLOUDFLARE_SECRETS_STORE_ID?: string;
   readonly CLOUDFLARE_SECRETS_STORE_API_TOKEN?: string;
+  readonly ATHARVAN_ARTH_CURRENT_KEY_ID?: string;
+  readonly ATHARVAN_ARTH_CURRENT_SHARED_SECRET?: string;
+  readonly ATHARVAN_ARTH_PREVIOUS_KEY_ID?: string;
+  readonly ATHARVAN_ARTH_PREVIOUS_SHARED_SECRET?: string;
+  readonly ATHARVAN_ARTH_AUDIENCE?: string;
 }
 
 export interface AuthenticationRuntime {
+  close(): Promise<void>;
+  readEmailDeliveryHealth(): Promise<
+    import("@atharvan/domain").EmailDeliveryHealth
+  >;
+  listEmailDeliveries(
+    actor: AuthenticatedOperator,
+    correlationId: string,
+  ): Promise<import("@atharvan/domain").EmailDeliveryPage>;
+  manageEmailDelivery(
+    actor: AuthenticatedOperator,
+    command: import("@atharvan/domain").ManageEmailDeliveryCommand,
+  ): Promise<{ outcome: "updated"; id: string }>;
+  restoreEmailRecipient(
+    actor: AuthenticatedOperator,
+    command: import("@atharvan/domain").RestoreEmailRecipientCommand,
+  ): Promise<{ outcome: "updated"; id: string }>;
+  listApprovals(
+    actor: AuthenticatedOperator,
+    correlationId: string,
+  ): Promise<import("@atharvan/domain").PlatformApprovalPage>;
+  requestApproval(
+    context: ApprovalActorContext,
+    scope: import("@atharvan/domain").PlatformApprovalScope,
+    reason: string,
+  ): Promise<{ outcome: "created"; id: string }>;
+  decideApproval(
+    context: ApprovalActorContext,
+    id: string,
+    decision: "approved" | "rejected" | "revoked",
+    reason: string,
+  ): Promise<{ outcome: "updated" | "unchanged"; id: string }>;
+  listOwnSessions(
+    identity: OperatorSessionIdentity,
+  ): Promise<OperatorSessionInventory>;
+  revokeOwnSession(
+    input: RevokeOwnSessionInput,
+  ): Promise<{ outcome: "updated" | "unchanged" }>;
+  readPlatformOverview(): Promise<PlatformOverview>;
+  readArthCommandDeliveryHealth(): Promise<
+    import("@atharvan/domain").ArthCommandDeliveryHealth
+  >;
+  readOperationalAlertDeliveryHealth(): Promise<
+    import("@atharvan/email").OperationalAlertDeliveryHealth
+  >;
+  readPlatformHealthProbeQueueHealth(): Promise<
+    import("@atharvan/domain").PlatformHealthProbeQueueHealth
+  >;
+  readOperationalRetentionHealth(): Promise<
+    import("@atharvan/domain").OperationalRetentionHealth
+  >;
   readonly emailDeliveryConfigured: boolean;
+  readonly emailFeedbackConfigured: boolean;
+  readonly alertDeliveryConfigured: boolean;
+  readonly arthWorkloadConfigured: boolean;
+  consumeArthWorkloadNonce(input: {
+    readonly keyId: string;
+    readonly nonce: string;
+    readonly requestTimestamp: Date;
+  }): Promise<void>;
+  reconcileArthCustomerDirectorySnapshot(
+    input: ReconcileTrustedCustomerDirectorySnapshotCommand,
+  ): Promise<{
+    readonly outcome: "updated" | "unchanged";
+    readonly sourceRevision: string;
+    readonly users?: number;
+    readonly workspaces?: number;
+    readonly memberships?: number;
+  }>;
+  claimArthCommand(
+    keyId: string,
+  ): Promise<import("@atharvan/domain").LeasedArthCommand | null>;
+  acknowledgeArthCommand(input: {
+    readonly keyId: string;
+    readonly acknowledgementFingerprint: string;
+    readonly acknowledgement: import("@atharvan/domain").ArthCommandAcknowledgement;
+  }): Promise<{
+    readonly outcome:
+      "completed" | "already_completed" | "retry_scheduled" | "dead_letter";
+    readonly state: import("@atharvan/domain").ArthCommandDeliveryState;
+  }>;
   handle(request: Request): Promise<Response>;
   getSession(headers: Headers): Promise<{
     readonly userId: string;
+    readonly sessionId: string;
     readonly createdAt: Date;
     readonly authenticationMethod: OperatorAuthenticationMethod;
     readonly strongAuthenticationAt: Date | null;
@@ -155,7 +280,9 @@ export interface AuthenticationRuntime {
   ): Promise<CustomerDirectoryInspection | null>;
   reconcileCustomerDirectorySnapshot(
     actor: AuthenticatedOperator,
-    input: ReconcileCustomerDirectorySnapshotCommand,
+    input: ReconcileCustomerDirectorySnapshotCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{
     readonly outcome: "updated" | "unchanged";
     readonly sourceRevision: string;
@@ -169,7 +296,7 @@ export interface AuthenticationRuntime {
   ): Promise<CustomerRestrictionRegistry>;
   setCustomerRestriction(
     actor: AuthenticatedOperator,
-    input: SetCustomerRestrictionCommand,
+    input: SetCustomerRestrictionCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "updated" | "unchanged";
     readonly restrictionId: string;
@@ -178,18 +305,20 @@ export interface AuthenticationRuntime {
   }>;
   recordCustomerRestrictionObservation(
     actor: AuthenticatedOperator,
-    input: RecordCustomerRestrictionObservationCommand,
+    input: RecordCustomerRestrictionObservationCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{
     readonly outcome: "created" | "unchanged";
     readonly restrictionId: string;
   }>;
   createCustomerInternalNote(
     actor: AuthenticatedOperator,
-    input: CreateCustomerInternalNoteCommand,
+    input: CreateCustomerInternalNoteCommand & { readonly commandId: string },
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
   setCustomerRiskMarker(
     actor: AuthenticatedOperator,
-    input: SetCustomerRiskMarkerCommand,
+    input: SetCustomerRiskMarkerCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "updated" | "unchanged";
     readonly id: string;
@@ -197,7 +326,9 @@ export interface AuthenticationRuntime {
   }>;
   requestCustomerOwnershipTransfer(
     actor: AuthenticatedOperator,
-    input: RequestCustomerOwnershipTransferCommand,
+    input: RequestCustomerOwnershipTransferCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{
     readonly outcome: "created";
     readonly id: string;
@@ -205,7 +336,9 @@ export interface AuthenticationRuntime {
   }>;
   recordCustomerOwnershipTransferObservation(
     actor: AuthenticatedOperator,
-    input: RecordCustomerOwnershipTransferObservationCommand,
+    input: RecordCustomerOwnershipTransferObservationCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{
     readonly outcome: "created" | "unchanged";
     readonly id: string;
@@ -231,50 +364,75 @@ export interface AuthenticationRuntime {
   exportPlatformAuditEvents(
     actor: AuthenticatedOperator,
     query: PlatformAuditQuery,
+    correlationId: string,
   ): Promise<PlatformAuditExport>;
   createOperatorInvitation(
     actor: AuthenticatedOperator,
-    input: OperatorInvitationCommand,
+    input: OperatorInvitationCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "already_exists";
     readonly id: string;
   }>;
   addMembershipDomain(
     actor: AuthenticatedOperator,
-    input: MembershipDomainCommand,
+    input: MembershipDomainCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "already_exists";
     readonly id: string;
   }>;
   disableMembershipDomain(
     actor: AuthenticatedOperator,
-    input: DisableMembershipDomainCommand,
+    input: DisableMembershipDomainCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "already_exists";
     readonly id: string;
   }>;
   replaceOperatorRoles(
     actor: AuthenticatedOperator,
-    input: ReplaceOperatorRolesCommand,
+    input: ReplaceOperatorRolesCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "updated" | "unchanged";
     readonly operatorId: string;
   }>;
+  changeOperatorStatus(
+    actor: AuthenticatedOperator,
+    input: ChangeOperatorStatusCommand,
+  ): Promise<OperatorLifecycleResult>;
+  transferPlatformOwnership(
+    actor: AuthenticatedOperator,
+    input: import("@atharvan/domain").TransferPlatformOwnershipCommand,
+  ): Promise<{ outcome: "updated"; operatorId: string }>;
   createOperatorBreakGlassGrant(
     actor: AuthenticatedOperator,
-    input: CreateOperatorBreakGlassGrantCommand,
+    input: CreateOperatorBreakGlassGrantCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
   revokeOperatorBreakGlassGrant(
     actor: AuthenticatedOperator,
-    input: RevokeOperatorBreakGlassGrantCommand,
+    input: RevokeOperatorBreakGlassGrantCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
   reviewOperatorBreakGlassGrant(
     actor: AuthenticatedOperator,
-    input: ReviewOperatorBreakGlassGrantCommand,
+    input: ReviewOperatorBreakGlassGrantCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
   setPlatformConfiguration(
     actor: AuthenticatedOperator,
-    input: SetPlatformConfigurationCommand,
+    input: SetPlatformConfigurationCommand & { readonly commandId: string },
+  ): Promise<{
+    readonly outcome: "updated" | "unchanged";
+    readonly key: string;
+    readonly revisionNumber?: number;
+  }>;
+  rollbackPlatformConfiguration(
+    actor: AuthenticatedOperator,
+    input: RollbackPlatformConfigurationCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{
     readonly outcome: "updated" | "unchanged";
     readonly key: string;
@@ -282,19 +440,23 @@ export interface AuthenticationRuntime {
   }>;
   createPlatformSecret(
     actor: AuthenticatedOperator,
-    input: CreatePlatformSecretCommand,
+    input: CreatePlatformSecretCommand & { readonly commandId: string },
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
+  retryPlatformSecretProvisioning(
+    actor: AuthenticatedOperator,
+    input: RotatePlatformSecretCommand & { readonly commandId: string },
+  ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
   rotatePlatformSecret(
     actor: AuthenticatedOperator,
-    input: RotatePlatformSecretCommand,
+    input: RotatePlatformSecretCommand & { readonly commandId: string },
   ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
   revokePlatformSecret(
     actor: AuthenticatedOperator,
-    input: RevokePlatformSecretCommand,
+    input: RevokePlatformSecretCommand & { readonly commandId: string },
   ): Promise<{ readonly outcome: "updated"; readonly id: string }>;
   setModelProvider(
     actor: AuthenticatedOperator,
-    input: SetModelProviderCommand,
+    input: SetModelProviderCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "updated" | "unchanged";
     readonly id: string;
@@ -302,7 +464,7 @@ export interface AuthenticationRuntime {
   }>;
   setModel(
     actor: AuthenticatedOperator,
-    input: SetModelCommand,
+    input: SetModelCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "updated" | "unchanged";
     readonly id: string;
@@ -310,11 +472,11 @@ export interface AuthenticationRuntime {
   }>;
   recordModelProviderHealth(
     actor: AuthenticatedOperator,
-    input: RecordModelProviderHealthCommand,
+    input: RecordModelProviderHealthCommand & { readonly commandId: string },
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
   setModelRoutingPolicy(
     actor: AuthenticatedOperator,
-    input: SetModelRoutingPolicyCommand,
+    input: SetModelRoutingPolicyCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "updated" | "unchanged";
     readonly id: string;
@@ -341,7 +503,9 @@ export interface AuthenticationRuntime {
   }>;
   recordPlatformIntegrationHealth(
     actor: AuthenticatedOperator,
-    input: RecordPlatformIntegrationHealthCommand,
+    input: RecordPlatformIntegrationHealthCommand & {
+      readonly commandId: string;
+    },
   ): Promise<{ readonly outcome: "created"; readonly id: string }>;
   setPlatformAdapterRelease(
     actor: AuthenticatedOperator,
@@ -353,7 +517,7 @@ export interface AuthenticationRuntime {
   }>;
   setPlatformFeatureFlag(
     actor: AuthenticatedOperator,
-    input: SetPlatformFeatureFlagCommand,
+    input: SetPlatformFeatureFlagCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "updated" | "unchanged";
     readonly id: string;
@@ -469,6 +633,7 @@ export interface RecordCustomerOwnershipTransferObservationCommand {
 }
 
 export interface SetPlatformAdapterReleaseCommand {
+  readonly commandId?: string;
   readonly key: string;
   readonly version: string;
   readonly displayName: string;
@@ -497,6 +662,7 @@ export interface SetPlatformAdapterReleaseCommand {
 }
 
 export interface SetPlatformIntegrationCommand {
+  readonly commandId?: string;
   readonly key: string;
   readonly displayName: string;
   readonly protocol: PlatformIntegrationProtocol;
@@ -505,6 +671,7 @@ export interface SetPlatformIntegrationCommand {
   readonly adapterPackage: string;
   readonly adapterVersion: string;
   readonly documentationUrl: string | null;
+  readonly healthProbe: PlatformHttpHealthProbe | null;
   readonly authorizationUrl: string | null;
   readonly tokenUrl: string | null;
   readonly clientId: string | null;
@@ -546,6 +713,7 @@ export interface SetModelRoutingPolicyCommand {
 }
 
 export interface SetModelRoutingControlCommand {
+  readonly commandId?: string;
   readonly targetKind: ModelRoutingControlTargetKind;
   readonly targetId: string;
   readonly state: ModelRoutingControlState;
@@ -567,6 +735,7 @@ export interface SetModelProviderCommand {
   readonly displayName: string;
   readonly adapterKind: ModelProviderAdapterKind;
   readonly baseUrl: string | null;
+  readonly healthProbe: PlatformHttpHealthProbe | null;
   readonly credentialReferenceId?: string | null;
   readonly regions: ReadonlyArray<string>;
   readonly maximumDataClassification: ModelDataClassification;
@@ -671,6 +840,15 @@ export interface SetPlatformConfigurationCommand {
   readonly correlationId: string;
 }
 
+export interface RollbackPlatformConfigurationCommand {
+  readonly key: string;
+  readonly scope: PlatformConfigurationScope;
+  readonly targetRevisionNumber: number;
+  readonly confirmation: string;
+  readonly reason: string;
+  readonly correlationId: string;
+}
+
 export interface MembershipDomainCommand {
   readonly domain: string;
   readonly includeSubdomains: boolean;
@@ -688,8 +866,11 @@ export interface DisableMembershipDomainCommand {
 type AppEnvironment = {
   Bindings: RuntimeBindings;
   Variables: {
+    authenticationRuntime?: Promise<AuthenticationRuntime>;
     operator: AuthenticatedOperator;
     authenticationAssurance: OperatorAuthenticationAssurance;
+    sessionIdentity: OperatorSessionIdentity;
+    traceContext: TraceContext;
   };
 };
 
@@ -697,17 +878,28 @@ export interface AppDependencies {
   resolveAuthenticationRuntime(
     context: Context<AppEnvironment>,
   ): Promise<AuthenticationRuntime>;
+  checkReadiness?(
+    bindings: RuntimeBindings,
+  ): Promise<import("@atharvan/db").DatabaseReadinessEvidence>;
 }
 
 const defaultDependencies: AppDependencies = {
   resolveAuthenticationRuntime(context) {
-    const requestOrigin = new URL(context.req.url).origin;
-
-    return resolveProductionAuthenticationRuntime({
-      bindings: context.env,
-      requestOrigin,
-      waitUntil: (operation) => context.executionCtx.waitUntil(operation),
-    });
+    let runtime = context.get("authenticationRuntime");
+    if (!runtime) {
+      runtime = resolveProductionAuthenticationRuntime({
+        bindings: context.env,
+        requestOrigin: new URL(context.req.url).origin,
+      });
+      context.set("authenticationRuntime", runtime);
+    }
+    return runtime;
+  },
+  async checkReadiness(bindings) {
+    const config = parseAuthenticationRuntimeConfig(bindings);
+    return runWithNeonDatabase(config.DATABASE_URL, (database) =>
+      checkPostgresReadiness(database),
+    );
   },
 };
 
@@ -718,6 +910,51 @@ export function createApp(
 
   app.use("*", requestId());
   app.use("*", secureHeaders());
+  app.use("*", async (context, next) => {
+    const traceContext = createTraceContext(context.req.header("traceparent"));
+    const startedAt = performance.now();
+    context.set("traceContext", traceContext);
+    await next();
+    const requestId = context.get("requestId");
+    context.header("traceparent", formatTraceparent(traceContext));
+    context.header("x-request-id", requestId);
+    const status = context.res.status;
+    writeTelemetry(status >= 500 ? "error" : "info", "http.request.completed", {
+      service: "atharvan-control-plane",
+      environment: context.env.ATHARVAN_ENVIRONMENT,
+      requestId,
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      method: context.req.method,
+      route: normalizeTelemetryPath(context.req.routePath || context.req.path),
+      status,
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      outcome:
+        status >= 500
+          ? "server_error"
+          : status >= 400
+            ? "client_error"
+            : "success",
+    });
+  });
+  app.use("*", async (context, next) => {
+    try {
+      await next();
+    } finally {
+      const pending = context.get("authenticationRuntime");
+      const runtime = pending ? await pending.catch(() => null) : null;
+      if (runtime)
+        await runtime.close().catch(() => {
+          const traceContext = context.get("traceContext");
+          writeTelemetry("error", "database.request_cleanup_failed", {
+            requestId: context.get("requestId"),
+            traceId: traceContext.traceId,
+            spanId: traceContext.spanId,
+          });
+        });
+    }
+  });
 
   app.get("/health/live", (context) => {
     return context.json({
@@ -727,18 +964,80 @@ export function createApp(
     });
   });
 
-  app.get("/health/ready", (context) => {
-    const config = parseRuntimeConfig(context.env);
+  app.get("/health/ready", async (context) => {
+    context.header("cache-control", "no-store");
+    let environment: RuntimeBindings["ATHARVAN_ENVIRONMENT"];
+    try {
+      environment = parseRuntimeConfig(context.env).ATHARVAN_ENVIRONMENT;
+      const evidence = await (
+        dependencies.checkReadiness ?? defaultDependencies.checkReadiness!
+      )(context.env);
+      return context.json(
+        {
+          service: "atharvan-control-plane",
+          status: "ready",
+          environment,
+          schemaVersion: evidence.schemaVersion,
+          checkedAt: evidence.checkedAt,
+          requestId: context.get("requestId"),
+        },
+        200,
+      );
+    } catch {
+      context.header("retry-after", "30");
+      return context.json(
+        {
+          service: "atharvan-control-plane",
+          status: "unavailable",
+          code: "readiness_check_failed",
+          message:
+            "Runtime configuration, database access, or schema compatibility is unavailable.",
+          requestId: context.get("requestId"),
+        },
+        503,
+      );
+    }
+  });
 
-    return context.json(
-      {
-        service: "atharvan-control-plane",
-        status: "ready",
-        environment: config.ATHARVAN_ENVIRONMENT,
-        requestId: context.get("requestId"),
-      },
-      200,
+  app.post("/v1/webhooks/resend", async (context) => {
+    const config = parseAuthenticationRuntimeConfig(context.env);
+    if (!config.RESEND_WEBHOOK_SECRET)
+      return context.json(
+        {
+          code: "webhook_unavailable",
+          message: "Transactional email feedback is not configured.",
+          requestId: context.get("requestId"),
+        },
+        503,
+      );
+    const body = await readBoundedRawBody(context.req.raw, 65_536);
+    if (body === null) return invalidRequest(context);
+    let event;
+    try {
+      event = await verifyResendEmailWebhook({
+        body,
+        eventId: context.req.header("svix-id") ?? null,
+        timestamp: context.req.header("svix-timestamp") ?? null,
+        signature: context.req.header("svix-signature") ?? null,
+        secret: config.RESEND_WEBHOOK_SECRET,
+      });
+    } catch {
+      return context.json(
+        {
+          code: "webhook_authentication_failed",
+          message: "The webhook request could not be authenticated.",
+          requestId: context.get("requestId"),
+        },
+        400,
+      );
+    }
+    await runWithNeonDatabase(config.DATABASE_URL, async (database) =>
+      createPostgresTransactionalEmailEventStore(database).record(
+        config.ATHARVAN_ENVIRONMENT,
+        event,
+      ),
     );
+    return context.body(null, 204);
   });
 
   app.all("/api/auth/*", async (context) => {
@@ -759,6 +1058,90 @@ export function createApp(
     }
 
     return runtime.handle(context.req.raw);
+  });
+
+  app.post("/v1/internal/arth/commands/claim", async (context) => {
+    context.header("cache-control", "no-store");
+    try {
+      const principal = await authenticateArthWorkloadRequest(
+        context.req.raw,
+        parseAuthenticationRuntimeConfig(context.env),
+      );
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      await runtime.consumeArthWorkloadNonce({
+        keyId: principal.keyId,
+        nonce: principal.nonce,
+        requestTimestamp: principal.requestTime,
+      });
+      const command = await runtime.claimArthCommand(principal.keyId);
+      return command === null
+        ? context.body(null, 204)
+        : context.json({ command }, 200);
+    } catch (error) {
+      return arthWorkloadError(context, error);
+    }
+  });
+
+  app.post(
+    "/v1/internal/arth/commands/:commandId/acknowledgement",
+    async (context) => {
+      context.header("cache-control", "no-store");
+      try {
+        const principal = await authenticateArthWorkloadRequest(
+          context.req.raw,
+          parseAuthenticationRuntimeConfig(context.env),
+        );
+        const runtime =
+          await dependencies.resolveAuthenticationRuntime(context);
+        await runtime.consumeArthWorkloadNonce({
+          keyId: principal.keyId,
+          nonce: principal.nonce,
+          requestTimestamp: principal.requestTime,
+        });
+        const input = await readJson(context, parseArthCommandAcknowledgement);
+        const commandId = context.req.param("commandId").trim().toLowerCase();
+        if (input === null || !uuidPattern.test(commandId))
+          return invalidRequest(context);
+        return context.json(
+          await runtime.acknowledgeArthCommand({
+            keyId: principal.keyId,
+            acknowledgementFingerprint: principal.contentSha256,
+            acknowledgement: { commandId, ...input },
+          }),
+        );
+      } catch (error) {
+        return arthWorkloadError(context, error);
+      }
+    },
+  );
+
+  app.post("/v1/internal/arth/customer-directory/snapshot", async (context) => {
+    context.header("cache-control", "no-store");
+    try {
+      const principal = await authenticateArthWorkloadRequest(
+        context.req.raw,
+        parseAuthenticationRuntimeConfig(context.env),
+      );
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      await runtime.consumeArthWorkloadNonce({
+        keyId: principal.keyId,
+        nonce: principal.nonce,
+        requestTimestamp: principal.requestTime,
+      });
+      const input = await readJson(context, parseArthCustomerDirectorySnapshot);
+      if (input === null) return invalidRequest(context);
+      return context.json(
+        await runtime.reconcileArthCustomerDirectorySnapshot({
+          ...input,
+          sourceWorkloadKeyId: principal.keyId,
+          requestNonce: principal.nonce,
+          payloadSha256: principal.contentSha256,
+        }),
+        200,
+      );
+    } catch (error) {
+      return arthWorkloadError(context, error);
+    }
   });
 
   app.use("/v1/platform/*", async (context, next) => {
@@ -817,11 +1200,18 @@ export function createApp(
 
     context.set("operator", {
       ...operator,
+      effectiveCapabilities: [
+        ...new Set([...operator.effectiveCapabilities, ownSessionCapability]),
+      ],
       ...(freshSessionProof === undefined
         ? {}
         : { stepUpVerifiedAt: freshSessionProof }),
     });
     context.set("authenticationAssurance", assurance);
+    context.set("sessionIdentity", {
+      userId: session.userId,
+      sessionId: session.sessionId,
+    });
 
     if (context.req.path === "/v1/platform/authentication/assurance") {
       await next();
@@ -857,7 +1247,7 @@ export function createApp(
     context.json(context.get("authenticationAssurance")),
   );
 
-  app.get("/v1/platform/overview", (context) => {
+  app.get("/v1/platform/overview", async (context) => {
     if (
       !operatorHasCapability(context.get("operator"), "platform:overview:read")
     ) {
@@ -871,8 +1261,288 @@ export function createApp(
       );
     }
 
-    return context.json(unknownPlatformOverview);
+    context.header("Cache-Control", "no-store");
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const [
+      overview,
+      emailDeliveryHealth,
+      arthCommandDeliveryHealth,
+      alertDeliveryHealth,
+      platformHealthProbeQueueHealth,
+      operationalRetentionHealth,
+    ] = await Promise.all([
+      runtime.readPlatformOverview(),
+      runtime.readEmailDeliveryHealth().catch(() => null),
+      runtime.readArthCommandDeliveryHealth().catch(() => null),
+      runtime.readOperationalAlertDeliveryHealth().catch(() => null),
+      runtime.readPlatformHealthProbeQueueHealth().catch(() => null),
+      runtime.readOperationalRetentionHealth().catch(() => null),
+    ]);
+    return context.json({
+      ...overview,
+      operationalRetention: operationalRetentionHealth,
+      alerts: buildOperationalAlerts(overview.environment, overview.evidence, {
+        emailDeliveryConfigured: runtime.emailDeliveryConfigured,
+        emailFeedbackConfigured: runtime.emailFeedbackConfigured,
+        secretProviderConfigured: runtime.secretProviderConfigured,
+        emailDeliveryHealth,
+        arthWorkloadConfigured: runtime.arthWorkloadConfigured,
+        arthCommandDeliveryHealth,
+        platformHealthProbeQueueHealth,
+        operationalRetentionHealth,
+        alertDeliveryConfigured: runtime.alertDeliveryConfigured,
+        alertDeliveryHealth,
+      }),
+    });
   });
+
+  app.get("/v1/platform/email-deliveries", async (context) => {
+    context.header("cache-control", "no-store");
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:security:read")
+    )
+      return capabilityRequired(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(
+      await runtime.listEmailDeliveries(
+        context.get("operator"),
+        context.get("requestId"),
+      ),
+    );
+  });
+  app.post("/v1/platform/email-deliveries/:deliveryId", async (context) => {
+    const input = await readJson(context, (value) => {
+      if (!isRecord(value)) return null;
+      const reason = readReason(value.reason);
+      return reason && (value.action === "retry" || value.action === "cancel")
+        ? ({ action: value.action, reason } as const)
+        : null;
+    });
+    const deliveryId = context.req.param("deliveryId");
+    if (
+      !input ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        deliveryId,
+      )
+    )
+      return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:security:write",
+        name: "email.delivery.manage",
+        version: 1,
+        targetType: "email_delivery",
+        targetId: deliveryId,
+        payload: input,
+        reason: input.reason,
+      },
+      (commandId) =>
+        runtime.manageEmailDelivery(context.get("operator"), {
+          ...input,
+          deliveryId,
+          commandId,
+          correlationId: context.get("requestId"),
+          sessionId: context.get("sessionIdentity").sessionId,
+        }),
+    );
+  });
+
+  app.post(
+    "/v1/platform/email-recipient-suppressions/:suppressionId/restore",
+    async (context) => {
+      const input = await readJson(context, (value) => {
+        if (!isRecord(value)) return null;
+        const reason = readReason(value.reason);
+        return reason ? { reason } : null;
+      });
+      const suppressionId = context.req.param("suppressionId");
+      if (!input || !uuidPattern.test(suppressionId))
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:security:write",
+          name: "email.recipient.restore",
+          version: 1,
+          targetType: "transactional_email_recipient_suppression",
+          targetId: suppressionId,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.restoreEmailRecipient(context.get("operator"), {
+            ...input,
+            suppressionId,
+            commandId,
+            correlationId: context.get("requestId"),
+            sessionId: context.get("sessionIdentity").sessionId,
+          }),
+      );
+    },
+  );
+
+  app.get("/v1/platform/approvals", async (context) => {
+    context.header("cache-control", "no-store");
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(
+      await runtime.listApprovals(
+        context.get("operator"),
+        context.get("requestId"),
+      ),
+    );
+  });
+  app.post("/v1/platform/approvals", async (context) => {
+    const input = await readJson(context, (value) => {
+      if (!isRecord(value)) return null;
+      const scope = parseApprovalScope(value.scope),
+        reason = readReason(value.reason);
+      return scope && reason ? { scope, reason } : null;
+    });
+    if (!input) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: approvalCapability(input.scope),
+        name: "approval.request",
+        version: 1,
+        targetType: "approval_intent",
+        targetId:
+          input.scope.kind === "operator_break_glass"
+            ? input.scope.targetOperatorId
+            : input.scope.kind === "platform_ownership_transfer"
+              ? input.scope.successorOperatorId
+              : input.scope.workspaceId,
+        payload: input,
+        reason: input.reason,
+      },
+      (commandId) =>
+        runtime.requestApproval(
+          {
+            commandId,
+            actor: context.get("operator"),
+            sessionId: context.get("sessionIdentity").sessionId,
+            correlationId: context.get("requestId"),
+          },
+          input.scope,
+          input.reason,
+        ),
+    );
+  });
+  app.post("/v1/platform/approvals/:approvalId/decision", async (context) => {
+    const input = await readJson(context, (value) => {
+      if (!isRecord(value)) return null;
+      const reason = readReason(value.reason),
+        decision = value.decision;
+      return reason &&
+        (decision === "approved" ||
+          decision === "rejected" ||
+          decision === "revoked")
+        ? ({ reason, decision } as const)
+        : null;
+    });
+    if (!input) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability:
+          input.decision === "revoked"
+            ? ownSessionCapability
+            : "platform:security:write",
+        name: "approval.decide",
+        version: 1,
+        targetType: "platform_approval",
+        targetId: context.req.param("approvalId"),
+        payload: input,
+        reason: input.reason,
+      },
+      (commandId) =>
+        runtime.decideApproval(
+          {
+            commandId,
+            actor: context.get("operator"),
+            sessionId: context.get("sessionIdentity").sessionId,
+            correlationId: context.get("requestId"),
+          },
+          context.req.param("approvalId"),
+          input.decision,
+          input.reason,
+        ),
+    );
+  });
+
+  app.get("/v1/platform/authentication/sessions", async (context) => {
+    context.header("Cache-Control", "no-store");
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(
+      await runtime.listOwnSessions(context.get("sessionIdentity")),
+    );
+  });
+
+  app.post(
+    "/v1/platform/authentication/sessions/:sessionId/revoke",
+    async (context) => {
+      context.header("Cache-Control", "no-store");
+      const targetSessionId = context.req.param("sessionId");
+      const input = await readJson(context, (value) => {
+        if (!isRecord(value)) return null;
+        const reason = readReason(value.reason);
+        return reason === null ? null : { reason };
+      });
+      if (input === null || !/^[A-Za-z0-9_-]{1,128}$/.test(targetSessionId))
+        return invalidRequest(context);
+      if (!context.get("authenticationAssurance").recentStepUp) {
+        return context.json(
+          {
+            code: "recent_step_up_required",
+            message: "Verify your passkey before revoking a session.",
+          },
+          403,
+        );
+      }
+      const identity = context.get("sessionIdentity");
+      if (identity.sessionId === targetSessionId) {
+        return context.json(
+          {
+            code: "current_session_protected",
+            message: "Use Sign out to end your current session.",
+          },
+          409,
+        );
+      }
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: ownSessionCapability,
+          name: "operator.session.revoke",
+          version: 1,
+          targetType: "operator_session",
+          targetId: targetSessionId,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.revokeOwnSession({
+            ...identity,
+            commandId,
+            operatorId: context.get("operator").operatorId,
+            targetSessionId,
+            reason: input.reason,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
 
   app.get("/v1/platform/customer-directory/status", async (context) => {
     const operator = context.get("operator");
@@ -951,9 +1621,10 @@ export function createApp(
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.reconcileCustomerDirectorySnapshot(context.get("operator"), {
           ...input,
+          commandId,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1010,8 +1681,9 @@ export function createApp(
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.setCustomerRestriction(context.get("operator"), {
+          commandId,
           ...input,
           correlationId: context.get("requestId"),
         }),
@@ -1027,6 +1699,7 @@ export function createApp(
       );
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const restrictionId = input.restrictionId.toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1035,15 +1708,17 @@ export function createApp(
           name: "customer-restriction.observation.reconcile",
           version: 1,
           targetType: "customer_restriction",
-          targetId: input.restrictionId,
+          targetId: restrictionId,
           payload: input,
           reason: "Reconcile the restriction state observed by Arth.",
         },
-        () =>
+        (commandId) =>
           runtime.recordCustomerRestrictionObservation(
             context.get("operator"),
             {
               ...input,
+              commandId,
+              restrictionId,
               correlationId: context.get("requestId"),
             },
           ),
@@ -1072,9 +1747,10 @@ export function createApp(
         sensitivePayloadKeys: ["body"],
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.createCustomerInternalNote(context.get("operator"), {
           ...input,
+          commandId,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1100,9 +1776,10 @@ export function createApp(
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.setCustomerRiskMarker(context.get("operator"), {
           ...input,
+          commandId,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1125,8 +1802,9 @@ export function createApp(
         reason: input.reason,
         approvalReference: input.approvalReference,
       },
-      () =>
+      (commandId) =>
         runtime.requestCustomerOwnershipTransfer(context.get("operator"), {
+          commandId,
           ...input,
           correlationId: context.get("requestId"),
         }),
@@ -1139,6 +1817,7 @@ export function createApp(
       const input = await readJson(context, parseOwnershipTransferObservation);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const transferId = input.transferId.toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1147,14 +1826,19 @@ export function createApp(
           name: "workspace.ownership-transfer.observation.reconcile",
           version: 1,
           targetType: "customer_workspace_ownership_transfer",
-          targetId: input.transferId,
+          targetId: transferId,
           payload: input,
           reason: "Reconcile the ownership state observed by Arth.",
         },
-        () =>
+        (commandId) =>
           runtime.recordCustomerOwnershipTransferObservation(
             context.get("operator"),
-            { ...input, correlationId: context.get("requestId") },
+            {
+              ...input,
+              commandId,
+              transferId,
+              correlationId: context.get("requestId"),
+            },
           ),
       );
     },
@@ -1180,12 +1864,29 @@ export function createApp(
     if (query === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
     try {
-      const exported = await runtime.exportPlatformAuditEvents(operator, query);
+      const exported = await runtime.exportPlatformAuditEvents(
+        operator,
+        query,
+        context.get("requestId"),
+      );
       return new Response(exported.content, {
         status: 200,
         headers: {
+          "cache-control": "no-store",
           "content-type": "application/x-ndjson; charset=utf-8",
-          "content-disposition": `attachment; filename="atharvan-audit-${new Date().toISOString().slice(0, 10)}.ndjson"`,
+          "content-disposition": `attachment; filename="atharvan-audit-${exported.generatedAt.slice(0, 10)}-${exported.contentSha256.slice(0, 12)}.ndjson"`,
+          "content-digest": auditContentDigestHeader(exported.contentSha256),
+          etag: `"${exported.contentSha256}"`,
+          "x-content-type-options": "nosniff",
+          "x-atharvan-audit-schema-version": String(exported.schemaVersion),
+          "x-atharvan-audit-environment": exported.environment,
+          "x-atharvan-audit-generated-at": exported.generatedAt,
+          "x-atharvan-audit-range-start": exported.rangeStart,
+          "x-atharvan-audit-range-end": exported.rangeEnd,
+          "x-atharvan-audit-content-sha256": exported.contentSha256,
+          "x-atharvan-audit-content-length": String(
+            exported.contentLengthBytes,
+          ),
           "x-atharvan-audit-item-count": String(exported.itemCount),
           "x-atharvan-audit-truncated": String(exported.truncated),
         },
@@ -1230,7 +1931,11 @@ export function createApp(
     }
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
-    return context.json({ items: await runtime.listOperators() });
+    return context.json({
+      items: await runtime.listOperators(),
+      viewerOperatorId: operator.operatorId,
+      canManageLifecycle: operator.isSuperAdministrator,
+    });
   });
 
   app.post("/v1/platform/operators/invitations", async (context) => {
@@ -1247,6 +1952,7 @@ export function createApp(
     }
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const email = input.email.trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1255,14 +1961,15 @@ export function createApp(
         name: "operator.invitation.create",
         version: 1,
         targetType: "operator_invitation",
-        targetId: input.email,
+        targetId: email,
         payload: input,
         reason: input.reason,
         approvalReference: input.approvalReference ?? null,
       },
-      () =>
+      (commandId) =>
         runtime.createOperatorInvitation(operator, {
-          email: input.email,
+          commandId,
+          email,
           organizationId: input.organizationId,
           roleKey: input.roleKey,
           reason: input.reason,
@@ -1318,6 +2025,7 @@ export function createApp(
     if (input === null) return invalidRequest(context);
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = context.req.param("key").trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1326,14 +2034,42 @@ export function createApp(
         name: "platform.configuration.set",
         version: 1,
         targetType: "platform_configuration",
-        targetId: context.req.param("key"),
+        targetId: key,
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.setPlatformConfiguration(context.get("operator"), {
           ...input,
-          key: context.req.param("key"),
+          commandId,
+          key,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
+
+  app.post("/v1/platform/configuration/:key/rollback", async (context) => {
+    const input = await readJson(context, parseRollbackPlatformConfiguration);
+    if (input === null) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = context.req.param("key").trim().toLowerCase();
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:configuration:write",
+        name: "platform.configuration.rollback",
+        version: 1,
+        targetType: "platform_configuration",
+        targetId: key,
+        payload: input,
+        reason: input.reason,
+      },
+      (commandId) =>
+        runtime.rollbackPlatformConfiguration(context.get("operator"), {
+          ...input,
+          commandId,
+          key,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1356,6 +2092,7 @@ export function createApp(
     const input = await readJson(context, parseCreatePlatformSecret);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = input.key.trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1364,18 +2101,51 @@ export function createApp(
         name: "platform.secret.create",
         version: 1,
         targetType: "platform_secret",
-        targetId: input.key,
+        targetId: key,
         payload: input,
         sensitivePayloadKeys: ["value"],
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.createPlatformSecret(context.get("operator"), {
           ...input,
+          commandId,
+          key,
           correlationId: context.get("requestId"),
         }),
     );
   });
+
+  app.post(
+    "/v1/platform/secret-references/:referenceId/retry-provisioning",
+    async (context) => {
+      const input = await readJson(context, parseRotatePlatformSecret);
+      if (input === null) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const referenceId = context.req.param("referenceId").trim().toLowerCase();
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:secrets:write",
+          name: "platform.secret.retry_provisioning",
+          version: 1,
+          targetType: "platform_secret",
+          targetId: referenceId,
+          payload: input,
+          sensitivePayloadKeys: ["value"],
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.retryPlatformSecretProvisioning(context.get("operator"), {
+            ...input,
+            commandId,
+            referenceId,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
 
   app.post(
     "/v1/platform/secret-references/:referenceId/rotate",
@@ -1383,6 +2153,7 @@ export function createApp(
       const input = await readJson(context, parseRotatePlatformSecret);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const referenceId = context.req.param("referenceId").trim().toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1391,15 +2162,16 @@ export function createApp(
           name: "platform.secret.rotate",
           version: 1,
           targetType: "platform_secret",
-          targetId: context.req.param("referenceId"),
+          targetId: referenceId,
           payload: input,
           sensitivePayloadKeys: ["value"],
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.rotatePlatformSecret(context.get("operator"), {
             ...input,
-            referenceId: context.req.param("referenceId"),
+            commandId,
+            referenceId,
             correlationId: context.get("requestId"),
           }),
       );
@@ -1420,6 +2192,7 @@ export function createApp(
     const input = await readJson(context, parseSetModelRoutingPolicy);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = context.req.param("key").trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1428,14 +2201,15 @@ export function createApp(
         name: "platform.model-routing.policy.set",
         version: 1,
         targetType: "model_routing_policy",
-        targetId: context.req.param("key"),
+        targetId: key,
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.setModelRoutingPolicy(context.get("operator"), {
           ...input,
-          key: context.req.param("key"),
+          commandId,
+          key,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1453,6 +2227,7 @@ export function createApp(
         return invalidRequest(context);
       }
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const targetId = context.req.param("targetId").trim().toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1461,15 +2236,16 @@ export function createApp(
           name: "platform.model-routing.control.set",
           version: 1,
           targetType: `model_routing_${targetKind}`,
-          targetId: context.req.param("targetId"),
+          targetId,
           payload: input,
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.setModelRoutingControl(context.get("operator"), {
             ...input,
+            commandId,
             targetKind,
-            targetId: context.req.param("targetId"),
+            targetId,
             correlationId: context.get("requestId"),
           }),
       );
@@ -1538,6 +2314,7 @@ export function createApp(
     const input = await readJson(context, parseSetPlatformFeatureFlag);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = context.req.param("key").trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1546,14 +2323,15 @@ export function createApp(
         name: "platform.feature-flag.set",
         version: 1,
         targetType: "platform_feature_flag",
-        targetId: context.req.param("key"),
+        targetId: key,
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.setPlatformFeatureFlag(context.get("operator"), {
           ...input,
-          key: context.req.param("key"),
+          commandId,
+          key,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1583,6 +2361,8 @@ export function createApp(
     const input = await readJson(context, parseSetPlatformAdapterRelease);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = context.req.param("key").trim().toLowerCase();
+    const version = context.req.param("version").trim();
     return executeCommand(
       context,
       runtime,
@@ -1591,7 +2371,7 @@ export function createApp(
         name: "platform.adapter-release.set",
         version: 1,
         targetType: "platform_adapter_release",
-        targetId: `${context.req.param("key")}@${context.req.param("version")}`,
+        targetId: `${key}@${version}`,
         payload: input,
         reason: input.reason,
         evidenceReferences:
@@ -1599,11 +2379,12 @@ export function createApp(
             ? []
             : [input.securityReviewReference],
       },
-      () =>
+      (commandId) =>
         runtime.setPlatformAdapterRelease(context.get("operator"), {
           ...input,
-          key: context.req.param("key"),
-          version: context.req.param("version"),
+          commandId,
+          key,
+          version,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1613,6 +2394,7 @@ export function createApp(
     const input = await readJson(context, parseSetPlatformIntegration);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = context.req.param("key").trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1621,14 +2403,15 @@ export function createApp(
         name: "platform.integration.set",
         version: 1,
         targetType: "platform_integration",
-        targetId: context.req.param("key"),
+        targetId: key,
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.setPlatformIntegration(context.get("operator"), {
           ...input,
-          key: context.req.param("key"),
+          commandId,
+          key,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1640,6 +2423,10 @@ export function createApp(
       const input = await readJson(context, parsePlatformIntegrationHealth);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const integrationId = context.req
+        .param("integrationId")
+        .trim()
+        .toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1648,14 +2435,15 @@ export function createApp(
           name: "platform.integration-health.record",
           version: 1,
           targetType: "platform_integration",
-          targetId: context.req.param("integrationId"),
+          targetId: integrationId,
           payload: input,
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.recordPlatformIntegrationHealth(context.get("operator"), {
             ...input,
-            integrationId: context.req.param("integrationId"),
+            commandId,
+            integrationId,
             correlationId: context.get("requestId"),
           }),
       );
@@ -1666,6 +2454,7 @@ export function createApp(
     const input = await readJson(context, parseSetModelProvider);
     if (input === null) return invalidRequest(context);
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const key = context.req.param("key").trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1674,14 +2463,15 @@ export function createApp(
         name: "platform.model-provider.set",
         version: 1,
         targetType: "model_provider",
-        targetId: context.req.param("key"),
+        targetId: key,
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.setModelProvider(context.get("operator"), {
           ...input,
-          key: context.req.param("key"),
+          commandId,
+          key,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1693,6 +2483,8 @@ export function createApp(
       const input = await readJson(context, parseSetModel);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const providerId = context.req.param("providerId").trim().toLowerCase();
+      const key = context.req.param("key").trim().toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1701,15 +2493,16 @@ export function createApp(
           name: "platform.model.set",
           version: 1,
           targetType: "model",
-          targetId: `${context.req.param("providerId")}/${context.req.param("key")}`,
+          targetId: `${providerId}/${key}`,
           payload: input,
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.setModel(context.get("operator"), {
             ...input,
-            providerId: context.req.param("providerId"),
-            key: context.req.param("key"),
+            commandId,
+            providerId,
+            key,
             correlationId: context.get("requestId"),
           }),
       );
@@ -1722,6 +2515,7 @@ export function createApp(
       const input = await readJson(context, parseModelProviderHealth);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const providerId = context.req.param("providerId").trim().toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1730,14 +2524,15 @@ export function createApp(
           name: "platform.model-provider-health.record",
           version: 1,
           targetType: "model_provider",
-          targetId: context.req.param("providerId"),
+          targetId: providerId,
           payload: input,
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.recordModelProviderHealth(context.get("operator"), {
             ...input,
-            providerId: context.req.param("providerId"),
+            commandId,
+            providerId,
             correlationId: context.get("requestId"),
           }),
       );
@@ -1750,6 +2545,7 @@ export function createApp(
       const input = await readJson(context, parseRevokePlatformSecret);
       if (input === null) return invalidRequest(context);
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const referenceId = context.req.param("referenceId").trim().toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1758,19 +2554,105 @@ export function createApp(
           name: "platform.secret.revoke",
           version: 1,
           targetType: "platform_secret",
-          targetId: context.req.param("referenceId"),
+          targetId: referenceId,
           payload: input,
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.revokePlatformSecret(context.get("operator"), {
-            referenceId: context.req.param("referenceId"),
+            commandId,
+            referenceId,
             reason: input.reason,
             correlationId: context.get("requestId"),
           }),
       );
     },
   );
+
+  app.post("/v1/platform/operators/ownership-transfer", async (context) => {
+    const input = await readJson(context, (value) => {
+      if (!isRecord(value)) return null;
+      const successorOperatorId = readTrimmedString(
+          value.successorOperatorId,
+          36,
+        ),
+        approvalId = readTrimmedString(value.approvalId, 36),
+        confirmation = readTrimmedString(value.confirmation, 360),
+        reason = readReason(value.reason);
+      return successorOperatorId && approvalId && confirmation && reason
+        ? { successorOperatorId, approvalId, confirmation, reason }
+        : null;
+    });
+    if (!input) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:operators:ownership:transfer",
+        name: "operator.ownership.transfer",
+        version: 1,
+        targetType: "operator",
+        targetId: input.successorOperatorId,
+        payload: input,
+        reason: input.reason,
+        approvalReference: input.approvalId,
+      },
+      (commandId) =>
+        runtime.transferPlatformOwnership(context.get("operator"), {
+          ...input,
+          commandId,
+          sessionId: context.get("sessionIdentity").sessionId,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
+
+  app.post("/v1/platform/operators/:operatorId/status", async (context) => {
+    const input = await readJson(context, (value) => {
+      if (!isRecord(value)) return null;
+      const reason = readReason(value.reason);
+      const confirmation = readTrimmedString(value.confirmation, 340);
+      const action = value.action;
+      const expectedStatus = value.expectedStatus;
+      if (
+        !reason ||
+        !confirmation ||
+        (action !== "suspend" &&
+          action !== "restore" &&
+          action !== "deactivate") ||
+        (expectedStatus !== "active" &&
+          expectedStatus !== "suspended" &&
+          expectedStatus !== "invited" &&
+          expectedStatus !== "verification_pending")
+      )
+        return null;
+      return { reason, confirmation, action, expectedStatus } as const;
+    });
+    if (!input) return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:operators:lifecycle:write",
+        name: "operator.status.change",
+        version: 1,
+        targetType: "operator",
+        targetId: context.req.param("operatorId"),
+        payload: input,
+        reason: input.reason,
+      },
+      (commandId) =>
+        runtime.changeOperatorStatus(context.get("operator"), {
+          ...input,
+          commandId,
+          targetOperatorId: context.req.param("operatorId"),
+          sessionId: context.get("sessionIdentity").sessionId,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
 
   app.put("/v1/platform/operators/:operatorId/roles", async (context) => {
     const input = await readJson(context, parseReplaceOperatorRoles);
@@ -1792,9 +2674,10 @@ export function createApp(
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.replaceOperatorRoles(context.get("operator"), {
           ...input,
+          commandId,
           targetOperatorId: context.req.param("operatorId"),
           correlationId: context.get("requestId"),
         }),
@@ -1821,9 +2704,10 @@ export function createApp(
           approvalReference: input.approvalReference,
           evidenceReferences: [input.incidentReference],
         },
-        () =>
+        (commandId) =>
           runtime.createOperatorBreakGlassGrant(context.get("operator"), {
             ...input,
+            commandId,
             targetOperatorId: context.req.param("operatorId"),
             correlationId: context.get("requestId"),
           }),
@@ -1849,8 +2733,9 @@ export function createApp(
           payload: input,
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.revokeOperatorBreakGlassGrant(context.get("operator"), {
+            commandId,
             grantId: context.req.param("grantId"),
             reason: input.reason,
             correlationId: context.get("requestId"),
@@ -1877,8 +2762,9 @@ export function createApp(
           payload: input,
           reason: input.summary,
         },
-        () =>
+        (commandId) =>
           runtime.reviewOperatorBreakGlassGrant(context.get("operator"), {
+            commandId,
             grantId: context.req.param("grantId"),
             outcome: input.outcome,
             summary: input.summary,
@@ -1907,6 +2793,7 @@ export function createApp(
     }
 
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const domain = input.domain.trim().toLowerCase();
     return executeCommand(
       context,
       runtime,
@@ -1915,13 +2802,15 @@ export function createApp(
         name: "membership-domain.add",
         version: 1,
         targetType: "membership_domain",
-        targetId: input.domain,
+        targetId: domain,
         payload: input,
         reason: input.reason,
       },
-      () =>
+      (commandId) =>
         runtime.addMembershipDomain(context.get("operator"), {
           ...input,
+          commandId,
+          domain,
           correlationId: context.get("requestId"),
         }),
     );
@@ -1937,6 +2826,7 @@ export function createApp(
       }
 
       const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const domain = context.req.param("domain").trim().toLowerCase();
       return executeCommand(
         context,
         runtime,
@@ -1945,14 +2835,15 @@ export function createApp(
           name: "membership-domain.disable",
           version: 1,
           targetType: "membership_domain",
-          targetId: context.req.param("domain"),
+          targetId: domain,
           payload: input,
           reason: input.reason,
         },
-        () =>
+        (commandId) =>
           runtime.disableMembershipDomain(context.get("operator"), {
             ...input,
-            domain: context.req.param("domain"),
+            commandId,
+            domain,
             correlationId: context.get("requestId"),
           }),
       );
@@ -1971,14 +2862,18 @@ export function createApp(
   });
 
   app.onError((error, context) => {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        event: "request.failed",
-        requestId: context.get("requestId"),
-        errorName: error.name,
-      }),
-    );
+    const traceContext = context.get("traceContext");
+    writeTelemetry("error", "http.request.failed", {
+      service: "atharvan-control-plane",
+      environment: context.env.ATHARVAN_ENVIRONMENT,
+      requestId: context.get("requestId"),
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      method: context.req.method,
+      route: normalizeTelemetryPath(context.req.routePath || context.req.path),
+      errorName: normalizeTelemetryLabel(error.name),
+    });
 
     return context.json(
       {
@@ -1993,6 +2888,16 @@ export function createApp(
   return app;
 }
 
+function auditContentDigestHeader(hexDigest: string): string {
+  if (!/^[0-9a-f]{64}$/u.test(hexDigest)) {
+    throw new Error("audit_export_digest_invalid");
+  }
+  const bytes = Uint8Array.from(hexDigest.match(/.{2}/gu) ?? [], (pair) =>
+    Number.parseInt(pair, 16),
+  );
+  return `sha-256=:${btoa(String.fromCharCode(...bytes))}:`;
+}
+
 async function readJson<Result>(
   context: Context<AppEnvironment>,
   parse: (value: unknown) => Result | null,
@@ -2002,6 +2907,43 @@ async function readJson<Result>(
     return parse(body);
   } catch {
     return null;
+  }
+}
+
+async function readBoundedRawBody(
+  request: Request,
+  maximumBytes: number,
+): Promise<string | null> {
+  const declaredLength = request.headers.get("content-length");
+  if (
+    declaredLength !== null &&
+    (!/^[0-9]+$/u.test(declaredLength) || Number(declaredLength) > maximumBytes)
+  )
+    return null;
+  const reader = request.body?.getReader();
+  if (!reader) return null;
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      length += part.value.byteLength;
+      if (length > maximumBytes) return null;
+      chunks.push(part.value);
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 }
 
@@ -2055,6 +2997,38 @@ function parseReconcileCustomerDirectorySnapshot(
     workspaces !== null &&
     memberships !== null
     ? { sourceRevision, observedAt, users, workspaces, memberships, reason }
+    : null;
+}
+
+function parseArthCustomerDirectorySnapshot(
+  value: unknown,
+): Omit<
+  ReconcileTrustedCustomerDirectorySnapshotCommand,
+  "sourceWorkloadKeyId" | "requestNonce" | "payloadSha256"
+> | null {
+  if (!isRecord(value)) return null;
+  const environment = value.environment;
+  const sourceRevision = readTrimmedString(value.sourceRevision, 19);
+  const observedAt = readTrimmedString(value.observedAt, 40);
+  const users = parseCustomerSnapshotUsers(value.users);
+  const workspaces = parseCustomerSnapshotWorkspaces(value.workspaces);
+  const memberships = parseCustomerSnapshotMemberships(value.memberships);
+  return (environment === "development" ||
+    environment === "production" ||
+    environment === "test") &&
+    sourceRevision !== null &&
+    observedAt !== null &&
+    users !== null &&
+    workspaces !== null &&
+    memberships !== null
+    ? {
+        environment,
+        sourceRevision,
+        observedAt,
+        users,
+        workspaces,
+        memberships,
+      }
     : null;
 }
 
@@ -2504,6 +3478,28 @@ function parseSetPlatformConfiguration(
     : null;
 }
 
+function parseRollbackPlatformConfiguration(
+  value: unknown,
+): Omit<RollbackPlatformConfigurationCommand, "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  const scope = value.scope;
+  const targetRevisionNumber = value.targetRevisionNumber;
+  const confirmation = readTrimmedString(value.confirmation, 320);
+  return reason !== null &&
+    confirmation !== null &&
+    (scope === "platform" || scope === "environment") &&
+    Number.isSafeInteger(targetRevisionNumber) &&
+    (targetRevisionNumber as number) > 0
+    ? {
+        scope,
+        targetRevisionNumber: targetRevisionNumber as number,
+        confirmation,
+        reason,
+      }
+    : null;
+}
+
 function parseMembershipDomain(
   value: unknown,
 ): Omit<MembershipDomainCommand, "correlationId"> | null {
@@ -2581,6 +3577,7 @@ function parseSetModelProvider(
       ? null
       : readTrimmedString(value.credentialReferenceId, 36);
   const reason = readReason(value.reason);
+  const healthProbe = parseHttpHealthProbe(value.healthProbe);
   const regions = readStringArray(value.regions, 32, 32);
   const adapterKind = value.adapterKind;
   const maximumDataClassification = value.maximumDataClassification;
@@ -2590,6 +3587,7 @@ function parseSetModelProvider(
     (!hasCredentialReference ||
       value.credentialReferenceId === null ||
       credentialReferenceId !== null) &&
+    healthProbe !== undefined &&
     reason !== null &&
     regions !== null &&
     isModelProviderAdapterKind(adapterKind) &&
@@ -2599,6 +3597,7 @@ function parseSetModelProvider(
         displayName,
         adapterKind,
         baseUrl,
+        healthProbe,
         ...(hasCredentialReference ? { credentialReferenceId } : {}),
         regions,
         maximumDataClassification,
@@ -2632,6 +3631,7 @@ function parseSetPlatformIntegration(
   const adapterPackage = readTrimmedString(value.adapterPackage, 214);
   const adapterVersion = readTrimmedString(value.adapterVersion, 80);
   const reason = readReason(value.reason);
+  const healthProbe = parseHttpHealthProbe(value.healthProbe);
   const optionalText = (field: string, maximum: number) =>
     value[field] === null || value[field] === undefined
       ? null
@@ -2657,6 +3657,7 @@ function parseSetPlatformIntegration(
     optionalScopes !== null &&
     adapterPackage !== null &&
     adapterVersion !== null &&
+    healthProbe !== undefined &&
     reason !== null &&
     isPlatformIntegrationProtocol(protocol) &&
     isPlatformIntegrationConnectionMode(connectionMode) &&
@@ -2682,6 +3683,7 @@ function parseSetPlatformIntegration(
         adapterPackage,
         adapterVersion,
         documentationUrl,
+        healthProbe,
         authorizationUrl,
         tokenUrl,
         clientId,
@@ -3021,6 +4023,36 @@ function parseAdapterHealthChecks(
   return parsed.some((item) => item === null)
     ? null
     : (parsed as ReadonlyArray<PlatformAdapterHealthCheckDeclaration>);
+}
+
+function parseHttpHealthProbe(
+  value: unknown,
+): PlatformHttpHealthProbe | null | undefined {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) return undefined;
+  const url = readTrimmedString(value.url, 2_048);
+  const expectedStatusCodes = Array.isArray(value.expectedStatusCodes)
+    ? value.expectedStatusCodes
+    : null;
+  return url !== null &&
+    (value.method === "GET" || value.method === "HEAD") &&
+    expectedStatusCodes !== null &&
+    expectedStatusCodes.length > 0 &&
+    expectedStatusCodes.length <= 32 &&
+    expectedStatusCodes.every(
+      (status): status is number =>
+        typeof status === "number" && Number.isSafeInteger(status),
+    ) &&
+    typeof value.timeoutMs === "number" &&
+    typeof value.intervalSeconds === "number"
+    ? {
+        url,
+        method: value.method,
+        expectedStatusCodes,
+        timeoutMs: value.timeoutMs,
+        intervalSeconds: value.intervalSeconds,
+      }
+    : undefined;
 }
 
 function parsePlatformIntegrationHealth(
@@ -3574,6 +4606,99 @@ function customerDirectoryReadError(
   throw error;
 }
 
+function parseArthCommandAcknowledgement(value: unknown) {
+  if (!isRecord(value)) return null;
+  const leaseToken =
+    typeof value.leaseToken === "string"
+      ? value.leaseToken.trim().toLowerCase()
+      : "";
+  const outcome = value.outcome;
+  const sourceRevision =
+    typeof value.sourceRevision === "string" ? value.sourceRevision.trim() : "";
+  const observedAt =
+    typeof value.observedAt === "string" ? value.observedAt.trim() : "";
+  const message =
+    value.message === undefined || value.message === null
+      ? null
+      : typeof value.message === "string"
+        ? value.message.trim()
+        : "";
+  const observedTime = new Date(observedAt).getTime();
+  if (
+    !uuidPattern.test(leaseToken) ||
+    (outcome !== "applied" &&
+      outcome !== "rejected" &&
+      outcome !== "retryable_failure") ||
+    !/^[1-9][0-9]{0,18}$/u.test(sourceRevision) ||
+    !Number.isFinite(observedTime) ||
+    observedTime > Date.now() + 5 * 60_000 ||
+    observedTime < Date.now() - 8 * 24 * 60 * 60_000 ||
+    (message !== null &&
+      (message.length < 1 ||
+        message.length > 160 ||
+        /[\r\n]/u.test(message) ||
+        /(?:private key|api[_ -]?key|access[_ -]?token|secret\s*[:=]|password\s*[:=])/iu.test(
+          message,
+        )))
+  ) {
+    return null;
+  }
+  return { leaseToken, outcome, sourceRevision, observedAt, message } as const;
+}
+
+function arthWorkloadError(context: Context<AppEnvironment>, error: unknown) {
+  if (
+    error instanceof ArthWorkloadAuthenticationError &&
+    error.reason === "arth_workload_authentication_unconfigured"
+  ) {
+    return context.json(
+      {
+        code: "arth_exchange_unavailable",
+        message: "The Arth command exchange is not configured.",
+        requestId: context.get("requestId"),
+      },
+      503,
+    );
+  }
+  if (error instanceof ArthWorkloadAuthenticationError) {
+    return context.json(
+      {
+        code: "workload_authentication_failed",
+        message: "The workload request could not be authenticated.",
+        requestId: context.get("requestId"),
+      },
+      401,
+    );
+  }
+  if (error instanceof CustomerDirectoryRejectedError) {
+    return context.json(
+      {
+        code: "customer_directory_snapshot_rejected",
+        reason: error.reason,
+        message: "The signed customer directory snapshot was not accepted.",
+        requestId: context.get("requestId"),
+      },
+      409,
+    );
+  }
+  if (error instanceof ArthCommandExchangeError) {
+    const authenticationFailure = error.reason === "workload_request_replayed";
+    return context.json(
+      {
+        code: authenticationFailure
+          ? "workload_authentication_failed"
+          : "arth_command_rejected",
+        message: authenticationFailure
+          ? "The workload request could not be authenticated."
+          : "The command acknowledgement was not accepted.",
+        requestId: context.get("requestId"),
+      },
+      authenticationFailure ? 401 : 409,
+    );
+  }
+  throw error;
+}
+
 interface PlatformCommandRequest {
   readonly requiredCapability: string;
   readonly name: string;
@@ -3592,7 +4717,7 @@ async function executeCommand(
   context: Context<AppEnvironment>,
   runtime: AuthenticationRuntime,
   request: PlatformCommandRequest,
-  command: () => Promise<{
+  command: (commandId: string) => Promise<{
     readonly outcome: "created" | "already_exists" | "updated" | "unchanged";
     readonly id?: string;
     readonly operatorId?: string;
@@ -3673,21 +4798,9 @@ async function executeCommand(
     );
   }
 
+  let result: Awaited<ReturnType<typeof command>>;
   try {
-    const result = await command();
-    const responseStatus = result.outcome === "created" ? 201 : 200;
-    await runtime.completePlatformCommand({
-      commandId: begun.commandId,
-      actor,
-      targetType: request.targetType,
-      targetId: request.targetId,
-      correlationId,
-      reason: request.reason,
-      outcome: "succeeded",
-      responseStatus,
-      responseBody: result,
-    });
-    return context.json(result, responseStatus);
+    result = await command(begun.commandId);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "";
     const mapped = mapCommandError(error, reason, correlationId);
@@ -3709,9 +4822,75 @@ async function executeCommand(
     if (mapped === null) throw error;
     return jsonResponse(mapped.body, mapped.status);
   }
+
+  const responseStatus = result.outcome === "created" ? 201 : 200;
+  try {
+    await runtime.completePlatformCommand({
+      commandId: begun.commandId,
+      actor,
+      targetType: request.targetType,
+      targetId: request.targetId,
+      correlationId,
+      reason: request.reason,
+      outcome: "succeeded",
+      responseStatus,
+      responseBody: result,
+    });
+  } catch {
+    // The effect already committed. Preserve the in-progress envelope for
+    // reconciliation instead of recording a false failure or repeating the effect.
+    console.error(
+      JSON.stringify({
+        event: "platform.command.completion_pending",
+        commandId: begun.commandId,
+        requestId: correlationId,
+      }),
+    );
+    return context.json(
+      {
+        code: "command_result_pending",
+        message:
+          "The action completed, but its receipt could not be saved. Refresh the affected record before taking further action.",
+        commandId: begun.commandId,
+        requestId: correlationId,
+      },
+      503,
+    );
+  }
+  return context.json(result, responseStatus);
 }
 
 function mapCommandError(error: unknown, reason: string, requestId: string) {
+  if (
+    error instanceof PlatformCommandRejectedError &&
+    error.reason === "delivery_not_pending"
+  )
+    return commandError(
+      409,
+      "rejected",
+      error.reason,
+      "This email is no longer waiting for delivery. Refresh its status before taking further action.",
+      requestId,
+    );
+  if (
+    error instanceof PlatformCommandRejectedError &&
+    error.reason === "recipient_suppression_not_active"
+  )
+    return commandError(
+      409,
+      "rejected",
+      error.reason,
+      "This recipient is no longer blocked. Refresh email delivery before taking further action.",
+      requestId,
+    );
+  if (error instanceof PlatformCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      error.reason,
+      "This request is no longer eligible. Review its scope, status and approval before trying again.",
+      requestId,
+    );
   if (reason === "recent_step_up_required")
     return commandError(
       403,
@@ -3895,4 +5074,134 @@ function toSafeCommandPayload(
 
 export const app = createApp();
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(
+    controller: ScheduledController,
+    bindings: RuntimeBindings,
+    _context: ExecutionContext,
+  ) {
+    const runId = crypto.randomUUID();
+    const traceContext = createTraceContext();
+    const startedAt = performance.now();
+    const [
+      { parseAuthenticationRuntimeConfig },
+      { runWithNeonDatabase },
+      { createEmailDeliveryRuntime },
+      { createOperationalAlertRuntime },
+      { createPlatformHealthProbeRuntime },
+      { createOperationalRetentionRuntime },
+    ] = await Promise.all([
+      import("@atharvan/config"),
+      import("@atharvan/db"),
+      import("./email-delivery-runtime"),
+      import("./operational-alert-runtime"),
+      import("./platform-health-probe-runtime"),
+      import("./operational-retention-runtime"),
+    ]);
+    const config = parseAuthenticationRuntimeConfig(bindings);
+    try {
+      await runWithNeonDatabase(config.DATABASE_URL, async (database) => {
+        const results = await Promise.allSettled([
+          runScheduledTask(
+            "email_delivery",
+            () => createEmailDeliveryRuntime(database, config).run(),
+            runId,
+            traceContext,
+            config.ATHARVAN_ENVIRONMENT,
+          ),
+          runScheduledTask(
+            "operational_alert_delivery",
+            () => createOperationalAlertRuntime(database, config).run(),
+            runId,
+            traceContext,
+            config.ATHARVAN_ENVIRONMENT,
+          ),
+          runScheduledTask(
+            "platform_health_probe",
+            () => createPlatformHealthProbeRuntime(database, config).run(),
+            runId,
+            traceContext,
+            config.ATHARVAN_ENVIRONMENT,
+          ),
+          runScheduledTask(
+            "operational_retention",
+            () => createOperationalRetentionRuntime(database, config).run(),
+            runId,
+            traceContext,
+            config.ATHARVAN_ENVIRONMENT,
+          ),
+        ]);
+        const failed = results.filter(
+          (result): result is PromiseRejectedResult =>
+            result.status === "rejected",
+        );
+        if (failed.length > 0) throw new Error("scheduled_delivery_run_failed");
+      });
+      writeTelemetry("info", "scheduled.run_completed", {
+        service: "atharvan-control-plane",
+        environment: config.ATHARVAN_ENVIRONMENT,
+        runId,
+        traceId: traceContext.traceId,
+        spanId: traceContext.spanId,
+        cron: controller.cron,
+        scheduledAt: new Date(controller.scheduledTime).toISOString(),
+        durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      });
+    } catch {
+      writeTelemetry("error", "scheduled.run_failed", {
+        service: "atharvan-control-plane",
+        environment: config.ATHARVAN_ENVIRONMENT,
+        runId,
+        traceId: traceContext.traceId,
+        spanId: traceContext.spanId,
+        cron: controller.cron,
+        scheduledAt: new Date(controller.scheduledTime).toISOString(),
+        durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      });
+      throw new Error("scheduled_delivery_run_failed");
+    }
+  },
+};
+
+async function runScheduledTask<Result>(
+  task: string,
+  operation: () => Promise<Result>,
+  runId: string,
+  parentTraceContext: TraceContext,
+  environment: RuntimeBindings["ATHARVAN_ENVIRONMENT"],
+): Promise<Result> {
+  const traceContext = createTraceContext(
+    formatTraceparent(parentTraceContext),
+  );
+  const startedAt = performance.now();
+  try {
+    const result = await operation();
+    writeTelemetry("info", "scheduled.task_completed", {
+      service: "atharvan-control-plane",
+      environment,
+      runId,
+      task,
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    });
+    return result;
+  } catch (error) {
+    writeTelemetry("error", "scheduled.task_failed", {
+      service: "atharvan-control-plane",
+      environment,
+      runId,
+      task,
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      errorName: normalizeTelemetryLabel(
+        error instanceof Error ? error.name : "UnknownError",
+      ),
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    });
+    throw error;
+  }
+}

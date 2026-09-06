@@ -1,8 +1,33 @@
 # Atharvan Progress
 
-Last updated: 2026-08-31
+Last updated: 2026-09-05
 Current phase: Safe administrative foundation  
 Overall status: Phase 1 in progress
+
+Delivery plan: [three-phase production delivery](docs/production-delivery-plan.md).
+Each subsequent execution targets one complete phase with mandatory end-to-end
+exit evidence. Existing checkboxes remain the implementation record; the plan
+adds completion gates and does not mark unfinished work complete.
+
+## Three-phase delivery gates
+
+- [ ] Phase 1: complete administrative foundation, real Arth/provider integration,
+      authenticated E2E, durable operations, telemetry and recovery evidence.
+- [ ] Phase 2: complete paid-platform billing, entitlements, metering/enforcement,
+      runners, workflows, deployments and operated reconciliation evidence.
+- [ ] Phase 3: complete support, security, enterprise/data governance, incident
+      operations and production release certification with restore/rollback drills.
+
+Current execution implements Phase 1. A blocked mandatory dependency keeps that phase
+open; fixtures, skipped checks or missing provider credentials cannot certify it.
+
+On 2026-09-04 the user deferred testing and requested implementation first.
+New work is compiled but remains unverified by automated, database, browser and
+provider tests. Migrations `0017_scoped_approvals`,
+`0018_verification_email_outbox`, `0019_arth_command_exchange`, and Arth
+`0060_atharvan_control_exchange` are generated and not applied.
+The [implementation record](docs/runbooks/phase-one-implementation.md) distinguishes
+implemented controls from remaining Phase 1 delivery work.
 
 ## Status legend
 
@@ -22,10 +47,11 @@ An item may be marked complete only when its implementation, tests, operational 
 - The dedicated `atharvan-development` Neon PostgreSQL 18 project is provisioned and migrations `0000` through `0016` are live. The complete schema was also recreated and contract-verified against a clean PostgreSQL 18 service in CI.
 - Customer directory search is deployed but remains operationally partial until Arth supplies the first real, monotonic snapshot. The console reports the projection as `unknown` rather than presenting sample customer records or invented freshness.
 - Granular user/workspace restriction intent and immutable reconciliation evidence are deployed. Enforcement remains pending until Arth consumes commands and reports the first monotonic restriction observation; Atharvan shows `pending` instead of claiming a deny is active.
+- The matching Arth consumer is implemented locally with signed polling, durable idempotent receipts, monotonic restriction/ownership/model/integration/adapter authority, session revocation, lease recovery and request-time enforcement. It has compiled successfully but remains undeployed and unverified end to end.
 - Append-only customer notes and immutable risk-marker revisions are deployed. Ownership transfer commands are also deployed, but remain operationally partial until a real Arth snapshot supplies explicit workspace owners and Arth reports monotonic transfer observations; membership roles are never treated as ownership.
-- The platform secret-management adapter additionally needs `CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID`, `CLOUDFLARE_SECRETS_STORE_ID`, and a dedicated `CLOUDFLARE_SECRETS_STORE_API_TOKEN` with Secrets Store write authority. Live create/rotate/revoke verification is deferred with the environment work.
+- The platform secret-management adapter additionally needs `CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID`, `CLOUDFLARE_SECRETS_STORE_ID`, and a dedicated `CLOUDFLARE_SECRETS_STORE_API_TOKEN` with Secrets Store read/write authority. Live create/recovery/rotate/revoke verification is deferred with the environment work.
 - Production deployment remains intentionally unconfigured and was not triggered from `dev`.
-- Local rendered preview remains blocked because Cloudflare Vite cannot enumerate this container's network interfaces. The deployed `/customers` route passed Browser DOM, console, screenshot, form-validation, and desktop layout checks; mobile rendering remains source-verified only.
+- Local development now uses the root `.env.local` with hosted Neon; Docker is not required. `pnpm local:check` passed read-only schema verification on 2026-09-04. After clearing rebuildable caches and pruning unused pnpm packages, C: had more than 14 GiB free and both local servers started. Worker liveness and console login return `200`, the console-to-Worker protected overview returns `401`, and an anonymous session returns `null`. Resend and Secrets Store remain unconfigured locally; real authenticated/browser verification is still outstanding.
 
 ## Phase 0 — Product and repository foundation
 
@@ -46,7 +72,7 @@ An item may be marked complete only when its implementation, tests, operational 
 
 - [x] Approved source-of-truth commit SHA recorded: `522ff93953bd3461c40bc982312a5f018e998c11`.
 - [ ] CI passes on `main`.
-- [ ] Local development and test setup reproduced from a clean checkout.
+- [~] Local development and test setup reproduced from a clean checkout: dependencies, local tests, Neon read-only schema verification, server startup, and anonymous HTTP smoke checks passed; authenticated browser verification remains outstanding.
 - [x] No plaintext credentials or production secrets are stored in the repository.
 
 ## Phase 1 — Safe administrative foundation
@@ -63,6 +89,13 @@ An item may be marked complete only when its implementation, tests, operational 
 - [x] Implement invited-to-active first-login email verification code flow.
 - [x] Add mandatory strong MFA/passkey policy.
 - [x] Add step-up authentication for sensitive actions.
+- [~] Add owner-scoped session inventory and audited revocation: implemented and verified locally, including isolated PostgreSQL rollback tests; deployment and real authenticated browser verification remain outstanding.
+- [~] Operator suspension, restoration and terminal deactivation: storage, API and confirmation UI implemented with session/invitation/emergency-grant invalidation; verification deferred.
+- [~] Platform ownership transfer: independently accepted exact approval, successor eligibility, atomic owner swap and session invalidation implemented; migration and verification pending.
+- [~] Scoped approvals: request/review/revoke/consume lifecycle, expiry, independent base-role reviewer and transaction-bound consumption implemented for workspace transfers and emergency grants; verification deferred.
+- [~] Every protected administrative mutation now forwards its command identity and persists the success receipt with the final database effect; runtime rollback/replay verification remains outstanding.
+- [~] Durable verification email delivery: encrypted queue, fenced leases, bounded idempotent retries, expiry scrubbing, scheduled recovery, operator controls and overview alerts implemented; migration and runtime verification deferred. See [delivery runbook](docs/runbooks/verification-email-delivery.md).
+- [~] Neon connections scoped to each HTTP/background/scheduled invocation with cleanup and deadlines; repeated-isolate/runtime verification deferred.
 - [x] Add break-glass grant lifecycle with expiry and review.
 
 ### Configuration and secrets
@@ -99,10 +132,10 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ### Platform overview
 
-- [ ] Implement health projections from real telemetry.
-- [ ] Implement runner, workflow, model, integration, and incident summaries.
+- [~] Implement health projections from real telemetry: the overview reads current and 24-hour historical model-provider and integration probe evidence; remaining telemetry sources are not connected.
+- [~] Implement runner, workflow, model, integration, and incident summaries: model/integration aggregates implemented and verified locally; runner/workflow/incident summaries remain outstanding.
 - [~] Implement unknown/partial/degraded data states.
-- [ ] Add operational alerts for critical foundation failures.
+- [~] Add operational alerts for critical foundation failures: the console covers provider probes, verification delivery, provider configuration, and Arth command delivery; stable occurrences, firing/recovery email outbox, fenced retries, provider idempotency and production routing gates are implemented. Operated delivery, external uptime monitoring and full incident workflows remain outstanding.
 
 ### Phase 1 exit evidence
 
@@ -211,6 +244,109 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ## Decision log
 
+### Local development slice — 2026-09-04
+
+- Added `pnpm dev` with validated root `.env.local` loading, loopback origin/port checks, separate console/Worker processes, shutdown cleanup, and a disk-space preflight.
+- Added `pnpm local:check`, reusing migration contracts in an explicit read-only transaction. No migrations or application data changes were performed by this check.
+- Added optional-provider normalization, credential isolation and serialization tests, Git exclusions for `.dev.vars*`, and the [local development runbook](docs/runbooks/local-development.md).
+- No deployment was performed. Full runtime/browser verification and the stateful PostgreSQL integration scenario remain outstanding.
+- Verification: 185 tests passed (including 16 local-settings tests), one stateful PostgreSQL integration test skipped, workspace type checks passed, migration history passed, and the supplied Neon schema passed read-only verification. The low-disk guard was exercised and exited before starting child processes. Added LF checkout rules for consistent Windows/Linux formatting.
+
+### Recorded health overview slice — 2026-09-04
+
+- Replaced the static overview with environment-scoped model-provider and integration aggregates from the existing observation tables; no migration or database writes required.
+- Latest observations are selected deterministically. Expired, missing, future-dated, and failed evidence cannot count as healthy. Read failures remain separate from empty registries, and overall coverage remains partial while other telemetry is absent.
+- Preserved passkey/capability protection, added no-store responses, and added automatic refresh, cancellation, timeout, expiry, and recovery handling in the console.
+- Verification: 210 automated tests passed, two opt-in database tests skipped in the normal suite; the new SELECT-only Neon test passed separately inside an explicit read-only transaction. Workspace types and all production builds passed. Desktop/mobile fixture checks verified rendering, refresh failure, cleared counts, and empty-state recovery using the real overview component and polling hook. Authenticated end-to-end verification and deployment remain outstanding.
+- Live local browser verification confirmed the anonymous dashboard redirects to login and the protected overview API returns `401`.
+- Temporary tooling cache cleanup restored approximately 6.8 GiB of free disk space after free space fell below 110 MiB. The local console and Worker were restarted. Daily project cache monitoring remains configured.
+- See [recorded health overview](docs/runbooks/platform-overview.md) for semantics and validation commands.
+
+### Operational alerts slice — 2026-09-04
+
+- Added deterministic, environment-scoped current alerts for unavailable/degraded probes, expired/missing evidence, failed evidence reads, and missing email/secret-provider configuration. Critical signals sort first; no provider credentials or database errors enter alert payloads.
+- The existing protected overview API combines stored health with configuration booleans. Alerts share the snapshot expiry, disappear while refreshing or after failed reads, and are replaced by the next snapshot. Expired outages become evidence warnings, not recovery claims.
+- Added critical/all filtering with selection preserved across refresh, affected counts when known, expandable recovery guidance, and explicit limited-coverage empty states. Older responses without alert evidence fail closed during rolling deployment.
+- Verification: 221 automated tests, workspace types, and builds passed. Browser fixture QA at 1440×1000 and 390×844 covered filtering, recovery guidance, failed refresh removal, and recovered empty state; no unexpected browser errors or overflow. Live anonymous access still redirects to login and denies overview API access with `401`.
+- No migrations, notification delivery, or deployment were performed. Real authenticated end-to-end verification remains pending local email/passkey onboarding. See [operational alerts](docs/runbooks/operational-alerts.md).
+
+### Operator session security slice — 2026-09-04
+
+- Added Security navigation and `/security` for current-first own-session inventory, device/IP context, explicit snapshot/truncation states, reason/confirmation, and post-revocation refresh.
+- Added protected self-service session APIs with identity derived from the authenticated request, recent passkey proof, current-session protection, named command envelopes, and atomic deletion/audit evidence. Native token-bearing list and unaudited revoke endpoints are disabled; normal sign-out remains available.
+- Verification: 237 normal tests, workspace type checks, builds, formatting, and desktop/mobile browser fixture checks passed. The isolated Neon scenario additionally verified ownership, stale/absent proof rejection, idempotency, and rollback on a forced audit failure. All test fixtures rolled back. Live anonymous Security access redirects to login and the session API returns `401`.
+- Created a dedicated Neon QA branch and applied existing repository migrations there; the application database and its sessions were not changed. No new migration or deployment was performed. See [session security runbook](docs/runbooks/operator-sessions.md) and [ADR 0016](docs/adr/0016-owner-scoped-session-management.md).
+
+### Signed platform-control propagation slice — 2026-09-05
+
+- Model/provider routing controls, platform integration lifecycle changes, and adapter release lifecycle changes now enqueue minimal signed Arth commands in the same transaction as their immutable control revision.
+- Arth validates and applies those commands through monotonic authority tables, retains acknowledgement evidence, and denies GitHub-backed mutations while the integration is unavailable or the managed `github-app` release is not active, signature-verified, and security-approved. Once an adapter key is managed, undeclared versions fail closed.
+- Configuration history now supports audited rollback by creating a new immutable revision after recent step-up authentication and exact typed confirmation; the prior revision remains historical evidence.
+- Added Atharvan migration `0021` and Arth migration `0062`; neither migration was applied. Static type checks, production builds, formatting, lint, diff checks, and Atharvan migration-history validation passed. Runtime and provider tests remain deferred by user instruction.
+- Build caches remain small (Atharvan 30.80 MiB; Arth 5.06 MiB), with 31.32 GiB free, so no cleanup was required.
+
+### Atomic command receipts and delivery telemetry slice — 2026-09-05
+
+- All protected administrative mutation routes now commit their replay result in the same database transaction as the final local effect. Propagated controls also include the Arth outbox entry. Secrets Store operations record success with the final lifecycle transition and retain provider-name reconciliation for uncertain external outcomes. The outer completion step treats these results as already completed, so retries cannot repeat a successful effect.
+- The protected overview now reports Arth exchange configuration, evidence-read failures, commands outstanding for more than two minutes, and recent rejection/dead-letter counts. Terminal failures age out of the current-alert window after 15 minutes.
+- Type checks, production builds, formatting, and diff checks passed. Runtime, database, browser, and provider verification remain deferred by user instruction.
+
+### Durable alert routing and operational contracts slice — 2026-09-05
+
+- Added migration `0022` for immutable alert occurrences and firing/recovery delivery records. Scheduled reconciliation deduplicates stable rules, updates open evidence, records recovery, and processes delivery with fenced leases, eight bounded retries, provider idempotency, terminal receipts, and dead letters.
+- Added alert-channel health to the protected overview, including missing destination, read failure, backlog, and recent dead-letter signals. Production startup and deployment now fail closed without a deployable HTTPS origin, Resend, an authorised alert destination, Secrets Store, and the current Arth workload identity.
+- Added the foundation threat model, public/internal interface compatibility contract, deployment environment contract, SLO/RPO/RTO policy, role ownership, and durable-alert ADR/runbook. All 27 type-check tasks, all 15 production build tasks, migration-history validation, formatting, and diff checks passed. Migration application and all runtime/provider verification remain deferred by user instruction.
+
+### Scheduled provider and integration health slice — 2026-09-05
+
+- Provider and integration revisions now support explicit public HTTPS health contracts with exact methods, accepted statuses, timeouts and intervals. The admin console exposes the complete contract and current schedule.
+- The scheduled Worker creates idempotent window jobs, leases a bounded concurrent batch, blocks credential-bearing/local targets and redirects, classifies exact results, and atomically commits current-revision observations plus correlated system audit evidence. Interrupted work is recoverable and coordination records have guarded 30-day retention.
+- Added migrations `0023` and `0024`, ADR 0018, the probe runbook, contract rules and threat-model coverage. All 27 static type-check tasks, all 15 production build tasks, migration-history validation, formatting and whitespace checks passed. Migrations and runtime/provider verification remain deferred by user instruction. Build/cache output is 74.78 MiB with 27.13 GiB free, so no cleanup was required.
+
+### Correlated telemetry and probe queue health slice — 2026-09-05
+
+- HTTP requests now continue valid W3C trace context, return trace/request identity, and emit bounded structured completion/failure evidence without headers, queries, bodies, credentials, provider responses, error messages, or stacks. Scheduled delivery/probe tasks emit correlated run, parent/child span, duration, and categorical outcome records.
+- Durable probe jobs distinguish recorded observations, target-revision replacement, and exhausted recovery. The protected overview and durable alert delivery now report queue read failure, jobs delayed over two minutes, and exhaustion in the last 15 minutes.
+- Added migration `0025` with safe terminal-row backfill, ADR 0019, interface/runbook/SLO/threat-model updates. All 27 static type-check tasks, all 15 production build tasks, migration-history validation, formatting and whitespace checks passed. Migration application and runtime/provider verification remain deferred by user instruction. Build/cache output is 77.77 MiB with 27.12 GiB free, so no cleanup was required.
+
+### Versioned transactional email and feedback slice — 2026-09-05
+
+- Transactional OTP and operational-alert mail now binds an immutable source template revision and locale selected through audited versioned configuration; English and Hindi renderers are production implementations and rollback uses the existing Settings history.
+- Added a bounded, signed Resend webhook, immutable idempotent provider-event evidence, monotonic delivered/bounced/complained transitions, environment-bound pseudonymous recipient suppression, alert-destination change protection, and operator feedback visibility.
+- Added migration `0026`, ADR 0020, the feedback runbook, deployment/SLO/threat-model updates, and migration contract coverage. All 27 static type-check tasks, all 15 production build tasks, migration-history validation, formatting and whitespace checks passed. Migration application and runtime/provider verification remain deferred by user instruction. Build/cache output is 83.31 MiB with 25.43 GiB free, so no cleanup was required.
+
+### Recipient suppression recovery slice — 2026-09-05
+
+- Active bounce, failure, provider-suppression, and complaint blocks are now visible without exposing addresses or recipient fingerprints. Ongoing blocks remain current health alerts instead of aging out with recent delivery failures.
+- The active Super Administrator can restore future delivery after recent passkey step-up. Restoration is idempotent and atomic with its audit and command receipt, preserves immutable provider/origin evidence, cannot be repeated, and allows a later provider event to create a new block.
+- Added migration `0027`, ADR 0021, and contract/runbook/threat-model coverage. All 27 static type-check tasks, all 15 production build tasks, migration-history validation, formatting, and whitespace checks passed. Migration application and runtime/provider verification remain deferred by user instruction. Build/cache output is 86.32 MiB with 25.39 GiB free, so no cleanup was required.
+
+### Operational evidence retention slice — 2026-09-05
+
+- Added a durable hourly retention workflow with unique schedule windows, fenced lease recovery, five bounded attempts, atomic cleanup/completion/audit settlement, and a 1,000-row limit per evidence category.
+- Policy version 1 removes expired replay nonces after one day, completed probe jobs after 30 days, unprotected email and resolved-alert metadata after 90 days, and dependency-health observations after 365 days. Canonical audit, command, approval, and complete recipient-suppression evidence chains are preserved.
+- Platform overview now exposes the policy and latest safe aggregate counts and alerts on read failure, late or failed execution, and batch saturation. Added migration `0028`, ADR 0022, and the operator runbook. All 27 static type-check tasks, all 15 production build tasks, migration-history validation, formatting, and whitespace checks passed. Migration application and runtime/database verification remain deferred by user instruction. Build/cache output is 80.95 MiB with 23.62 GiB free, so no cleanup was required.
+
+### Fail-closed deployment readiness slice — 2026-09-05
+
+- Process liveness remains dependency-free, while deployment readiness now validates runtime configuration, Neon connectivity, the exact migration head and hash, required retention schema safeguards, database write mode, and runtime-role privileges through one read-only query.
+- Worker readiness returns safe schema evidence on success and a generic unavailable response on failure. Deployment promotion waits through Worker propagation and blocks console publication until the expected environment and schema version are ready. Migration validation rejects stale readiness constants or deployment expectations.
+- All 27 static type-check tasks, all 15 production build tasks, migration-history and readiness-head validation, formatting, script syntax, and whitespace checks passed. Migration application and runtime/deployed verification remain deferred by user instruction. Build/cache output is 83.45 MiB with 22.03 GiB free, so no cleanup was required.
+
+### Historical foundation health slice — 2026-09-05
+
+- The protected overview now reconstructs 24 rolling hourly model-provider and integration states from immutable probe observations. Boundaries include only registered entities that existed at that time, apply original evidence expiry, preserve source read failures, and return bounded aggregate counts without entity, endpoint, latency, error, or credential details.
+- The responsive console renders accessible evidence timelines with exact per-boundary counts and explicitly distinguishes sampled evidence from continuous uptime. Scheduled alert reconciliation skips the historical query and continues to use current evidence only.
+- All 27 static type-check tasks, all 15 production build tasks, formatting, and whitespace checks passed. Runtime, database, browser, and provider verification remain deferred by user instruction. Build/cache output is 86.46 MiB with 25.10 GiB free, so no cleanup was required.
+
+### Verifiable audit export slice — 2026-09-05
+
+- Bounded event-per-line NDJSON exports now carry schema, environment, generation/range, byte length, count and truncation provenance plus an exact-body SHA-256 in standard `Content-Digest`, ETag, and stable Atharvan headers. The response remains backward-compatible, non-cacheable, and limited to 5,000 records or 16 MiB.
+- The console fetches into a bounded blob, validates every required header, recomputes SHA-256 over the received bytes, and saves only a matching file with a digest-bearing filename. Before release, the service appends immutable actor, normalized scope, request correlation, count, truncation and digest evidence; a failed audit write denies the export.
+- All 27 static type-check tasks, all 15 production build tasks, formatting, and whitespace checks passed. Runtime, database, browser, and security verification remain deferred by user instruction. Build/cache output is 92.49 MiB with 27.06 GiB free, so no cleanup was required.
+
+### Architecture decisions
+
 | Date       | Decision                                                                                                                                                                                                                                                     | Status   | Reference                                                                     |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ----------------------------------------------------------------------------- |
 | 2026-08-28 | Atharvan will be the internal operator control plane for Arth, separate from customer workspace/project administration.                                                                                                                                      | Accepted | `SOURCE_OF_TRUTH.md`                                                          |
@@ -234,6 +370,8 @@ An item may be marked complete only when its implementation, tests, operational 
 | 2026-08-30 | Customer notes are append-only, risk markers use immutable revisions, and ownership transfers remain pending until Arth supplies explicit ownership and a monotonic reconciliation observation; ownership is never inferred from membership.                 | Accepted | `docs/adr/0013-reconciled-customer-operations.md`                             |
 | 2026-08-31 | Break-glass authority uses exact 5–60 minute capability grants, approval and incident evidence, automatic expiry, guarded revocation, immutable terminal review, and command-level grant provenance.                                                         | Accepted | `docs/adr/0014-expiring-operator-break-glass-grants.md`                       |
 | 2026-08-31 | Email OTP is bootstrap-only; all platform access and recent step-up evidence require a user-verified passkey session, with fail-closed credential lifecycle and no OTP recovery downgrade.                                                                   | Accepted | `docs/adr/0015-phishing-resistant-operator-passkeys.md`                       |
+| 2026-09-05 | Provider and integration health uses revisioned public HTTPS contracts, durable idempotent schedule windows, fenced leases, current-revision settlement, system audit correlation and bounded retention.                                                     | Accepted | `docs/adr/0018-durable-scheduled-health-probes.md`                            |
+| 2026-09-05 | HTTP and scheduled execution use W3C-compatible trace identity and bounded structured records; durable queue and audit state remain canonical operational evidence.                                                                                          | Accepted | `docs/adr/0019-correlated-edge-telemetry.md`                                  |
 
 ## Work log
 
@@ -263,3 +401,16 @@ An item may be marked complete only when its implementation, tests, operational 
 | 2026-08-30 | Added append-only customer notes, immutable risk-marker revisions and resolution, explicit workspace ownership projection, step-up/approval-gated transfer intent, monotonic Arth observations, protected APIs, migration `0014`, ADR 0013, and Customers controls.                                                                                                     | Formatting, clean PostgreSQL 18 migration/contract verification, 156 tests, 15-workspace type-check, client/SSR/Worker builds, live Neon migration, Worker liveness/readiness, anonymous Customers redirect/login rendering, native form validation, and protected API `401`; Actions run `33339723637` passed                                                                                                                                                        | `8eedc3093a843e47decc86ebc3f61e97d83705e5`                                                                                         |
 | 2026-08-31 | Added exact, expiring operator break-glass capability grants with incident/approval evidence, automatic session-authority overlay, revocation, immutable terminal review, command provenance, protected APIs, migration `0015`, ADR 0014, and Operators controls; repaired the CI environment boundary so the PostgreSQL integration scenario runs on every validation. | Formatting, clean PostgreSQL 18 migration/contract verification, 165 tests including the PostgreSQL integration scenario, 15-workspace type-check, client/SSR/Worker builds, live Neon migration, secret sync, and both development deployments; Actions run `33344270472` passed. Worker version `954e6643-3271-427f-9817-5ea61e12e73d`; console version `1bcb1382-d6b8-4aef-aa09-bd95cdad7aed`.                                                                     | `92192ddca8486946132ba62470a99f66c393cfe9`, `497146e4bf6b3a7d3958df81bcd6692adb553a44`, `01abb6c57046e22685cc8bdf774c1acdbc0ea4b9` |
 | 2026-08-31 | Added mandatory discoverable, user-verified operator passkeys, bootstrap-only email OTP, explicit session assurance, five-minute passkey-backed step-up, audited and guarded credential lifecycle, enrollment/verification console ceremonies, migration `0016`, and ADR 0015.                                                                                          | Formatting, clean PostgreSQL 18 migration/contract verification, 170 tests including final-passkey retention and session audit integration, 15-workspace type-check, client/SSR/Worker builds, live Neon migration, anonymous denial, live WebAuthn RP/user-verification contract, and both development deployments; Actions run `33347078314` passed. Worker version `b43515e7-e002-4763-b780-4b42ba633eda`; console version `bb9c4653-d3c9-458a-909d-dd00c86b511a`. | `7c31b0a179063626f2a94d65b198bfbd60f583ef`, `7156cb69f320f7adf211f4dbd95385e5d918ca8b`, `f7ed447b172226301279930756512cf6545e0790` |
+
+# 2026-09-05
+
+- Added a transactional Arth command outbox for customer restrictions and
+  workspace ownership transfers, plus signed workload claim/acknowledgement,
+  replay protection, fenced recovery and atomic observation evidence.
+- Added migration `0019_arth_command_exchange.sql` and the operator runbook. The
+  migration is generated but unapplied.
+- Implemented the corresponding Arth command consumer, local enforcement, and
+  signed directory publisher. Atharvan migration
+  `0020_arth_directory_snapshot_ingestion.sql` now records immutable workload
+  provenance and atomically applies monotonic snapshots. Arth migrations `0060`
+  and `0061` remain unapplied; live exchange verification is deferred.

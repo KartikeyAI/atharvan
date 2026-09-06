@@ -1,6 +1,7 @@
 import {
   assertPlatformCommandAuthorized,
   type AuthenticatedOperator,
+  type PlatformConfigurationEnvironment,
 } from "@atharvan/domain";
 
 import { OnboardingCommandRejectedError } from "./errors";
@@ -20,6 +21,8 @@ export type OperatorRoleCommandResult =
 export interface OperatorRoleAdministrationStore {
   replaceOperatorRoles(input: {
     readonly actorId: string;
+    readonly commandId?: string;
+    readonly commandEnvironment?: PlatformConfigurationEnvironment;
     readonly targetOperatorId: string;
     readonly roleKeys: ReadonlyArray<string>;
     readonly reason: string;
@@ -37,6 +40,8 @@ export function createOperatorRoleAdministrationService(input: {
   return {
     async replaceOperatorRoles(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
+      readonly commandEnvironment?: PlatformConfigurationEnvironment;
       readonly targetOperatorId: string;
       readonly roleKeys: ReadonlyArray<string>;
       readonly reason: string;
@@ -59,6 +64,12 @@ export function createOperatorRoleAdministrationService(input: {
 
       const result = await input.store.replaceOperatorRoles({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
+        ...(command.commandEnvironment === undefined
+          ? {}
+          : { commandEnvironment: command.commandEnvironment }),
         targetOperatorId: requireUuidLike(
           command.targetOperatorId,
           "target_operator_id_required",

@@ -9,6 +9,10 @@ import {
   type PlatformJsonValue,
 } from "@atharvan/domain";
 
+export * from "./approvals";
+
+const maximumAuditExportBytes = 16 * 1024 * 1024;
+
 export interface PlatformCommandReplay {
   readonly outcome: PlatformCommandOutcome;
   readonly responseStatus: number;
@@ -65,6 +69,27 @@ export interface PlatformCommandAuditStore {
     readonly items: PlatformAuditEventPage["items"];
     readonly truncated: boolean;
   }>;
+  recordAuditExport(input: {
+    readonly actorId: string;
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly correlationId: string;
+    readonly generatedAt: Date;
+    readonly rangeStart: Date;
+    readonly rangeEnd: Date;
+    readonly filters: Readonly<{
+      actorId: string | null;
+      eventType: string | null;
+      targetType: string | null;
+      targetId: string | null;
+      correlationId: string | null;
+      commandName: string | null;
+      outcome: PlatformCommandOutcome | null;
+    }>;
+    readonly itemCount: number;
+    readonly truncated: boolean;
+    readonly contentSha256: string;
+    readonly contentLengthBytes: number;
+  }): Promise<void>;
 }
 
 export interface BeginPlatformCommand {
@@ -99,17 +124,16 @@ export interface NormalizedPlatformAuditQuery {
 
 export interface NormalizedPlatformAuditExportQuery extends Omit<
   NormalizedPlatformAuditQuery,
-  "cursor" | "limit"
+  "cursor" | "limit" | "from" | "to"
 > {
+  readonly from: Date;
+  readonly to: Date;
   readonly cursor: null;
   readonly limit: 5001;
 }
 
-export class PlatformCommandRejectedError extends Error {
-  constructor(readonly reason: string) {
-    super("platform_command_rejected");
-  }
-}
+import { PlatformCommandRejectedError } from "./errors";
+export { PlatformCommandRejectedError } from "./errors";
 
 export function createPlatformCommandService(input: {
   readonly store: PlatformCommandAuditStore;
@@ -239,6 +263,7 @@ export function createPlatformCommandService(input: {
     async exportAuditEvents(
       actor: AuthenticatedOperator,
       query: PlatformAuditQuery,
+      correlationId: string,
     ): Promise<PlatformAuditExport> {
       assertPlatformCommandAuthorized({
         actor,
@@ -248,14 +273,52 @@ export function createPlatformCommandService(input: {
       });
       const normalized = normalizeAuditExportQuery(query);
       const result = await input.store.exportAuditEvents({ query: normalized });
-      return {
-        generatedAt: now().toISOString(),
-        format: "ndjson",
+      const content =
+        result.items.map((item) => JSON.stringify(item)).join("\n") +
+        (result.items.length === 0 ? "" : "\n");
+      const contentLengthBytes = new TextEncoder().encode(content).byteLength;
+      if (contentLengthBytes > maximumAuditExportBytes) {
+        reject("audit_export_size_exceeded");
+      }
+      const contentSha256 = await fingerprint(content);
+      const generatedAt = now();
+      await input.store.recordAuditExport({
+        actorId: actor.operatorId,
+        environment: input.environment,
+        correlationId: requireUuid(
+          correlationId,
+          "audit_export_correlation_invalid",
+        ),
+        generatedAt,
+        rangeStart: normalized.from,
+        rangeEnd: normalized.to,
+        filters: {
+          actorId: normalized.actorId,
+          eventType: normalized.eventType,
+          targetType: normalized.targetType,
+          targetId: normalized.targetId,
+          correlationId: normalized.correlationId,
+          commandName: normalized.commandName,
+          outcome: normalized.outcome,
+        },
         itemCount: result.items.length,
         truncated: result.truncated,
-        content:
-          result.items.map((item) => JSON.stringify(item)).join("\n") +
-          (result.items.length === 0 ? "" : "\n"),
+        contentSha256,
+        contentLengthBytes,
+      });
+      return {
+        schemaVersion: 1,
+        environment: input.environment,
+        generatedAt: generatedAt.toISOString(),
+        rangeStart: normalized.from.toISOString(),
+        rangeEnd: normalized.to.toISOString(),
+        format: "ndjson",
+        digestAlgorithm: "sha256",
+        contentSha256,
+        contentLengthBytes,
+        itemCount: result.items.length,
+        truncated: result.truncated,
+        content,
       };
     },
   };
@@ -302,11 +365,13 @@ function normalizeAuditExportQuery(
   if (normalized.from === null || normalized.to === null) {
     reject("audit_export_range_required");
   }
-  const rangeMs = normalized.to.getTime() - normalized.from.getTime();
+  const from = normalized.from;
+  const to = normalized.to;
+  const rangeMs = to.getTime() - from.getTime();
   if (rangeMs <= 0 || rangeMs > 31 * 24 * 60 * 60_000) {
     reject("audit_export_range_invalid");
   }
-  return { ...normalized, cursor: null, limit: 5001 };
+  return { ...normalized, from, to, cursor: null, limit: 5001 };
 }
 
 export function encodePlatformAuditCursor(

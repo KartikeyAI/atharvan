@@ -8,6 +8,7 @@ import { useState, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { OperatorShell } from "@/components/operator-shell";
+import { ApprovalRequest } from "@/components/approval-request";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -970,7 +971,7 @@ function OwnershipTransferControl({
           </Field>
           <Field>
             <FieldLabel htmlFor={`approval-${inspection.workspace.id}`}>
-              Approval reference
+              Approval ID
             </FieldLabel>
             <Input
               id={`approval-${inspection.workspace.id}`}
@@ -978,6 +979,21 @@ function OwnershipTransferControl({
               onChange={(event) => setApprovalReference(event.target.value)}
               required
               value={approvalReference}
+            />
+            <ApprovalRequest
+              scope={
+                inspection.workspace.ownerUserId && successorUserId.trim()
+                  ? {
+                      kind: "workspace_ownership_transfer",
+                      workspaceId: inspection.workspace.id,
+                      expectedOwnerUserId: inspection.workspace.ownerUserId,
+                      sourceRevision: inspection.workspace.sourceRevision,
+                      successorUserId: successorUserId.trim(),
+                    }
+                  : null
+              }
+              reason={reason}
+              onRequested={setApprovalReference}
             />
           </Field>
           <Field>

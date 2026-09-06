@@ -1,10 +1,15 @@
 import type { OperatorBreakGlassAdministrationStore } from "@atharvan/auth";
-import { capabilityGrantMatches } from "@atharvan/domain";
+import {
+  capabilityGrantMatches,
+  type PlatformConfigurationEnvironment,
+} from "@atharvan/domain";
+import { consumePlatformApproval } from "./platform-approval-store";
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 
 import * as schema from "./schema";
+import { recordTransactionalCommandSuccess } from "./transactional-command-receipt";
 import {
   auditEvents,
   operatorBreakGlassGrants,
@@ -19,6 +24,7 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export function createPostgresOperatorBreakGlassAdministrationStore(
   database: Database,
+  environment: PlatformConfigurationEnvironment,
 ): OperatorBreakGlassAdministrationStore {
   return {
     createGrant(input) {
@@ -65,6 +71,21 @@ export function createPostgresOperatorBreakGlassAdministrationStore(
           };
         }
 
+        await consumePlatformApproval(transaction, {
+          approvalId: input.approvalReference,
+          actorId: input.actorId,
+          environment,
+          scope: {
+            kind: "operator_break_glass",
+            targetOperatorId: input.targetOperatorId,
+            capabilities: input.capabilities,
+            durationMinutes:
+              (input.expiresAt.getTime() - input.now.getTime()) / 60_000,
+            incidentReference: input.incidentReference,
+          },
+          correlationId: input.correlationId,
+          now: input.now,
+        });
         await transaction.insert(operatorBreakGlassGrants).values({
           id: input.id,
           operatorId: target.id,
@@ -94,7 +115,14 @@ export function createPostgresOperatorBreakGlassAdministrationStore(
           occurredAt: input.now,
         });
 
-        return { outcome: "created", id: input.id };
+        const result = { outcome: "created", id: input.id } as const;
+        await recordBreakGlassReceipt(transaction, input, environment, result, {
+          name: "operator.break-glass.grant",
+          targetType: "operator",
+          targetId: input.targetOperatorId,
+          reason: input.reason,
+        });
+        return result;
       });
     },
 
@@ -145,7 +173,14 @@ export function createPostgresOperatorBreakGlassAdministrationStore(
           occurredAt: input.now,
         });
 
-        return { outcome: "updated", id: grant.id };
+        const result = { outcome: "updated", id: grant.id } as const;
+        await recordBreakGlassReceipt(transaction, input, environment, result, {
+          name: "operator.break-glass.revoke",
+          targetType: "operator_break_glass_grant",
+          targetId: input.grantId,
+          reason: input.reason,
+        });
+        return result;
       });
     },
 
@@ -215,10 +250,56 @@ export function createPostgresOperatorBreakGlassAdministrationStore(
           occurredAt: input.now,
         });
 
-        return { outcome: "created", id: input.id };
+        const result = { outcome: "created", id: input.id } as const;
+        await recordBreakGlassReceipt(transaction, input, environment, result, {
+          name: "operator.break-glass.review",
+          targetType: "operator_break_glass_grant",
+          targetId: input.grantId,
+          reason: input.summary,
+        });
+        return result;
       });
     },
   };
+}
+
+async function recordBreakGlassReceipt(
+  transaction: Transaction,
+  input:
+    | Parameters<OperatorBreakGlassAdministrationStore["createGrant"]>[0]
+    | Parameters<OperatorBreakGlassAdministrationStore["revokeGrant"]>[0]
+    | Parameters<OperatorBreakGlassAdministrationStore["reviewGrant"]>[0],
+  environment: PlatformConfigurationEnvironment,
+  result: {
+    readonly outcome: "created" | "updated";
+    readonly id: string;
+  },
+  command: {
+    readonly name:
+      | "operator.break-glass.grant"
+      | "operator.break-glass.revoke"
+      | "operator.break-glass.review";
+    readonly targetType: "operator" | "operator_break_glass_grant";
+    readonly targetId: string;
+    readonly reason: string;
+  },
+) {
+  if (input.commandId === undefined) return;
+  await recordTransactionalCommandSuccess(
+    transaction,
+    {
+      commandId: input.commandId,
+      actorId: input.actorId,
+      environment,
+      name: command.name,
+      targetType: command.targetType,
+      targetId: command.targetId,
+      correlationId: input.correlationId,
+      reason: command.reason,
+      now: input.now,
+    },
+    result,
+  );
 }
 
 async function assertActiveSuperAdministrator(

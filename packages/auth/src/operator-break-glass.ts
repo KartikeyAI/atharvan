@@ -31,6 +31,7 @@ export type OperatorBreakGlassCommandResult =
 export interface OperatorBreakGlassAdministrationStore {
   createGrant(input: {
     readonly id: string;
+    readonly commandId?: string;
     readonly actorId: string;
     readonly targetOperatorId: string;
     readonly capabilities: ReadonlyArray<string>;
@@ -46,6 +47,7 @@ export interface OperatorBreakGlassAdministrationStore {
   >;
   revokeGrant(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly grantId: string;
     readonly reason: string;
     readonly correlationId: string;
@@ -56,6 +58,7 @@ export interface OperatorBreakGlassAdministrationStore {
   >;
   reviewGrant(input: {
     readonly id: string;
+    readonly commandId?: string;
     readonly actorId: string;
     readonly grantId: string;
     readonly outcome: OperatorBreakGlassReviewOutcome;
@@ -77,6 +80,7 @@ export function createOperatorBreakGlassAdministrationService(input: {
   return {
     async createGrant(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly targetOperatorId: string;
       readonly capabilities: ReadonlyArray<string>;
       readonly durationMinutes: number;
@@ -107,6 +111,9 @@ export function createOperatorBreakGlassAdministrationService(input: {
 
       const result = await input.store.createGrant({
         id: crypto.randomUUID(),
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         actorId: command.actor.operatorId,
         targetOperatorId,
         capabilities,
@@ -135,6 +142,7 @@ export function createOperatorBreakGlassAdministrationService(input: {
 
     async revokeGrant(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly grantId: string;
       readonly reason: string;
       readonly correlationId?: string;
@@ -144,6 +152,9 @@ export function createOperatorBreakGlassAdministrationService(input: {
       return requireAccepted(
         await input.store.revokeGrant({
           actorId: command.actor.operatorId,
+          ...(command.commandId === undefined
+            ? {}
+            : { commandId: command.commandId }),
           grantId: requireUuid(command.grantId, "break_glass_grant_not_found"),
           reason: requireText(
             command.reason,
@@ -159,6 +170,7 @@ export function createOperatorBreakGlassAdministrationService(input: {
 
     async reviewGrant(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly grantId: string;
       readonly outcome: OperatorBreakGlassReviewOutcome;
       readonly summary: string;
@@ -181,6 +193,9 @@ export function createOperatorBreakGlassAdministrationService(input: {
       return requireAccepted(
         await input.store.reviewGrant({
           id: crypto.randomUUID(),
+          ...(command.commandId === undefined
+            ? {}
+            : { commandId: command.commandId }),
           actorId: command.actor.operatorId,
           grantId: requireUuid(command.grantId, "break_glass_grant_not_found"),
           outcome: command.outcome,

@@ -45,6 +45,13 @@ function createStore(): CustomerDirectoryStore {
       workspaces: input.workspaces.length,
       memberships: input.memberships.length,
     })),
+    reconcileTrustedSnapshot: vi.fn(async (input) => ({
+      outcome: "updated" as const,
+      sourceRevision: input.sourceRevision,
+      users: input.users.length,
+      workspaces: input.workspaces.length,
+      memberships: input.memberships.length,
+    })),
     listRestrictions: vi.fn(async (input) => ({
       environment: input.environment,
       targetType: input.targetType,
@@ -246,6 +253,7 @@ describe("customer directory service", () => {
 
     await expect(
       service.setRestriction({
+        commandId: "00000000-0000-4000-8000-000000000201",
         actor: restrictionActor,
         targetType: "user",
         targetId: "usr_1",
@@ -268,6 +276,7 @@ describe("customer directory service", () => {
 
     await expect(
       service.setRestriction({
+        commandId: "00000000-0000-4000-8000-000000000202",
         actor: restrictionActor,
         targetType: "user",
         targetId: "usr_1",
@@ -287,6 +296,7 @@ describe("customer directory service", () => {
     });
     await expect(
       service.setRestriction({
+        commandId: "00000000-0000-4000-8000-000000000203",
         actor: {
           ...actor,
           effectiveCapabilities: ["platform:workspaces:restrict"],
@@ -370,6 +380,7 @@ describe("customer directory service", () => {
 
     await expect(
       service.requestOwnershipTransfer({
+        commandId: "00000000-0000-4000-8000-000000000204",
         actor: transferActor,
         workspaceId: "wrk_1",
         successorUserId: "usr_2",
@@ -388,6 +399,7 @@ describe("customer directory service", () => {
 
     await expect(
       service.requestOwnershipTransfer({
+        commandId: "00000000-0000-4000-8000-000000000205",
         actor: transferActor,
         workspaceId: "wrk_1",
         successorUserId: "usr_2",

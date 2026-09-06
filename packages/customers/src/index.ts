@@ -57,6 +57,7 @@ export interface CustomerDirectorySnapshotMembership {
 
 export interface ReconcileCustomerDirectorySnapshotCommand {
   readonly actor: AuthenticatedOperator;
+  readonly commandId?: string;
   readonly sourceRevision: string;
   readonly observedAt: string;
   readonly users: ReadonlyArray<CustomerDirectorySnapshotUser>;
@@ -65,6 +66,29 @@ export interface ReconcileCustomerDirectorySnapshotCommand {
   readonly reason: string;
   readonly correlationId?: string;
 }
+
+export interface ReconcileTrustedCustomerDirectorySnapshotCommand {
+  readonly environment: PlatformConfigurationEnvironment;
+  readonly sourceRevision: string;
+  readonly observedAt: string;
+  readonly users: ReadonlyArray<CustomerDirectorySnapshotUser>;
+  readonly workspaces: ReadonlyArray<CustomerDirectorySnapshotWorkspace>;
+  readonly memberships: ReadonlyArray<CustomerDirectorySnapshotMembership>;
+  readonly sourceWorkloadKeyId: string;
+  readonly requestNonce: string;
+  readonly payloadSha256: string;
+}
+
+export type CustomerDirectoryReconciliationResult =
+  | {
+      readonly outcome: "updated";
+      readonly sourceRevision: string;
+      readonly users: number;
+      readonly workspaces: number;
+      readonly memberships: number;
+    }
+  | { readonly outcome: "unchanged"; readonly sourceRevision: string }
+  | { readonly outcome: "rejected"; readonly reason: string };
 
 export interface CustomerDirectoryStore {
   getStatus(input: {
@@ -93,30 +117,36 @@ export interface CustomerDirectoryStore {
   }): Promise<CustomerDirectoryInspection | null>;
   reconcileSnapshot(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly environment: PlatformConfigurationEnvironment;
     readonly sourceRevision: string;
     readonly observedAt: Date;
     readonly users: ReadonlyArray<CustomerDirectorySnapshotUser>;
     readonly workspaces: ReadonlyArray<CustomerDirectorySnapshotWorkspace>;
     readonly memberships: ReadonlyArray<CustomerDirectorySnapshotMembership>;
+    readonly reason: string;
+    readonly correlationId: string;
     readonly now: Date;
-  }): Promise<
-    | {
-        readonly outcome: "updated";
-        readonly sourceRevision: string;
-        readonly users: number;
-        readonly workspaces: number;
-        readonly memberships: number;
-      }
-    | { readonly outcome: "unchanged"; readonly sourceRevision: string }
-    | { readonly outcome: "rejected"; readonly reason: string }
-  >;
+  }): Promise<CustomerDirectoryReconciliationResult>;
+  reconcileTrustedSnapshot(input: {
+    readonly environment: PlatformConfigurationEnvironment;
+    readonly sourceRevision: string;
+    readonly observedAt: Date;
+    readonly users: ReadonlyArray<CustomerDirectorySnapshotUser>;
+    readonly workspaces: ReadonlyArray<CustomerDirectorySnapshotWorkspace>;
+    readonly memberships: ReadonlyArray<CustomerDirectorySnapshotMembership>;
+    readonly sourceWorkloadKeyId: string;
+    readonly requestNonce: string;
+    readonly payloadSha256: string;
+    readonly now: Date;
+  }): Promise<CustomerDirectoryReconciliationResult>;
   listRestrictions(input: {
     readonly environment: PlatformConfigurationEnvironment;
     readonly targetType: CustomerDirectoryEntityType;
     readonly targetId: string;
   }): Promise<CustomerRestrictionRegistry>;
   setRestriction(input: {
+    readonly commandId: string;
     readonly actorId: string;
     readonly environment: PlatformConfigurationEnvironment;
     readonly targetType: CustomerDirectoryEntityType;
@@ -143,6 +173,7 @@ export interface CustomerDirectoryStore {
   >;
   recordRestrictionObservation(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly environment: PlatformConfigurationEnvironment;
     readonly restrictionId: string;
     readonly desiredRevisionNumber: number;
@@ -159,6 +190,7 @@ export interface CustomerDirectoryStore {
   >;
   createInternalNote(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly environment: PlatformConfigurationEnvironment;
     readonly targetType: CustomerOperationsTargetType;
     readonly targetId: string;
@@ -173,6 +205,7 @@ export interface CustomerDirectoryStore {
   >;
   setRiskMarker(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly environment: PlatformConfigurationEnvironment;
     readonly targetType: CustomerOperationsTargetType;
     readonly targetId: string;
@@ -193,6 +226,7 @@ export interface CustomerDirectoryStore {
     | { readonly outcome: "rejected"; readonly reason: string }
   >;
   requestOwnershipTransfer(input: {
+    readonly commandId: string;
     readonly actorId: string;
     readonly environment: PlatformConfigurationEnvironment;
     readonly workspaceId: string;
@@ -211,6 +245,7 @@ export interface CustomerDirectoryStore {
   >;
   recordOwnershipTransferObservation(input: {
     readonly actorId: string;
+    readonly commandId?: string;
     readonly environment: PlatformConfigurationEnvironment;
     readonly transferId: string;
     readonly sourceRevision: string;
@@ -310,50 +345,46 @@ export function createCustomerDirectoryService(input: {
         requireRecentStepUp: true,
         now: commandTime,
       });
-      const sourceRevision = requireSourceRevision(command.sourceRevision);
-      const observedAt = requireObservedAt(command.observedAt, commandTime);
-      const users = requireUsers(command.users);
-      const workspaces = requireWorkspaces(command.workspaces);
-      const memberships = requireMemberships(command.memberships);
-      assertUnique(
-        users.map((value) => value.id),
-        "duplicate_user_id",
-      );
-      assertUnique(
-        workspaces.map((value) => value.id),
-        "duplicate_workspace_id",
-      );
-      assertUnique(
-        memberships.map((value) => value.id),
-        "duplicate_membership_id",
-      );
-      const userIds = new Set(users.map((value) => value.id));
-      const workspaceIds = new Set(workspaces.map((value) => value.id));
-      if (
-        memberships.some(
-          (value) =>
-            !userIds.has(value.userId) || !workspaceIds.has(value.workspaceId),
-        )
-      ) {
-        reject("membership_reference_missing");
-      }
-      if (
-        workspaces.some(
-          (value) =>
-            value.ownerUserId !== null && !userIds.has(value.ownerUserId),
-        )
-      ) {
-        reject("workspace_owner_reference_missing");
-      }
+      const snapshot = validateSnapshot(command, commandTime);
 
       const result = await input.store.reconcileSnapshot({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         environment: input.environment,
-        sourceRevision,
-        observedAt,
-        users,
-        workspaces,
-        memberships,
+        ...snapshot,
+        reason: requireText(command.reason, 8, 500, "snapshot_reason_required"),
+        correlationId: command.correlationId ?? randomId(),
+        now: commandTime,
+      });
+      if (result.outcome === "rejected") reject(result.reason);
+      return result;
+    },
+
+    async reconcileTrustedSnapshot(
+      command: ReconcileTrustedCustomerDirectorySnapshotCommand,
+    ) {
+      const commandTime = now();
+      if (command.environment !== input.environment) {
+        reject("source_environment_mismatch");
+      }
+      const snapshot = validateSnapshot(command, commandTime);
+      const result = await input.store.reconcileTrustedSnapshot({
+        environment: input.environment,
+        ...snapshot,
+        sourceWorkloadKeyId: requireIdentifier(
+          command.sourceWorkloadKeyId,
+          "source_workload_key_id_invalid",
+        ),
+        requestNonce: requireUuid(
+          command.requestNonce,
+          "request_nonce_invalid",
+        ),
+        payloadSha256: requireSha256(
+          command.payloadSha256,
+          "payload_sha256_invalid",
+        ),
         now: commandTime,
       });
       if (result.outcome === "rejected") reject(result.reason);
@@ -375,6 +406,7 @@ export function createCustomerDirectoryService(input: {
     },
 
     async setRestriction(command: {
+      readonly commandId: string;
       readonly actor: AuthenticatedOperator;
       readonly targetType: CustomerDirectoryEntityType;
       readonly targetId: string;
@@ -402,6 +434,7 @@ export function createCustomerDirectoryService(input: {
         reject("restriction_confirmation_invalid");
       }
       const result = await input.store.setRestriction({
+        commandId: requireUuid(command.commandId, "command_id_invalid"),
         actorId: command.actor.operatorId,
         environment: input.environment,
         targetType,
@@ -423,6 +456,7 @@ export function createCustomerDirectoryService(input: {
 
     async recordRestrictionObservation(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly restrictionId: string;
       readonly desiredRevisionNumber: number;
       readonly sourceRevision: string;
@@ -441,6 +475,9 @@ export function createCustomerDirectoryService(input: {
       });
       const result = await input.store.recordRestrictionObservation({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         environment: input.environment,
         restrictionId: requireUuid(
           command.restrictionId,
@@ -475,6 +512,7 @@ export function createCustomerDirectoryService(input: {
 
     async createInternalNote(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly targetType: CustomerOperationsTargetType;
       readonly targetId: string;
       readonly category: CustomerInternalNoteCategory;
@@ -489,6 +527,9 @@ export function createCustomerDirectoryService(input: {
       });
       const result = await input.store.createInternalNote({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         environment: input.environment,
         targetType,
         targetId: requireIdentifier(command.targetId, "entity_id_invalid"),
@@ -513,6 +554,7 @@ export function createCustomerDirectoryService(input: {
 
     async setRiskMarker(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly targetType: CustomerOperationsTargetType;
       readonly targetId: string;
       readonly markerId?: string | null;
@@ -540,6 +582,9 @@ export function createCustomerDirectoryService(input: {
       }
       const result = await input.store.setRiskMarker({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         environment: input.environment,
         targetType,
         targetId: requireIdentifier(command.targetId, "entity_id_invalid"),
@@ -574,6 +619,7 @@ export function createCustomerDirectoryService(input: {
     },
 
     async requestOwnershipTransfer(command: {
+      readonly commandId: string;
       readonly actor: AuthenticatedOperator;
       readonly workspaceId: string;
       readonly successorUserId: string;
@@ -604,6 +650,7 @@ export function createCustomerDirectoryService(input: {
         reject("ownership_transfer_confirmation_invalid");
       }
       const result = await input.store.requestOwnershipTransfer({
+        commandId: requireUuid(command.commandId, "command_id_invalid"),
         actorId: command.actor.operatorId,
         environment: input.environment,
         workspaceId,
@@ -629,6 +676,7 @@ export function createCustomerDirectoryService(input: {
 
     async recordOwnershipTransferObservation(command: {
       readonly actor: AuthenticatedOperator;
+      readonly commandId?: string;
       readonly transferId: string;
       readonly sourceRevision: string;
       readonly observedState: CustomerOwnershipTransferObservedState;
@@ -675,6 +723,9 @@ export function createCustomerDirectoryService(input: {
       }
       const result = await input.store.recordOwnershipTransferObservation({
         actorId: command.actor.operatorId,
+        ...(command.commandId === undefined
+          ? {}
+          : { commandId: command.commandId }),
         environment: input.environment,
         transferId: requireUuid(
           command.transferId,
@@ -737,6 +788,50 @@ function assertSearchAuthorized(
       requestedCapability: "platform:workspaces:read",
     });
   }
+}
+
+function validateSnapshot(
+  command: Pick<
+    ReconcileCustomerDirectorySnapshotCommand,
+    "sourceRevision" | "observedAt" | "users" | "workspaces" | "memberships"
+  >,
+  commandTime: Date,
+) {
+  const sourceRevision = requireSourceRevision(command.sourceRevision);
+  const observedAt = requireObservedAt(command.observedAt, commandTime);
+  const users = requireUsers(command.users);
+  const workspaces = requireWorkspaces(command.workspaces);
+  const memberships = requireMemberships(command.memberships);
+  assertUnique(
+    users.map((value) => value.id),
+    "duplicate_user_id",
+  );
+  assertUnique(
+    workspaces.map((value) => value.id),
+    "duplicate_workspace_id",
+  );
+  assertUnique(
+    memberships.map((value) => value.id),
+    "duplicate_membership_id",
+  );
+  const userIds = new Set(users.map((value) => value.id));
+  const workspaceIds = new Set(workspaces.map((value) => value.id));
+  if (
+    memberships.some(
+      (value) =>
+        !userIds.has(value.userId) || !workspaceIds.has(value.workspaceId),
+    )
+  ) {
+    reject("membership_reference_missing");
+  }
+  if (
+    workspaces.some(
+      (value) => value.ownerUserId !== null && !userIds.has(value.ownerUserId),
+    )
+  ) {
+    reject("workspace_owner_reference_missing");
+  }
+  return { sourceRevision, observedAt, users, workspaces, memberships };
 }
 
 function requireUsers(values: ReadonlyArray<CustomerDirectorySnapshotUser>) {
@@ -917,6 +1012,12 @@ function requireUuid(value: string, reason: string) {
   ) {
     reject(reason);
   }
+  return normalized;
+}
+
+function requireSha256(value: string, reason: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) reject(reason);
   return normalized;
 }
 

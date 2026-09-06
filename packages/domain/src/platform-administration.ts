@@ -21,6 +21,7 @@ export interface OperatorDirectoryEntry {
   readonly id: string;
   readonly email: string;
   readonly emailDomain: string;
+  readonly membershipDomainAllowed?: boolean;
   readonly status: OperatorLifecycleStatus;
   readonly isSuperAdministrator: boolean;
   readonly effectiveCapabilities: ReadonlyArray<string>;

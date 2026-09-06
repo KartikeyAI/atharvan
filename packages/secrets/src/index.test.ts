@@ -22,6 +22,10 @@ function createStore(): PlatformSecretLifecycleStore {
   return {
     listReferences: vi.fn(async () => []),
     beginCreate: vi.fn(async () => ({ outcome: "created" as const })),
+    beginProvisioningRetry: vi.fn(async () => ({
+      outcome: "started" as const,
+      providerName: "atharvan_development_models_openai_00000000",
+    })),
     completeCreate: vi.fn(async () => undefined),
     failCreate: vi.fn(async () => undefined),
     beginRotation: vi.fn(async () => ({
@@ -43,6 +47,7 @@ function createStore(): PlatformSecretLifecycleStore {
 function createProvider(): PlatformSecretMaterialProvider {
   return {
     configured: true,
+    findByName: vi.fn(async () => null),
     create: vi.fn(async () => ({ externalId: "provider-secret-id" })),
     rotate: vi.fn(async () => undefined),
     revoke: vi.fn(async () => undefined),
