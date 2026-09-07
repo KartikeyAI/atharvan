@@ -1,6 +1,10 @@
 import { Pool } from "pg";
 
 const expectedTables = [
+  "billing_checkout_requests",
+  "billing_provider_subscription_bindings",
+  "billing_subscription_observations",
+  "billing_subscription_reconciliation_jobs",
   "commercial_plan_entitlement_sets",
   "commercial_plan_entitlement_values",
   "commercial_plan_versions",
@@ -18,6 +22,8 @@ const expectedTables = [
   "workspace_entitlement_observations",
   "workspace_entitlement_snapshot_layers",
   "workspace_entitlement_snapshots",
+  "workspace_billing_subscription_revisions",
+  "workspace_billing_subscriptions",
   "arth_command_outbox",
   "arth_workload_request_nonces",
   "operational_retention_runs",
@@ -67,6 +73,20 @@ const expectedTables = [
 ] as const;
 
 const expectedIndexes = [
+  "billing_checkout_requests_command_unique",
+  "billing_checkout_requests_provider_key_unique",
+  "billing_checkout_requests_session_unique",
+  "billing_checkout_requests_subscription_unique",
+  "billing_checkout_requests_correlation_unique",
+  "billing_checkout_requests_workspace_active_unique",
+  "billing_checkout_requests_due_idx",
+  "billing_checkout_requests_history_idx",
+  "billing_provider_subscription_bindings_provider_unique",
+  "billing_provider_subscription_bindings_identity_unique",
+  "billing_provider_subscription_bindings_checkout_unique",
+  "billing_subscription_observations_correlation_unique",
+  "billing_subscription_observations_history_idx",
+  "billing_subscription_reconciliation_jobs_due_idx",
   "commercial_plan_entitlement_sets_plan_version_unique",
   "commercial_plan_entitlement_sets_correlation_unique",
   "commercial_plan_entitlement_sets_identity_unique",
@@ -172,6 +192,11 @@ const expectedIndexes = [
   "workspace_entitlement_snapshots_revision_unique",
   "workspace_entitlement_snapshots_correlation_unique",
   "workspace_entitlement_snapshots_history_idx",
+  "workspace_billing_subscription_revisions_number_unique",
+  "workspace_billing_subscription_revisions_pointer_unique",
+  "workspace_billing_subscription_revisions_correlation_unique",
+  "workspace_billing_subscription_revisions_history_idx",
+  "workspace_billing_subscriptions_workspace_unique",
 ] as const;
 
 const expectedAuthTables = [
@@ -205,6 +230,19 @@ const expectedAuthTriggers = [
 ] as const;
 
 const expectedConstraints = [
+  "billing_checkout_requests_identity_valid",
+  "billing_checkout_requests_attempts_valid",
+  "billing_checkout_requests_lease_valid",
+  "billing_checkout_requests_provider_fields_valid",
+  "billing_checkout_requests_state_valid",
+  "billing_provider_subscription_bindings_reference_valid",
+  "billing_subscription_observations_revision_positive",
+  "billing_subscription_observations_reason_valid",
+  "billing_subscription_observations_request_valid",
+  "billing_subscription_observations_revision_fk",
+  "billing_subscription_reconciliation_jobs_failures_valid",
+  "billing_subscription_reconciliation_jobs_lease_valid",
+  "billing_subscription_reconciliation_jobs_error_valid",
   "commercial_plan_entitlement_sets_reason_valid",
   "commercial_plan_entitlement_values_key_valid",
   "commercial_plan_entitlement_values_shape_valid",
@@ -326,6 +364,15 @@ const expectedConstraints = [
   "workspace_entitlement_snapshots_revision_positive",
   "workspace_entitlement_snapshots_reason_valid",
   "workspace_entitlement_snapshots_set_plan_fk",
+  "workspace_billing_subscription_revisions_number_positive",
+  "workspace_billing_subscription_revisions_quantity_valid",
+  "workspace_billing_subscription_revisions_period_valid",
+  "workspace_billing_subscription_revisions_provider_valid",
+  "workspace_billing_subscription_revisions_binding_identity_fk",
+  "workspace_billing_subscriptions_identity_valid",
+  "workspace_billing_subscriptions_revision_positive",
+  "workspace_billing_subscriptions_current_binding_fk",
+  "workspace_billing_subscriptions_current_revision_fk",
 ] as const;
 
 const forbiddenSecretMaterialColumns = new Set([
@@ -343,6 +390,10 @@ const forbiddenSecretMaterialColumns = new Set([
 ]);
 
 const expectedTriggers = [
+  "billing_checkout_requests_transition_guard",
+  "billing_provider_subscription_bindings_immutable",
+  "billing_subscription_observations_immutable",
+  "billing_subscription_reconciliation_jobs_guard",
   "commercial_plan_entitlement_sets_immutable",
   "commercial_plan_entitlement_values_immutable",
   "commercial_product_revisions_immutable",
@@ -391,9 +442,15 @@ const expectedTriggers = [
   "workspace_entitlement_observations_immutable",
   "workspace_entitlement_snapshot_layers_immutable",
   "workspace_entitlement_snapshots_immutable",
+  "workspace_billing_subscription_revisions_immutable",
+  "workspace_billing_subscriptions_pointer_guard",
 ] as const;
 
 const expectedEnumLabels = [
+  "billing_checkout_state.completed",
+  "billing_reconciliation_state.drift",
+  "billing_subscription_status.active",
+  "billing_subscription_status.canceled",
   "commercial_lifecycle.retired",
   "commercial_plan_audience.grandfathered",
   "commercial_pricing_model.contract",
@@ -450,7 +507,7 @@ export async function verifyMigratedContracts(
       "select trigger_name from information_schema.triggers where trigger_schema = 'public'",
     );
     const enumResult = await pool.query<{ typname: string; enumlabel: string }>(
-      "select type.typname, value.enumlabel from pg_type type join pg_enum value on value.enumtypid = type.oid join pg_namespace namespace on namespace.oid = type.typnamespace where namespace.nspname = 'public' and type.typname in ('model_provider_health_source', 'platform_integration_health_source', 'commercial_lifecycle', 'commercial_plan_audience', 'commercial_pricing_model', 'commercial_billing_interval', 'commercial_tax_behavior', 'enterprise_entitlement_grant_lifecycle', 'entitlement_observation_state', 'entitlement_overage_policy', 'entitlement_source_kind', 'entitlement_value_type')",
+      "select type.typname, value.enumlabel from pg_type type join pg_enum value on value.enumtypid = type.oid join pg_namespace namespace on namespace.oid = type.typnamespace where namespace.nspname = 'public' and type.typname in ('billing_checkout_state', 'billing_reconciliation_state', 'billing_subscription_status', 'model_provider_health_source', 'platform_integration_health_source', 'commercial_lifecycle', 'commercial_plan_audience', 'commercial_pricing_model', 'commercial_billing_interval', 'commercial_tax_behavior', 'enterprise_entitlement_grant_lifecycle', 'entitlement_observation_state', 'entitlement_overage_policy', 'entitlement_source_kind', 'entitlement_value_type')",
     );
     const functionResult = await pool.query<{ routine_name: string }>(
       "select routine_name from information_schema.routines where routine_schema = 'public' and routine_name = 'platform_http_health_probe_valid'",

@@ -100,6 +100,27 @@ require a contract reference and cannot exceed 128 distinct keys per workspace.
 Each effective change atomically creates the next complete snapshot, audit event,
 command receipt, and Arth outbox command.
 
+### Subscription billing contract
+
+`GET /v1/platform/billing/workspaces/{workspaceId}` requires
+`platform:billing:read` and returns Stripe configuration state, bounded Checkout
+history, the current immutable provider subscription revision, recent revision
+history, reconciliation scheduling, and bounded observations. The response never
+contains provider credentials or raw provider payloads.
+
+`POST /v1/platform/billing/workspaces/{workspaceId}/checkout` requires
+`platform:billing:write`, recent passkey step-up, an idempotency key, a reason,
+and an active fixed recurring plan version with a Stripe Price reference. The
+workspace must be active and its current entitlement snapshot must name the same
+plan version. The durable response reports `pending`, `ready`, `completed`,
+`expired`, or `failed`; only `ready` may include an unexpired hosted Checkout URL.
+
+`POST /v1/platform/billing/workspaces/{workspaceId}/reconcile` schedules and
+attempts provider reconciliation under the same command controls. Stripe
+subscription ID, customer, Price, environment, workspace, plan, and originating
+Checkout metadata must match. A mismatch records `drift` and cannot silently
+change plan or entitlement authority.
+
 `POST /v1/platform/email-recipient-suppressions/{suppressionId}/restore`
 requires `platform:security:write`, the active Super Administrator, recent
 passkey step-up, a reason, and an idempotency key. It restores eligibility only

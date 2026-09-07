@@ -187,6 +187,19 @@ function createRuntime(input?: {
     })),
     getPlanEntitlementSet: vi.fn(async () => null),
     getWorkspaceEntitlements: vi.fn(async () => null),
+    billingProviderConfigured: true,
+    getWorkspaceBilling: vi.fn(async () => null),
+    startSubscriptionCheckout: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000556",
+      state: "ready" as const,
+      checkoutUrl: "https://checkout.stripe.com/c/pay/test",
+      expiresAt: new Date("2026-09-04T01:00:00Z").toISOString(),
+    })),
+    reconcileWorkspaceSubscription: vi.fn(async () => ({
+      outcome: "updated" as const,
+      id: "00000000-0000-4000-8000-000000000557",
+    })),
     listModelRoutingOperations: vi.fn(async () => ({
       environment: "development" as const,
       policies: [],

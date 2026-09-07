@@ -6,10 +6,10 @@ import type * as schema from "./schema";
 
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-export const currentAtharvanSchemaVersion = 30;
-export const currentAtharvanMigrationTimestamp = "1788766254999";
+export const currentAtharvanSchemaVersion = 31;
+export const currentAtharvanMigrationTimestamp = "1788769518101";
 export const currentAtharvanMigrationHash =
-  "233440cb6fd1b01f4bf50b5d6b967c95081b2cffae6b3abdc9c282713271b466";
+  "a6e50ce47ebf21cd25841bcb2801ee1a3581c801f1a482cbe79d178471b41a6e";
 
 export interface DatabaseReadinessEvidence {
   readonly schemaVersion: number;
@@ -30,12 +30,15 @@ export async function checkPostgresReadiness(
     commercialGuard: boolean;
     entitlementTable: boolean;
     entitlementGuard: boolean;
+    billingTable: boolean;
+    billingGuard: boolean;
     writable: boolean;
     commandPrivileges: boolean;
     retentionPrivileges: boolean;
     cleanupPrivileges: boolean;
     commercialPrivileges: boolean;
     entitlementPrivileges: boolean;
+    billingPrivileges: boolean;
   }>(sql`SELECT
       migration.hash,
       migration.created_at::text AS "createdAt",
@@ -61,6 +64,13 @@ export async function checkPostgresReadiness(
           AND tgname = 'workspace_entitlement_snapshots_immutable'
           AND NOT tgisinternal
       ) AS "entitlementGuard",
+      to_regclass('public.workspace_billing_subscriptions') IS NOT NULL AS "billingTable",
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = to_regclass('public.workspace_billing_subscription_revisions')
+          AND tgname = 'workspace_billing_subscription_revisions_immutable'
+          AND NOT tgisinternal
+      ) AS "billingGuard",
       current_setting('transaction_read_only') = 'off' AS writable,
       has_table_privilege(current_user, 'public.platform_commands', 'SELECT,INSERT,UPDATE') AS "commandPrivileges",
       has_table_privilege(current_user, 'public.operational_retention_runs', 'SELECT,INSERT,UPDATE') AS "retentionPrivileges",
@@ -77,6 +87,12 @@ export async function checkPostgresReadiness(
         AND has_table_privilege(current_user, 'public.workspace_enterprise_entitlement_grants', 'SELECT,INSERT,UPDATE')
         AND has_table_privilege(current_user, 'public.workspace_enterprise_entitlement_grant_revisions', 'SELECT,INSERT')
         AND has_table_privilege(current_user, 'public.workspace_entitlement_observations', 'SELECT,INSERT') AS "entitlementPrivileges"
+      , has_table_privilege(current_user, 'public.billing_checkout_requests', 'SELECT,INSERT,UPDATE')
+        AND has_table_privilege(current_user, 'public.workspace_billing_subscriptions', 'SELECT,INSERT,UPDATE')
+        AND has_table_privilege(current_user, 'public.billing_provider_subscription_bindings', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.workspace_billing_subscription_revisions', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.billing_subscription_observations', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.billing_subscription_reconciliation_jobs', 'SELECT,INSERT,UPDATE') AS "billingPrivileges"
     FROM atharvan_migrations.history AS migration
     ORDER BY migration.created_at DESC, migration.id DESC
     LIMIT 1`);
@@ -100,7 +116,9 @@ export async function checkPostgresReadiness(
     !row.commercialTable ||
     !row.commercialGuard ||
     !row.entitlementTable ||
-    !row.entitlementGuard
+    !row.entitlementGuard ||
+    !row.billingTable ||
+    !row.billingGuard
   )
     throw new Error("database_schema_sentinel_missing");
   if (
@@ -109,7 +127,8 @@ export async function checkPostgresReadiness(
     !row.retentionPrivileges ||
     !row.cleanupPrivileges ||
     !row.commercialPrivileges ||
-    !row.entitlementPrivileges
+    !row.entitlementPrivileges ||
+    !row.billingPrivileges
   )
     throw new Error("database_write_authority_unavailable");
   const checkedAt = new Date(row.checkedAt);

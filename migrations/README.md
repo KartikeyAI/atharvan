@@ -51,4 +51,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0030_entitlement_snapshots.sql` adds one sealed entitlement set per immutable plan version, monotonic workspace assignment snapshots, time-bounded enterprise grant revisions, complete snapshot layers, and append-only Arth observations. Deferred foreign keys bind every pointer to its exact revision and every snapshot set to its plan version; triggers prohibit history rewrites, pointer skips, deletion, and reactivation of revoked grants.
 
+`0031_billing_subscriptions.sql` adds durable Stripe Checkout requests, immutable provider subscription bindings and revisions, append-only reconciliation observations, and fenced scheduled jobs. Deferred composite foreign keys bind the stable workspace pointer to its exact current provider revision; transition and immutability triggers reject skipped revisions, terminal rewrites, and evidence deletion.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

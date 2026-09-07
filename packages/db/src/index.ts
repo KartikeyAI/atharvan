@@ -45,6 +45,7 @@ export { createPostgresPlatformSecretStore } from "./platform-secret-store";
 export { createPostgresModelCatalogueStore } from "./model-catalogue-store";
 export { createPostgresCommercialCatalogueStore } from "./commercial-catalogue-store";
 export { createPostgresEntitlementStore } from "./entitlement-store";
+export { createPostgresBillingSubscriptionStore } from "./billing-subscription-store";
 export { createPostgresModelRoutingStore } from "./model-routing-store";
 export { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 export * as authDatabaseSchema from "./schema";

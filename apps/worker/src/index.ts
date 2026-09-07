@@ -17,6 +17,8 @@ import {
 } from "@atharvan/commands";
 import { PlatformAdapterCommandRejectedError } from "@atharvan/adapters";
 import {
+  BillingCommandRejectedError,
+  BillingProviderError,
   CommercialCatalogueCommandRejectedError,
   EntitlementCommandRejectedError,
   type AssignWorkspacePlanCommand,
@@ -24,6 +26,8 @@ import {
   type SetEnterpriseGrantCommand,
   type SetCommercialPlanVersionCommand,
   type SetCommercialProductCommand,
+  type StartSubscriptionCheckoutCommand,
+  type ReconcileWorkspaceSubscriptionCommand,
 } from "@atharvan/commercial";
 import {
   parseAuthenticationRuntimeConfig,
@@ -91,6 +95,7 @@ import {
   type EntitlementValue,
   type PlanEntitlementSet,
   type WorkspaceEntitlementRegistry,
+  type WorkspaceBillingRegistry,
   type ModelRoutingControlState,
   type ModelRoutingControlTargetKind,
   type ModelRoutingDecision,
@@ -166,6 +171,7 @@ export interface RuntimeBindings {
   readonly ATHARVAN_ALERT_EMAIL_TO?: string;
   readonly RESEND_API_KEY?: string;
   readonly RESEND_WEBHOOK_SECRET?: string;
+  readonly STRIPE_SECRET_KEY?: string;
   readonly CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID?: string;
   readonly CLOUDFLARE_SECRETS_STORE_ID?: string;
   readonly CLOUDFLARE_SECRETS_STORE_API_TOKEN?: string;
@@ -289,6 +295,27 @@ export interface AuthenticationRuntime {
   getWorkspaceEntitlements(
     workspaceId: string,
   ): Promise<WorkspaceEntitlementRegistry | null>;
+  readonly billingProviderConfigured: boolean;
+  getWorkspaceBilling(
+    workspaceId: string,
+  ): Promise<WorkspaceBillingRegistry | null>;
+  startSubscriptionCheckout(
+    actor: AuthenticatedOperator,
+    command: StartSubscriptionCheckoutCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly state: import("@atharvan/domain").BillingCheckoutState;
+    readonly checkoutUrl: string | null;
+    readonly expiresAt: string | null;
+  }>;
+  reconcileWorkspaceSubscription(
+    actor: AuthenticatedOperator,
+    command: ReconcileWorkspaceSubscriptionCommand,
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+  }>;
   listModelRoutingOperations(): Promise<ModelRoutingOperations>;
   listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
   listPlatformAdapters(): Promise<PlatformAdapterRegistry>;
@@ -2532,6 +2559,91 @@ export function createApp(
     },
   );
 
+  app.get("/v1/platform/billing/workspaces/:workspaceId", async (context) => {
+    context.header("cache-control", "no-store");
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:billing:read")
+    )
+      return capabilityRequired(context);
+    const workspaceId = context.req.param("workspaceId").trim();
+    if (readTrimmedString(workspaceId, 200) === null)
+      return invalidRequest(context);
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    const result = await runtime.getWorkspaceBilling(workspaceId);
+    return result === null
+      ? context.json(
+          {
+            code: "workspace_not_found",
+            message: "The projected customer workspace was not found.",
+            requestId: context.get("requestId"),
+          },
+          404,
+        )
+      : context.json(result);
+  });
+
+  app.post(
+    "/v1/platform/billing/workspaces/:workspaceId/checkout",
+    async (context) => {
+      const input = await readJson(context, parseStartSubscriptionCheckout);
+      const workspaceId = context.req.param("workspaceId").trim();
+      if (input === null || readTrimmedString(workspaceId, 200) === null)
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:billing:write",
+          name: "billing.subscription-checkout.start",
+          version: 1,
+          targetType: "workspace_billing",
+          targetId: workspaceId,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.startSubscriptionCheckout(context.get("operator"), {
+            ...input,
+            commandId,
+            workspaceId,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
+
+  app.post(
+    "/v1/platform/billing/workspaces/:workspaceId/reconcile",
+    async (context) => {
+      const input = await readJson(context, parseBillingReconciliation);
+      const workspaceId = context.req.param("workspaceId").trim();
+      if (input === null || readTrimmedString(workspaceId, 200) === null)
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:billing:write",
+          name: "billing.subscription.reconcile",
+          version: 1,
+          targetType: "workspace_billing",
+          targetId: workspaceId,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.reconcileWorkspaceSubscription(context.get("operator"), {
+            ...input,
+            commandId,
+            workspaceId,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
+
   app.put(
     "/v1/platform/workspace-entitlements/:workspaceId/grants/:key",
     async (context) => {
@@ -4537,6 +4649,33 @@ function parseAssignWorkspacePlan(
     : null;
 }
 
+function parseStartSubscriptionCheckout(
+  value: unknown,
+): Omit<
+  StartSubscriptionCheckoutCommand,
+  "workspaceId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const planVersionId = readTrimmedString(value.planVersionId, 36);
+  const reason = readReason(value.reason);
+  return planVersionId !== null &&
+    uuidPattern.test(planVersionId.toLowerCase()) &&
+    reason !== null
+    ? { planVersionId: planVersionId.toLowerCase(), reason }
+    : null;
+}
+
+function parseBillingReconciliation(
+  value: unknown,
+): Omit<
+  ReconcileWorkspaceSubscriptionCommand,
+  "workspaceId" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const reason = readReason(value.reason);
+  return reason === null ? null : { reason };
+}
+
 function parseSetEnterpriseGrant(
   value: unknown,
 ): Omit<
@@ -5468,6 +5607,30 @@ function mapCommandError(error: unknown, reason: string, requestId: string) {
       requestId,
       error.reason,
     );
+  if (error instanceof BillingProviderError)
+    return commandError(
+      error.reason === "billing_provider_unconfigured" ? 503 : 502,
+      "failed",
+      "billing_provider_unavailable",
+      error.reason === "billing_provider_unconfigured"
+        ? "Stripe billing is not configured."
+        : "Stripe did not complete the billing request.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof BillingCommandRejectedError)
+    return commandError(
+      error.reason === "billing_provider_unconfigured" ? 503 : 409,
+      error.reason === "billing_provider_unconfigured" ? "failed" : "rejected",
+      error.reason === "billing_provider_unconfigured"
+        ? "billing_provider_unavailable"
+        : "billing_change_rejected",
+      error.reason === "billing_provider_unconfigured"
+        ? "Stripe billing is not configured."
+        : "The subscription request was not accepted.",
+      requestId,
+      error.reason,
+    );
   if (error instanceof ModelRoutingCommandRejectedError)
     return commandError(
       409,
@@ -5605,6 +5768,7 @@ export default {
       { createOperationalAlertRuntime },
       { createPlatformHealthProbeRuntime },
       { createOperationalRetentionRuntime },
+      { createBillingReconciliationRuntime },
     ] = await Promise.all([
       import("@atharvan/config"),
       import("@atharvan/db"),
@@ -5612,6 +5776,7 @@ export default {
       import("./operational-alert-runtime"),
       import("./platform-health-probe-runtime"),
       import("./operational-retention-runtime"),
+      import("./billing-reconciliation-runtime"),
     ]);
     const config = parseAuthenticationRuntimeConfig(bindings);
     try {
@@ -5641,6 +5806,13 @@ export default {
           runScheduledTask(
             "operational_retention",
             () => createOperationalRetentionRuntime(database, config).run(),
+            runId,
+            traceContext,
+            config.ATHARVAN_ENVIRONMENT,
+          ),
+          runScheduledTask(
+            "billing_reconciliation",
+            () => createBillingReconciliationRuntime(database, config).run(),
             runId,
             traceContext,
             config.ATHARVAN_ENVIRONMENT,

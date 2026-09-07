@@ -10,6 +10,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { OperatorShell } from "@/components/operator-shell";
 import { EntitlementOperations } from "@/components/entitlement-operations";
+import { SubscriptionOperations } from "@/components/subscription-operations";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,6 +111,7 @@ function BillingPage() {
           )
         ) : null}
         <EntitlementOperations products={registry?.items ?? []} />
+        <SubscriptionOperations products={registry?.items ?? []} />
       </div>
     </OperatorShell>
   );

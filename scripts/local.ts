@@ -114,6 +114,9 @@ async function main(): Promise<void> {
     `Email feedback: ${config.RESEND_WEBHOOK_SECRET ? "configured (webhook not tested)" : "not configured; delivery/bounce/complaint outcomes unavailable"}.`,
   );
   console.log(
+    `Stripe billing: ${config.STRIPE_SECRET_KEY ? "configured (provider not tested)" : "not configured; subscription Checkout unavailable"}.`,
+  );
+  console.log(
     `Secrets Store: ${config.CLOUDFLARE_SECRETS_STORE_API_TOKEN ? "configured (provider access not tested)" : "not configured"}.`,
   );
 

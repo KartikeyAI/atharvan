@@ -11,6 +11,8 @@ import {
 } from "@atharvan/domain";
 
 export * from "./entitlements";
+export * from "./stripe-billing-provider";
+export * from "./subscriptions";
 
 const lifecycles = new Set<CommercialLifecycle>(["draft", "active", "retired"]);
 const audiences = new Set<CommercialPlanAudience>([

@@ -5,7 +5,7 @@
 `/health/live` confirms only that the Worker can execute. `/health/ready` checks
 the full runtime configuration and canonical Neon boundary without mutating
 state. A successful response includes `status: ready`, the environment,
-`schemaVersion: 30`, `checkedAt`, and a request ID.
+`schemaVersion: 31`, `checkedAt`, and a request ID.
 
 A `503 readiness_check_failed` response intentionally combines configuration,
 connectivity, migration, trigger, read-only, and privilege failures. Use Worker
@@ -25,7 +25,7 @@ variable containing the deployed Worker's public HTTPS origin. The deploy job:
 6. deploys the console only after success.
 
 If the gate fails, leave the console release unchanged. Confirm the environment
-variable points to the Worker, check that migration `0030` is the recorded head,
+variable points to the Worker, check that migration `0031` is the recorded head,
 run the migration contract against the destination, and confirm the runtime
 database role is writable with the required table privileges. Apply a forward
 fix for schema problems; do not forge migration history or weaken the readiness

@@ -16,8 +16,11 @@ import {
   createPlatformApprovalService,
 } from "@atharvan/commands";
 import {
+  createBillingSubscriptionService,
   createCommercialCatalogueService,
   createEntitlementService,
+  createStripeBillingProvider,
+  unconfiguredBillingProvider,
 } from "@atharvan/commercial";
 import {
   createPlatformConfigurationAdministrationService,
@@ -48,6 +51,7 @@ import {
   createPostgresModelRoutingStore,
   createPostgresCommercialCatalogueStore,
   createPostgresEntitlementStore,
+  createPostgresBillingSubscriptionStore,
   createPostgresArthCommandExchange,
   createPostgresOperationalAlertDeliveryStore,
   createPostgresPlatformHealthProbeStore,
@@ -151,6 +155,15 @@ async function createProductionAuthenticationRuntime(input: {
     const entitlementService = createEntitlementService({
       store: createPostgresEntitlementStore(databaseHandle.database),
       environment: config.ATHARVAN_ENVIRONMENT,
+    });
+    const billingProvider = config.STRIPE_SECRET_KEY
+      ? createStripeBillingProvider({ secretKey: config.STRIPE_SECRET_KEY })
+      : unconfiguredBillingProvider;
+    const billingSubscriptionService = createBillingSubscriptionService({
+      store: createPostgresBillingSubscriptionStore(databaseHandle.database),
+      provider: billingProvider,
+      environment: config.ATHARVAN_ENVIRONMENT,
+      publicOrigin: config.ATHARVAN_PUBLIC_ORIGIN,
     });
     const modelRoutingService = createModelRoutingService({
       store: createPostgresModelRoutingStore(databaseHandle.database),
@@ -317,6 +330,7 @@ async function createProductionAuthenticationRuntime(input: {
           config.ATHARVAN_ENVIRONMENT,
         ).revoke(input),
       secretProviderConfigured: secretMaterialProvider.configured,
+      billingProviderConfigured: billingProvider.configured,
       async handle(request) {
         return requirePasskeyUserVerification(
           request,
@@ -365,6 +379,12 @@ async function createProductionAuthenticationRuntime(input: {
         entitlementService.getPlanEntitlementSet(planVersionId),
       getWorkspaceEntitlements: (workspaceId) =>
         entitlementService.getWorkspaceEntitlements(workspaceId),
+      getWorkspaceBilling: (workspaceId) =>
+        billingSubscriptionService.getWorkspaceBilling(workspaceId),
+      startSubscriptionCheckout: (actor, command) =>
+        billingSubscriptionService.startCheckout(actor, command),
+      reconcileWorkspaceSubscription: (actor, command) =>
+        billingSubscriptionService.requestReconciliation(actor, command),
       listModelRoutingOperations: () => modelRoutingService.listOperations(),
       listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
       listPlatformAdapters: () => adapterRegistryService.listRegistry(),

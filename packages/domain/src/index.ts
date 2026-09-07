@@ -121,6 +121,7 @@ export * from "./operator-lifecycle";
 export * from "./email-delivery";
 export * from "./operational-retention";
 export * from "./arth-command-delivery";
+export * from "./billing-subscriptions";
 export * from "./platform-approvals";
 export * from "./customer-directory";
 export * from "./platform-administration";

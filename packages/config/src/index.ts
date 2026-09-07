@@ -22,6 +22,11 @@ export const authenticationRuntimeConfigSchema = runtimeConfigSchema
     ATHARVAN_ALERT_EMAIL_TO: z.email().optional(),
     RESEND_API_KEY: z.string().trim().min(1).optional(),
     RESEND_WEBHOOK_SECRET: z.string().trim().min(20).optional(),
+    STRIPE_SECRET_KEY: z
+      .string()
+      .trim()
+      .regex(/^(?:sk|rk)_(?:test|live)_[A-Za-z0-9_]{16,}$/)
+      .optional(),
     CLOUDFLARE_SECRETS_STORE_ACCOUNT_ID: z.string().trim().min(1).optional(),
     CLOUDFLARE_SECRETS_STORE_ID: z.string().trim().min(1).optional(),
     CLOUDFLARE_SECRETS_STORE_API_TOKEN: z.string().trim().min(1).optional(),
@@ -93,6 +98,19 @@ export const authenticationRuntimeConfigSchema = runtimeConfigSchema
           "Current and previous Arth workload key identifiers must differ.",
       });
     }
+    if (value.STRIPE_SECRET_KEY !== undefined) {
+      const expectedMode =
+        value.ATHARVAN_ENVIRONMENT === "production" ? "live" : "test";
+      if (
+        !value.STRIPE_SECRET_KEY.startsWith(`sk_${expectedMode}_`) &&
+        !value.STRIPE_SECRET_KEY.startsWith(`rk_${expectedMode}_`)
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["STRIPE_SECRET_KEY"],
+          message: `STRIPE_SECRET_KEY must use Stripe ${expectedMode} mode for this environment.`,
+        });
+    }
     if (value.ATHARVAN_ENVIRONMENT === "production") {
       const origin = new URL(value.ATHARVAN_PUBLIC_ORIGIN);
       if (
@@ -108,6 +126,7 @@ export const authenticationRuntimeConfigSchema = runtimeConfigSchema
       for (const [name, configured] of [
         ["RESEND_API_KEY", Boolean(value.RESEND_API_KEY)],
         ["RESEND_WEBHOOK_SECRET", Boolean(value.RESEND_WEBHOOK_SECRET)],
+        ["STRIPE_SECRET_KEY", Boolean(value.STRIPE_SECRET_KEY)],
         [
           "ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET",
           Boolean(value.ATHARVAN_EMAIL_RECIPIENT_HMAC_SECRET),

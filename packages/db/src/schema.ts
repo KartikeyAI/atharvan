@@ -316,6 +316,30 @@ export const commercialTaxBehavior = pgEnum("commercial_tax_behavior", [
   "unspecified",
 ]);
 
+export const billingCheckoutState = pgEnum("billing_checkout_state", [
+  "pending",
+  "ready",
+  "completed",
+  "expired",
+  "failed",
+]);
+
+export const billingSubscriptionStatus = pgEnum("billing_subscription_status", [
+  "incomplete",
+  "incomplete_expired",
+  "trialing",
+  "active",
+  "past_due",
+  "canceled",
+  "unpaid",
+  "paused",
+]);
+
+export const billingReconciliationState = pgEnum(
+  "billing_reconciliation_state",
+  ["matched", "drift", "failed"],
+);
+
 export const entitlementValueType = pgEnum("entitlement_value_type", [
   "boolean",
   "quantity",
@@ -4089,6 +4113,320 @@ export const workspaceEntitlementObservations = pgTable(
     check(
       "workspace_entitlement_observations_key_valid",
       sql`${table.sourceWorkloadKeyId} ~ '^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,79}$'`,
+    ),
+  ],
+);
+
+export const billingCheckoutRequests = pgTable(
+  "billing_checkout_requests",
+  {
+    id: uuid("id").primaryKey(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    workspaceSourceId: text("workspace_source_id").notNull(),
+    planVersionId: uuid("plan_version_id")
+      .notNull()
+      .references(() => commercialPlanVersions.id, { onDelete: "restrict" }),
+    requestedByOperatorId: uuid("requested_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    commandId: uuid("command_id")
+      .notNull()
+      .references(() => platformCommands.id, { onDelete: "restrict" }),
+    provider: text("provider").notNull().default("stripe"),
+    providerIdempotencyKey: text("provider_idempotency_key").notNull(),
+    state: billingCheckoutState("state").notNull().default("pending"),
+    providerCheckoutSessionId: text("provider_checkout_session_id"),
+    providerCustomerId: text("provider_customer_id"),
+    providerSubscriptionId: text("provider_subscription_id"),
+    checkoutUrl: text("checkout_url"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    failures: integer("failures").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_checkout_requests_command_unique").on(table.commandId),
+    uniqueIndex("billing_checkout_requests_provider_key_unique").on(
+      table.provider,
+      table.providerIdempotencyKey,
+    ),
+    uniqueIndex("billing_checkout_requests_session_unique")
+      .on(table.provider, table.providerCheckoutSessionId)
+      .where(sql`${table.providerCheckoutSessionId} IS NOT NULL`),
+    uniqueIndex("billing_checkout_requests_subscription_unique")
+      .on(table.provider, table.providerSubscriptionId)
+      .where(sql`${table.providerSubscriptionId} IS NOT NULL`),
+    uniqueIndex("billing_checkout_requests_correlation_unique").on(
+      table.correlationId,
+    ),
+    uniqueIndex("billing_checkout_requests_workspace_active_unique")
+      .on(table.environment, table.workspaceSourceId)
+      .where(sql`${table.state} IN ('pending', 'ready')`),
+    index("billing_checkout_requests_due_idx").on(
+      table.environment,
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+    ),
+    index("billing_checkout_requests_history_idx").on(
+      table.environment,
+      table.workspaceSourceId,
+      table.createdAt,
+    ),
+    check(
+      "billing_checkout_requests_identity_valid",
+      sql`${table.provider} = 'stripe' AND length(btrim(${table.workspaceSourceId})) BETWEEN 1 AND 200 AND length(${table.providerIdempotencyKey}) BETWEEN 8 AND 200`,
+    ),
+    check(
+      "billing_checkout_requests_attempts_valid",
+      sql`${table.failures} BETWEEN 0 AND 5`,
+    ),
+    check(
+      "billing_checkout_requests_lease_valid",
+      sql`(${table.leaseToken} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseToken} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "billing_checkout_requests_provider_fields_valid",
+      sql`(${table.providerCheckoutSessionId} IS NULL OR length(${table.providerCheckoutSessionId}) BETWEEN 3 AND 200) AND (${table.providerCustomerId} IS NULL OR length(${table.providerCustomerId}) BETWEEN 3 AND 200) AND (${table.providerSubscriptionId} IS NULL OR length(${table.providerSubscriptionId}) BETWEEN 3 AND 200) AND (${table.lastErrorCode} IS NULL OR ${table.lastErrorCode} ~ '^[a-z][a-z0-9_.-]{2,79}$')`,
+    ),
+    check(
+      "billing_checkout_requests_state_valid",
+      sql`(${table.state} = 'pending' AND ${table.providerCheckoutSessionId} IS NULL AND ${table.checkoutUrl} IS NULL AND ${table.expiresAt} IS NULL AND ${table.providerSubscriptionId} IS NULL) OR (${table.state} = 'ready' AND ${table.providerCheckoutSessionId} IS NOT NULL AND ${table.checkoutUrl} LIKE 'https://checkout.stripe.com/%' AND ${table.expiresAt} IS NOT NULL AND ${table.providerSubscriptionId} IS NULL) OR (${table.state} = 'completed' AND ${table.providerCheckoutSessionId} IS NOT NULL AND ${table.providerCustomerId} IS NOT NULL AND ${table.providerSubscriptionId} IS NOT NULL AND ${table.checkoutUrl} IS NULL AND ${table.expiresAt} IS NOT NULL) OR (${table.state} = 'expired' AND ${table.providerCheckoutSessionId} IS NOT NULL AND ${table.checkoutUrl} IS NULL AND ${table.expiresAt} IS NOT NULL) OR (${table.state} = 'failed' AND ${table.checkoutUrl} IS NULL)`,
+    ),
+  ],
+);
+
+export const workspaceBillingSubscriptions = pgTable(
+  "workspace_billing_subscriptions",
+  {
+    id: uuid("id").primaryKey(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    workspaceSourceId: text("workspace_source_id").notNull(),
+    provider: text("provider").notNull().default("stripe"),
+    currentProviderBindingId: uuid("current_provider_binding_id").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_billing_subscriptions_workspace_unique").on(
+      table.environment,
+      table.workspaceSourceId,
+    ),
+    check(
+      "workspace_billing_subscriptions_identity_valid",
+      sql`${table.provider} = 'stripe' AND length(btrim(${table.workspaceSourceId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "workspace_billing_subscriptions_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const billingProviderSubscriptionBindings = pgTable(
+  "billing_provider_subscription_bindings",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceSubscriptionId: uuid("workspace_subscription_id")
+      .notNull()
+      .references(() => workspaceBillingSubscriptions.id, {
+        onDelete: "restrict",
+      }),
+    checkoutRequestId: uuid("checkout_request_id")
+      .notNull()
+      .references(() => billingCheckoutRequests.id, { onDelete: "restrict" }),
+    provider: text("provider").notNull().default("stripe"),
+    providerSubscriptionId: text("provider_subscription_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_provider_subscription_bindings_provider_unique").on(
+      table.provider,
+      table.providerSubscriptionId,
+    ),
+    uniqueIndex("billing_provider_subscription_bindings_identity_unique").on(
+      table.id,
+      table.workspaceSubscriptionId,
+    ),
+    uniqueIndex("billing_provider_subscription_bindings_checkout_unique").on(
+      table.checkoutRequestId,
+    ),
+    check(
+      "billing_provider_subscription_bindings_reference_valid",
+      sql`${table.provider} = 'stripe' AND length(${table.providerSubscriptionId}) BETWEEN 3 AND 200`,
+    ),
+  ],
+);
+
+export const workspaceBillingSubscriptionRevisions = pgTable(
+  "workspace_billing_subscription_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceSubscriptionId: uuid("workspace_subscription_id")
+      .notNull()
+      .references(() => workspaceBillingSubscriptions.id, {
+        onDelete: "restrict",
+      }),
+    revisionNumber: integer("revision_number").notNull(),
+    providerBindingId: uuid("provider_binding_id")
+      .notNull()
+      .references(() => billingProviderSubscriptionBindings.id, {
+        onDelete: "restrict",
+      }),
+    planVersionId: uuid("plan_version_id")
+      .notNull()
+      .references(() => commercialPlanVersions.id, { onDelete: "restrict" }),
+    providerCustomerId: text("provider_customer_id").notNull(),
+    status: billingSubscriptionStatus("status").notNull(),
+    quantity: integer("quantity").notNull(),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull(),
+    currentPeriodStart: timestamp("current_period_start", {
+      withTimezone: true,
+    }).notNull(),
+    currentPeriodEnd: timestamp("current_period_end", {
+      withTimezone: true,
+    }).notNull(),
+    trialEnd: timestamp("trial_end", { withTimezone: true }),
+    providerCreatedAt: timestamp("provider_created_at", {
+      withTimezone: true,
+    }).notNull(),
+    providerDataSha256: text("provider_data_sha256").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("workspace_billing_subscription_revisions_number_unique").on(
+      table.workspaceSubscriptionId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("workspace_billing_subscription_revisions_pointer_unique").on(
+      table.workspaceSubscriptionId,
+      table.revisionNumber,
+      table.providerBindingId,
+    ),
+    uniqueIndex(
+      "workspace_billing_subscription_revisions_correlation_unique",
+    ).on(table.correlationId),
+    index("workspace_billing_subscription_revisions_history_idx").on(
+      table.workspaceSubscriptionId,
+      table.revisionNumber,
+    ),
+    check(
+      "workspace_billing_subscription_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "workspace_billing_subscription_revisions_quantity_valid",
+      sql`${table.quantity} BETWEEN 1 AND 1000000`,
+    ),
+    check(
+      "workspace_billing_subscription_revisions_period_valid",
+      sql`${table.currentPeriodEnd} > ${table.currentPeriodStart} AND (${table.trialEnd} IS NULL OR ${table.trialEnd} >= ${table.providerCreatedAt})`,
+    ),
+    check(
+      "workspace_billing_subscription_revisions_provider_valid",
+      sql`length(${table.providerCustomerId}) BETWEEN 3 AND 200 AND ${table.providerDataSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+export const billingSubscriptionObservations = pgTable(
+  "billing_subscription_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceSubscriptionId: uuid("workspace_subscription_id")
+      .notNull()
+      .references(() => workspaceBillingSubscriptions.id, {
+        onDelete: "restrict",
+      }),
+    subscriptionRevisionNumber: integer(
+      "subscription_revision_number",
+    ).notNull(),
+    state: billingReconciliationState("state").notNull(),
+    reasonCode: text("reason_code"),
+    providerRequestId: text("provider_request_id"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_subscription_observations_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("billing_subscription_observations_history_idx").on(
+      table.workspaceSubscriptionId,
+      table.observedAt,
+    ),
+    check(
+      "billing_subscription_observations_revision_positive",
+      sql`${table.subscriptionRevisionNumber} > 0`,
+    ),
+    check(
+      "billing_subscription_observations_reason_valid",
+      sql`(${table.state} = 'matched' AND ${table.reasonCode} IS NULL) OR (${table.state} IN ('drift', 'failed') AND ${table.reasonCode} ~ '^[a-z][a-z0-9_.-]{2,79}$')`,
+    ),
+    check(
+      "billing_subscription_observations_request_valid",
+      sql`${table.providerRequestId} IS NULL OR length(${table.providerRequestId}) BETWEEN 3 AND 200`,
+    ),
+  ],
+);
+
+export const billingSubscriptionReconciliationJobs = pgTable(
+  "billing_subscription_reconciliation_jobs",
+  {
+    workspaceSubscriptionId: uuid("workspace_subscription_id")
+      .primaryKey()
+      .references(() => workspaceBillingSubscriptions.id, {
+        onDelete: "restrict",
+      }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    failures: integer("failures").notNull().default(0),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    lastReconciledAt: timestamp("last_reconciled_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("billing_subscription_reconciliation_jobs_due_idx").on(
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+    ),
+    check(
+      "billing_subscription_reconciliation_jobs_failures_valid",
+      sql`${table.failures} BETWEEN 0 AND 5`,
+    ),
+    check(
+      "billing_subscription_reconciliation_jobs_lease_valid",
+      sql`(${table.leaseToken} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseToken} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "billing_subscription_reconciliation_jobs_error_valid",
+      sql`${table.lastErrorCode} IS NULL OR ${table.lastErrorCode} ~ '^[a-z][a-z0-9_.-]{2,79}$'`,
     ),
   ],
 );
