@@ -1,6 +1,8 @@
 import { Pool } from "pg";
 
 const expectedTables = [
+  "commercial_plan_entitlement_sets",
+  "commercial_plan_entitlement_values",
   "commercial_plan_versions",
   "commercial_plans",
   "commercial_product_revisions",
@@ -10,6 +12,12 @@ const expectedTables = [
   "transactional_email_provider_events",
   "transactional_email_recipient_suppressions",
   "verification_email_deliveries",
+  "workspace_enterprise_entitlement_grant_revisions",
+  "workspace_enterprise_entitlement_grants",
+  "workspace_entitlement_assignments",
+  "workspace_entitlement_observations",
+  "workspace_entitlement_snapshot_layers",
+  "workspace_entitlement_snapshots",
   "arth_command_outbox",
   "arth_workload_request_nonces",
   "operational_retention_runs",
@@ -59,6 +67,10 @@ const expectedTables = [
 ] as const;
 
 const expectedIndexes = [
+  "commercial_plan_entitlement_sets_plan_version_unique",
+  "commercial_plan_entitlement_sets_correlation_unique",
+  "commercial_plan_entitlement_sets_identity_unique",
+  "commercial_plan_entitlement_values_key_unique",
   "commercial_plan_versions_number_unique",
   "commercial_plan_versions_correlation_unique",
   "commercial_plan_versions_history_idx",
@@ -148,6 +160,18 @@ const expectedIndexes = [
   "platform_secret_references_key_environment_unique",
   "platform_secret_versions_one_active",
   "platform_secret_versions_one_pending",
+  "workspace_enterprise_entitlement_grant_revisions_number_unique",
+  "workspace_enterprise_entitlement_grant_revisions_correlation_unique",
+  "workspace_enterprise_entitlement_grants_key_unique",
+  "workspace_entitlement_assignments_workspace_unique",
+  "workspace_entitlement_observations_source_unique",
+  "workspace_entitlement_observations_correlation_unique",
+  "workspace_entitlement_observations_assignment_idx",
+  "workspace_entitlement_snapshot_layers_source_unique",
+  "workspace_entitlement_snapshot_layers_resolution_idx",
+  "workspace_entitlement_snapshots_revision_unique",
+  "workspace_entitlement_snapshots_correlation_unique",
+  "workspace_entitlement_snapshots_history_idx",
 ] as const;
 
 const expectedAuthTables = [
@@ -181,6 +205,9 @@ const expectedAuthTriggers = [
 ] as const;
 
 const expectedConstraints = [
+  "commercial_plan_entitlement_sets_reason_valid",
+  "commercial_plan_entitlement_values_key_valid",
+  "commercial_plan_entitlement_values_shape_valid",
   "commercial_plan_versions_number_positive",
   "commercial_plan_versions_content_valid",
   "commercial_plan_versions_pricing_valid",
@@ -280,6 +307,25 @@ const expectedConstraints = [
   "platform_integration_revisions_maintenance_metadata",
   "platform_secret_references_active_metadata",
   "platform_secret_versions_terminal_metadata",
+  "workspace_enterprise_entitlement_grant_revisions_number_positive",
+  "workspace_enterprise_entitlement_grant_revisions_shape_valid",
+  "workspace_enterprise_entitlement_grant_revisions_term_valid",
+  "workspace_enterprise_entitlement_grant_revisions_contract_valid",
+  "workspace_enterprise_entitlement_grants_key_valid",
+  "workspace_enterprise_entitlement_grants_revision_positive",
+  "workspace_enterprise_entitlement_grants_current_revision_fk",
+  "workspace_entitlement_assignments_workspace_valid",
+  "workspace_entitlement_assignments_revision_positive",
+  "workspace_entitlement_assignments_current_snapshot_fk",
+  "workspace_entitlement_observations_revision_positive",
+  "workspace_entitlement_observations_message_valid",
+  "workspace_entitlement_observations_key_valid",
+  "workspace_entitlement_snapshot_layers_key_valid",
+  "workspace_entitlement_snapshot_layers_shape_valid",
+  "workspace_entitlement_snapshot_layers_window_valid",
+  "workspace_entitlement_snapshots_revision_positive",
+  "workspace_entitlement_snapshots_reason_valid",
+  "workspace_entitlement_snapshots_set_plan_fk",
 ] as const;
 
 const forbiddenSecretMaterialColumns = new Set([
@@ -297,6 +343,8 @@ const forbiddenSecretMaterialColumns = new Set([
 ]);
 
 const expectedTriggers = [
+  "commercial_plan_entitlement_sets_immutable",
+  "commercial_plan_entitlement_values_immutable",
   "commercial_product_revisions_immutable",
   "commercial_plan_versions_immutable",
   "commercial_products_guard",
@@ -337,6 +385,12 @@ const expectedTriggers = [
   "customer_directory_snapshot_ingestion_guard",
   "operator_break_glass_grants_guarded",
   "operator_break_glass_reviews_immutable",
+  "workspace_enterprise_entitlement_grant_revisions_immutable",
+  "workspace_enterprise_entitlement_grants_guard",
+  "workspace_entitlement_assignments_guard",
+  "workspace_entitlement_observations_immutable",
+  "workspace_entitlement_snapshot_layers_immutable",
+  "workspace_entitlement_snapshots_immutable",
 ] as const;
 
 const expectedEnumLabels = [
@@ -345,6 +399,11 @@ const expectedEnumLabels = [
   "commercial_pricing_model.contract",
   "commercial_billing_interval.year",
   "commercial_tax_behavior.unspecified",
+  "enterprise_entitlement_grant_lifecycle.revoked",
+  "entitlement_observation_state.failed",
+  "entitlement_overage_policy.contract",
+  "entitlement_source_kind.enterprise_grant",
+  "entitlement_value_type.quantity",
   "model_provider_health_source.scheduled_probe",
   "platform_integration_health_source.scheduled_probe",
 ] as const;
@@ -391,7 +450,7 @@ export async function verifyMigratedContracts(
       "select trigger_name from information_schema.triggers where trigger_schema = 'public'",
     );
     const enumResult = await pool.query<{ typname: string; enumlabel: string }>(
-      "select type.typname, value.enumlabel from pg_type type join pg_enum value on value.enumtypid = type.oid join pg_namespace namespace on namespace.oid = type.typnamespace where namespace.nspname = 'public' and type.typname in ('model_provider_health_source', 'platform_integration_health_source', 'commercial_lifecycle', 'commercial_plan_audience', 'commercial_pricing_model', 'commercial_billing_interval', 'commercial_tax_behavior')",
+      "select type.typname, value.enumlabel from pg_type type join pg_enum value on value.enumtypid = type.oid join pg_namespace namespace on namespace.oid = type.typnamespace where namespace.nspname = 'public' and type.typname in ('model_provider_health_source', 'platform_integration_health_source', 'commercial_lifecycle', 'commercial_plan_audience', 'commercial_pricing_model', 'commercial_billing_interval', 'commercial_tax_behavior', 'enterprise_entitlement_grant_lifecycle', 'entitlement_observation_state', 'entitlement_overage_policy', 'entitlement_source_kind', 'entitlement_value_type')",
     );
     const functionResult = await pool.query<{ routine_name: string }>(
       "select routine_name from information_schema.routines where routine_schema = 'public' and routine_name = 'platform_http_health_probe_valid'",

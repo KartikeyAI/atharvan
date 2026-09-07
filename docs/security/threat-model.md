@@ -26,6 +26,9 @@ approval/recovery processes.
 | Replay or duplicate administrative effects   | Public API/database       | Idempotency key fingerprint, immutable command envelope, atomic effect/result receipt                                                             | Exact retry replays result; changed input conflicts                 |
 | Silent repricing or history rewrite          | Commercial catalogue      | Stable identities, immutable versions, exact next-version pointers, forward-only lifecycle, database update/delete guards                         | Stale or destructive mutation aborts; historical terms remain fixed |
 | Ambiguous price or provider substitution     | Commercial/provider       | Safe integer minor units, pricing-model invariants, bounded opaque provider references, environment isolation                                     | Invalid terms are rejected before persistence                       |
+| Silent entitlement expansion                 | Commercial/Arth           | Sealed plan sets, immutable complete snapshots, typed values, exact next revisions, atomic signed outbox                                          | Unauthorized or partial authority cannot become current             |
+| Stale entitlement enforcement                | Arth exchange             | Monotonic assignment revisions, signed complete layers, validity windows, immutable observations, desired/observed separation                     | Stale acknowledgement conflicts; pending/failed remains visible     |
+| Indefinite enterprise override               | Operator/database         | Contract reference, bounded start/expiry, 128-key workspace cap, immutable revisions, terminal revocation, step-up and audit                      | Invalid or reopened grant is rejected                               |
 | Approval substitution or self-approval       | Approval workflow         | Typed scope identity, requester/beneficiary checks, reviewer base-role proof, expiry and atomic consumption                                       | Protected effect does not commit                                    |
 | Lost response after local commit             | Worker/database           | Transactional command receipt committed with the effect                                                                                           | Retry reads the stored terminal response                            |
 | Lost response after external secret mutation | Secrets Store             | Exact provider-name reconciliation and explicit failed lifecycle states                                                                           | Recovery reconciles before creating material again                  |
@@ -68,6 +71,10 @@ approval/recovery processes.
   or any provider event and delivery chain supporting a recipient suppression.
 - A plan version cannot be edited, deleted, reactivated after retirement, or
   activated beneath a non-active product.
+- A workspace snapshot cannot be edited, skip a revision, reference another
+  plan's entitlement set, or report applied without a matching Arth observation.
+- An enterprise grant cannot omit its contract/expiry, outlive its bounded term,
+  exceed the workspace key cap, or return to active after revocation.
 
 ## Residual risks and required evidence
 

@@ -316,6 +316,32 @@ export const commercialTaxBehavior = pgEnum("commercial_tax_behavior", [
   "unspecified",
 ]);
 
+export const entitlementValueType = pgEnum("entitlement_value_type", [
+  "boolean",
+  "quantity",
+]);
+
+export const entitlementOveragePolicy = pgEnum("entitlement_overage_policy", [
+  "denied",
+  "metered",
+  "contract",
+]);
+
+export const entitlementSourceKind = pgEnum("entitlement_source_kind", [
+  "plan",
+  "enterprise_grant",
+]);
+
+export const enterpriseEntitlementGrantLifecycle = pgEnum(
+  "enterprise_entitlement_grant_lifecycle",
+  ["active", "revoked"],
+);
+
+export const entitlementObservationState = pgEnum(
+  "entitlement_observation_state",
+  ["applied", "failed"],
+);
+
 export const modelProviderHealthStatus = pgEnum(
   "model_provider_health_status",
   ["healthy", "degraded", "unavailable"],
@@ -3740,6 +3766,329 @@ export const commercialPlanVersions = pgTable(
     check(
       "commercial_plan_versions_provider_reference_valid",
       sql`${table.providerPriceReference} IS NULL OR length(btrim(${table.providerPriceReference})) BETWEEN 2 AND 200`,
+    ),
+  ],
+);
+
+export const commercialPlanEntitlementSets = pgTable(
+  "commercial_plan_entitlement_sets",
+  {
+    id: uuid("id").primaryKey(),
+    planVersionId: uuid("plan_version_id")
+      .notNull()
+      .references(() => commercialPlanVersions.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("commercial_plan_entitlement_sets_plan_version_unique").on(
+      table.planVersionId,
+    ),
+    uniqueIndex("commercial_plan_entitlement_sets_correlation_unique").on(
+      table.correlationId,
+    ),
+    check(
+      "commercial_plan_entitlement_sets_reason_valid",
+      sql`length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const commercialPlanEntitlementValues = pgTable(
+  "commercial_plan_entitlement_values",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entitlementSetId: uuid("entitlement_set_id")
+      .notNull()
+      .references(() => commercialPlanEntitlementSets.id, {
+        onDelete: "restrict",
+      }),
+    key: text("key").notNull(),
+    valueType: entitlementValueType("value_type").notNull(),
+    enabled: boolean("enabled"),
+    limit: bigint("limit", { mode: "number" }),
+    unit: text("unit"),
+    overagePolicy: entitlementOveragePolicy("overage_policy").notNull(),
+  },
+  (table) => [
+    uniqueIndex("commercial_plan_entitlement_values_key_unique").on(
+      table.entitlementSetId,
+      table.key,
+    ),
+    check(
+      "commercial_plan_entitlement_values_key_valid",
+      sql`${table.key} ~ '^[a-z][a-z0-9_.-]{1,63}$'`,
+    ),
+    check(
+      "commercial_plan_entitlement_values_shape_valid",
+      sql`(${table.valueType} = 'boolean' AND ${table.enabled} IS NOT NULL AND ${table.limit} IS NULL AND ${table.unit} IS NULL AND ${table.overagePolicy} = 'denied') OR (${table.valueType} = 'quantity' AND ${table.enabled} IS NULL AND (${table.limit} IS NULL OR ${table.limit} BETWEEN 0 AND 9000000000000) AND ${table.unit} ~ '^[a-z][a-z0-9_.-]{1,63}$')`,
+    ),
+  ],
+);
+
+export const workspaceEntitlementAssignments = pgTable(
+  "workspace_entitlement_assignments",
+  {
+    id: uuid("id").primaryKey(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    workspaceSourceId: text("workspace_source_id").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_entitlement_assignments_workspace_unique").on(
+      table.environment,
+      table.workspaceSourceId,
+    ),
+    check(
+      "workspace_entitlement_assignments_workspace_valid",
+      sql`length(btrim(${table.workspaceSourceId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "workspace_entitlement_assignments_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const workspaceEntitlementSnapshots = pgTable(
+  "workspace_entitlement_snapshots",
+  {
+    id: uuid("id").primaryKey(),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => workspaceEntitlementAssignments.id, {
+        onDelete: "restrict",
+      }),
+    revisionNumber: integer("revision_number").notNull(),
+    planVersionId: uuid("plan_version_id")
+      .notNull()
+      .references(() => commercialPlanVersions.id, { onDelete: "restrict" }),
+    entitlementSetId: uuid("entitlement_set_id")
+      .notNull()
+      .references(() => commercialPlanEntitlementSets.id, {
+        onDelete: "restrict",
+      }),
+    reason: text("reason").notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_entitlement_snapshots_revision_unique").on(
+      table.assignmentId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("workspace_entitlement_snapshots_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("workspace_entitlement_snapshots_history_idx").on(
+      table.assignmentId,
+      table.revisionNumber,
+    ),
+    check(
+      "workspace_entitlement_snapshots_revision_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "workspace_entitlement_snapshots_reason_valid",
+      sql`length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const workspaceEntitlementSnapshotLayers = pgTable(
+  "workspace_entitlement_snapshot_layers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    snapshotId: uuid("snapshot_id")
+      .notNull()
+      .references(() => workspaceEntitlementSnapshots.id, {
+        onDelete: "restrict",
+      }),
+    key: text("key").notNull(),
+    valueType: entitlementValueType("value_type").notNull(),
+    enabled: boolean("enabled"),
+    limit: bigint("limit", { mode: "number" }),
+    unit: text("unit"),
+    overagePolicy: entitlementOveragePolicy("overage_policy").notNull(),
+    sourceKind: entitlementSourceKind("source_kind").notNull(),
+    sourceId: uuid("source_id").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("workspace_entitlement_snapshot_layers_source_unique").on(
+      table.snapshotId,
+      table.key,
+      table.sourceKind,
+    ),
+    index("workspace_entitlement_snapshot_layers_resolution_idx").on(
+      table.snapshotId,
+      table.startsAt,
+      table.expiresAt,
+    ),
+    check(
+      "workspace_entitlement_snapshot_layers_key_valid",
+      sql`${table.key} ~ '^[a-z][a-z0-9_.-]{1,63}$'`,
+    ),
+    check(
+      "workspace_entitlement_snapshot_layers_shape_valid",
+      sql`(${table.valueType} = 'boolean' AND ${table.enabled} IS NOT NULL AND ${table.limit} IS NULL AND ${table.unit} IS NULL AND ${table.overagePolicy} = 'denied') OR (${table.valueType} = 'quantity' AND ${table.enabled} IS NULL AND (${table.limit} IS NULL OR ${table.limit} BETWEEN 0 AND 9000000000000) AND ${table.unit} ~ '^[a-z][a-z0-9_.-]{1,63}$')`,
+    ),
+    check(
+      "workspace_entitlement_snapshot_layers_window_valid",
+      sql`${table.expiresAt} IS NULL OR ${table.expiresAt} > ${table.startsAt}`,
+    ),
+  ],
+);
+
+export const workspaceEnterpriseEntitlementGrants = pgTable(
+  "workspace_enterprise_entitlement_grants",
+  {
+    id: uuid("id").primaryKey(),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => workspaceEntitlementAssignments.id, {
+        onDelete: "restrict",
+      }),
+    key: text("key").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_enterprise_entitlement_grants_key_unique").on(
+      table.assignmentId,
+      table.key,
+    ),
+    check(
+      "workspace_enterprise_entitlement_grants_key_valid",
+      sql`${table.key} ~ '^[a-z][a-z0-9_.-]{1,63}$'`,
+    ),
+    check(
+      "workspace_enterprise_entitlement_grants_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const workspaceEnterpriseEntitlementGrantRevisions = pgTable(
+  "workspace_enterprise_entitlement_grant_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    grantId: uuid("grant_id")
+      .notNull()
+      .references(() => workspaceEnterpriseEntitlementGrants.id, {
+        onDelete: "restrict",
+      }),
+    revisionNumber: integer("revision_number").notNull(),
+    valueType: entitlementValueType("value_type").notNull(),
+    enabled: boolean("enabled"),
+    limit: bigint("limit", { mode: "number" }),
+    unit: text("unit"),
+    overagePolicy: entitlementOveragePolicy("overage_policy").notNull(),
+    lifecycle: enterpriseEntitlementGrantLifecycle("lifecycle").notNull(),
+    contractReference: text("contract_reference").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    reason: text("reason").notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex(
+      "workspace_enterprise_entitlement_grant_revisions_number_unique",
+    ).on(table.grantId, table.revisionNumber),
+    uniqueIndex(
+      "workspace_enterprise_entitlement_grant_revisions_correlation_unique",
+    ).on(table.correlationId),
+    check(
+      "workspace_enterprise_entitlement_grant_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "workspace_enterprise_entitlement_grant_revisions_shape_valid",
+      sql`(${table.valueType} = 'boolean' AND ${table.enabled} IS NOT NULL AND ${table.limit} IS NULL AND ${table.unit} IS NULL AND ${table.overagePolicy} = 'denied') OR (${table.valueType} = 'quantity' AND ${table.enabled} IS NULL AND (${table.limit} IS NULL OR ${table.limit} BETWEEN 0 AND 9000000000000) AND ${table.unit} ~ '^[a-z][a-z0-9_.-]{1,63}$')`,
+    ),
+    check(
+      "workspace_enterprise_entitlement_grant_revisions_term_valid",
+      sql`${table.expiresAt} > ${table.startsAt} AND ${table.expiresAt} <= ${table.startsAt} + interval '5 years 5 days'`,
+    ),
+    check(
+      "workspace_enterprise_entitlement_grant_revisions_contract_valid",
+      sql`length(btrim(${table.contractReference})) BETWEEN 3 AND 200 AND length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const workspaceEntitlementObservations = pgTable(
+  "workspace_entitlement_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => workspaceEntitlementAssignments.id, {
+        onDelete: "restrict",
+      }),
+    desiredRevisionNumber: integer("desired_revision_number").notNull(),
+    sourceRevision: bigint("source_revision", { mode: "bigint" }).notNull(),
+    observedState: entitlementObservationState("observed_state").notNull(),
+    message: text("message"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    synchronizedAt: timestamp("synchronized_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sourceWorkloadKeyId: text("source_workload_key_id").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("workspace_entitlement_observations_source_unique").on(
+      table.assignmentId,
+      table.sourceRevision,
+    ),
+    uniqueIndex("workspace_entitlement_observations_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("workspace_entitlement_observations_assignment_idx").on(
+      table.assignmentId,
+      table.observedAt,
+    ),
+    check(
+      "workspace_entitlement_observations_revision_positive",
+      sql`${table.desiredRevisionNumber} > 0 AND ${table.sourceRevision} > 0`,
+    ),
+    check(
+      "workspace_entitlement_observations_message_valid",
+      sql`${table.message} IS NULL OR length(btrim(${table.message})) BETWEEN 1 AND 500`,
+    ),
+    check(
+      "workspace_entitlement_observations_key_valid",
+      sql`${table.sourceWorkloadKeyId} ~ '^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,79}$'`,
     ),
   ],
 );

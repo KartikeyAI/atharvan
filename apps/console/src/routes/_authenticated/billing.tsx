@@ -9,6 +9,7 @@ import { useState, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { OperatorShell } from "@/components/operator-shell";
+import { EntitlementOperations } from "@/components/entitlement-operations";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,6 +109,7 @@ function BillingPage() {
             </div>
           )
         ) : null}
+        <EntitlementOperations products={registry?.items ?? []} />
       </div>
     </OperatorShell>
   );

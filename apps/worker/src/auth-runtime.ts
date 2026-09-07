@@ -15,7 +15,10 @@ import {
   createPlatformCommandService,
   createPlatformApprovalService,
 } from "@atharvan/commands";
-import { createCommercialCatalogueService } from "@atharvan/commercial";
+import {
+  createCommercialCatalogueService,
+  createEntitlementService,
+} from "@atharvan/commercial";
 import {
   createPlatformConfigurationAdministrationService,
   parseAuthenticationRuntimeConfig,
@@ -44,6 +47,7 @@ import {
   createPostgresModelCatalogueStore,
   createPostgresModelRoutingStore,
   createPostgresCommercialCatalogueStore,
+  createPostgresEntitlementStore,
   createPostgresArthCommandExchange,
   createPostgresOperationalAlertDeliveryStore,
   createPostgresPlatformHealthProbeStore,
@@ -142,6 +146,10 @@ async function createProductionAuthenticationRuntime(input: {
     });
     const commercialCatalogueService = createCommercialCatalogueService({
       store: createPostgresCommercialCatalogueStore(databaseHandle.database),
+      environment: config.ATHARVAN_ENVIRONMENT,
+    });
+    const entitlementService = createEntitlementService({
+      store: createPostgresEntitlementStore(databaseHandle.database),
       environment: config.ATHARVAN_ENVIRONMENT,
     });
     const modelRoutingService = createModelRoutingService({
@@ -353,6 +361,10 @@ async function createProductionAuthenticationRuntime(input: {
         secretLifecycleService.listReferences(),
       listModelCatalogue: () => modelCatalogueService.listCatalogue(),
       listCommercialCatalogue: () => commercialCatalogueService.listCatalogue(),
+      getPlanEntitlementSet: (planVersionId) =>
+        entitlementService.getPlanEntitlementSet(planVersionId),
+      getWorkspaceEntitlements: (workspaceId) =>
+        entitlementService.getWorkspaceEntitlements(workspaceId),
       listModelRoutingOperations: () => modelRoutingService.listOperations(),
       listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
       listPlatformAdapters: () => adapterRegistryService.listRegistry(),
@@ -517,6 +529,12 @@ async function createProductionAuthenticationRuntime(input: {
         commercialCatalogueService.setProduct(actor, command),
       setCommercialPlanVersion: (actor, command) =>
         commercialCatalogueService.setPlanVersion(actor, command),
+      sealPlanEntitlementSet: (actor, command) =>
+        entitlementService.sealPlanEntitlementSet(actor, command),
+      assignWorkspacePlan: (actor, command) =>
+        entitlementService.assignWorkspacePlan(actor, command),
+      setEnterpriseEntitlementGrant: (actor, command) =>
+        entitlementService.setEnterpriseGrant(actor, command),
       recordModelProviderHealth: (actor, command) =>
         modelCatalogueService.recordHealthObservation({ actor, ...command }),
       setModelRoutingPolicy: (actor, command) =>

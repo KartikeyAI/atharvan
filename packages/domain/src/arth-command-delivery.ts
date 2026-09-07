@@ -1,11 +1,13 @@
 import type { PlatformConfigurationEnvironment } from "./platform-configuration";
+import type { WorkspaceEntitlementLayer } from "./platform-entitlements";
 
 export type ArthCommandKind =
   | "customer_restriction"
   | "workspace_ownership_transfer"
   | "model_routing_control"
   | "platform_integration_control"
-  | "platform_adapter_release_control";
+  | "platform_adapter_release_control"
+  | "workspace_entitlement_snapshot";
 
 export type ArthCommandDeliveryState =
   "pending" | "leased" | "applied" | "rejected" | "dead_letter";
@@ -76,12 +78,23 @@ export interface PlatformAdapterReleaseControlArthCommand {
   readonly requestedAt: string;
 }
 
+export interface WorkspaceEntitlementSnapshotArthCommand {
+  readonly kind: "workspace_entitlement_snapshot";
+  readonly assignmentId: string;
+  readonly revisionNumber: number;
+  readonly workspaceId: string;
+  readonly planVersionId: string;
+  readonly layers: ReadonlyArray<WorkspaceEntitlementLayer>;
+  readonly requestedAt: string;
+}
+
 export type ArthCommandPayload =
   | CustomerRestrictionArthCommand
   | WorkspaceOwnershipArthCommand
   | ModelRoutingControlArthCommand
   | PlatformIntegrationControlArthCommand
-  | PlatformAdapterReleaseControlArthCommand;
+  | PlatformAdapterReleaseControlArthCommand
+  | WorkspaceEntitlementSnapshotArthCommand;
 
 export interface LeasedArthCommand {
   readonly commandId: string;

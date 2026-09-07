@@ -49,4 +49,6 @@ This directory is the ordered, immutable PostgreSQL migration history owned by `
 
 `0029_commercial_catalogue.sql` adds environment-scoped products and immutable product and plan revisions. Exact minor-unit pricing, billing interval, currency, tax behavior, audience, trial, provider reference, lifecycle, and effective-time contracts are guarded by database constraints. Pointer rows may advance by exactly one version and cannot be deleted; revision rows cannot be updated or deleted.
 
+`0030_entitlement_snapshots.sql` adds one sealed entitlement set per immutable plan version, monotonic workspace assignment snapshots, time-bounded enterprise grant revisions, complete snapshot layers, and append-only Arth observations. Deferred foreign keys bind every pointer to its exact revision and every snapshot set to its plan version; triggers prohibit history rewrites, pointer skips, deletion, and reactivation of revoked grants.
+
 Before its first production application, rollback is deletion of the disposable Atharvan database or restoration of its pre-migration snapshot. After production data exists, do not drop these tables as a rollback. Restore from the provider snapshot when data recovery is required, or ship a reviewed forward-fix migration.

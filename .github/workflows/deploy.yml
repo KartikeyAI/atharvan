@@ -195,7 +195,7 @@ jobs:
         run: pnpm --filter @atharvan/worker deploy:dev
 
       - name: Verify development control-plane readiness
-        run: node scripts/verify-deployed-readiness.mjs "$ATHARVAN_CONTROL_PLANE_ORIGIN" development 29
+        run: node scripts/verify-deployed-readiness.mjs "$ATHARVAN_CONTROL_PLANE_ORIGIN" development 30
 
       - name: Deploy development console
         run: pnpm --filter @atharvan/console deploy:dev
@@ -313,7 +313,7 @@ jobs:
         run: pnpm --filter @atharvan/worker deploy:production
 
       - name: Verify production control-plane readiness
-        run: node scripts/verify-deployed-readiness.mjs "$ATHARVAN_CONTROL_PLANE_ORIGIN" production 29
+        run: node scripts/verify-deployed-readiness.mjs "$ATHARVAN_CONTROL_PLANE_ORIGIN" production 30
 
       - name: Deploy production console
         run: pnpm --filter @atharvan/console deploy:production

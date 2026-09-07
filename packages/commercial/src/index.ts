@@ -10,6 +10,8 @@ import {
   type PlatformConfigurationEnvironment,
 } from "@atharvan/domain";
 
+export * from "./entitlements";
+
 const lifecycles = new Set<CommercialLifecycle>(["draft", "active", "retired"]);
 const audiences = new Set<CommercialPlanAudience>([
   "public",

@@ -185,6 +185,8 @@ function createRuntime(input?: {
       items: [],
       truncated: false,
     })),
+    getPlanEntitlementSet: vi.fn(async () => null),
+    getWorkspaceEntitlements: vi.fn(async () => null),
     listModelRoutingOperations: vi.fn(async () => ({
       environment: "development" as const,
       policies: [],
@@ -375,6 +377,22 @@ function createRuntime(input?: {
       outcome: "created" as const,
       id: "00000000-0000-4000-8000-000000000452",
       revisionNumber: 1,
+    })),
+    sealPlanEntitlementSet: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000453",
+      revisionNumber: 1,
+    })),
+    assignWorkspacePlan: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000454",
+      revisionNumber: 1,
+    })),
+    setEnterpriseEntitlementGrant: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000455",
+      revisionNumber: 1,
+      snapshotRevisionNumber: 2,
     })),
     recordModelProviderHealth: vi.fn(async () => ({
       outcome: "created" as const,

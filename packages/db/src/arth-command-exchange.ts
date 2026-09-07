@@ -19,6 +19,8 @@ import {
   modelOperationalControlRevisions,
   platformAdapterReleaseRevisions,
   platformIntegrationRevisions,
+  workspaceEntitlementObservations,
+  workspaceEntitlementSnapshots,
 } from "./schema";
 
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -492,6 +494,56 @@ async function persistObservation(
       revision.securityReviewStatus !== payload.securityReviewStatus
     )
       reject("arth_command_aggregate_changed");
+    return;
+  }
+
+  if (row.kind === "workspace_entitlement_snapshot") {
+    const payload = row.payload;
+    if (payload.kind !== "workspace_entitlement_snapshot")
+      reject("arth_command_payload_invalid");
+    const [snapshot] = await transaction
+      .select({
+        planVersionId: workspaceEntitlementSnapshots.planVersionId,
+      })
+      .from(workspaceEntitlementSnapshots)
+      .where(
+        and(
+          eq(workspaceEntitlementSnapshots.assignmentId, payload.assignmentId),
+          eq(
+            workspaceEntitlementSnapshots.revisionNumber,
+            payload.revisionNumber,
+          ),
+        ),
+      )
+      .limit(1);
+    if (!snapshot || snapshot.planVersionId !== payload.planVersionId)
+      reject("arth_command_aggregate_changed");
+    const [latest] = await transaction
+      .select({
+        sourceRevision: workspaceEntitlementObservations.sourceRevision,
+      })
+      .from(workspaceEntitlementObservations)
+      .where(
+        eq(workspaceEntitlementObservations.assignmentId, payload.assignmentId),
+      )
+      .orderBy(desc(workspaceEntitlementObservations.sourceRevision))
+      .limit(1);
+    if (latest && input.sourceRevision <= latest.sourceRevision)
+      reject("arth_source_revision_stale");
+    await transaction.insert(workspaceEntitlementObservations).values({
+      assignmentId: payload.assignmentId,
+      desiredRevisionNumber: payload.revisionNumber,
+      sourceRevision: input.sourceRevision,
+      observedState: input.outcome === "applied" ? "applied" : "failed",
+      message:
+        input.outcome === "rejected"
+          ? (input.message ?? "Arth rejected the entitlement snapshot.")
+          : input.message,
+      observedAt: input.observedAt,
+      synchronizedAt: input.synchronizedAt,
+      sourceWorkloadKeyId: keyId,
+      correlationId: crypto.randomUUID(),
+    });
     return;
   }
 

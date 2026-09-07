@@ -128,6 +128,7 @@ export * from "./platform-adapters";
 export * from "./platform-audit";
 export * from "./platform-configuration";
 export * from "./platform-commercial";
+export * from "./platform-entitlements";
 export * from "./platform-feature-flags";
 export * from "./platform-health";
 export * from "./platform-integrations";

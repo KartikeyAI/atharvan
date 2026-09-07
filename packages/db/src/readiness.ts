@@ -6,10 +6,10 @@ import type * as schema from "./schema";
 
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-export const currentAtharvanSchemaVersion = 29;
-export const currentAtharvanMigrationTimestamp = "1788763869622";
+export const currentAtharvanSchemaVersion = 30;
+export const currentAtharvanMigrationTimestamp = "1788766254999";
 export const currentAtharvanMigrationHash =
-  "83475ae71f4f41b7321760e78ac8419f6c1005ff03710bc85c4ef31a994c63b1";
+  "233440cb6fd1b01f4bf50b5d6b967c95081b2cffae6b3abdc9c282713271b466";
 
 export interface DatabaseReadinessEvidence {
   readonly schemaVersion: number;
@@ -28,11 +28,14 @@ export async function checkPostgresReadiness(
     retentionGuard: boolean;
     commercialTable: boolean;
     commercialGuard: boolean;
+    entitlementTable: boolean;
+    entitlementGuard: boolean;
     writable: boolean;
     commandPrivileges: boolean;
     retentionPrivileges: boolean;
     cleanupPrivileges: boolean;
     commercialPrivileges: boolean;
+    entitlementPrivileges: boolean;
   }>(sql`SELECT
       migration.hash,
       migration.created_at::text AS "createdAt",
@@ -51,6 +54,13 @@ export async function checkPostgresReadiness(
           AND tgname = 'commercial_plan_versions_immutable'
           AND NOT tgisinternal
       ) AS "commercialGuard",
+      to_regclass('public.workspace_entitlement_snapshots') IS NOT NULL AS "entitlementTable",
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = to_regclass('public.workspace_entitlement_snapshots')
+          AND tgname = 'workspace_entitlement_snapshots_immutable'
+          AND NOT tgisinternal
+      ) AS "entitlementGuard",
       current_setting('transaction_read_only') = 'off' AS writable,
       has_table_privilege(current_user, 'public.platform_commands', 'SELECT,INSERT,UPDATE') AS "commandPrivileges",
       has_table_privilege(current_user, 'public.operational_retention_runs', 'SELECT,INSERT,UPDATE') AS "retentionPrivileges",
@@ -58,7 +68,15 @@ export async function checkPostgresReadiness(
       has_table_privilege(current_user, 'public.commercial_products', 'SELECT,INSERT,UPDATE')
         AND has_table_privilege(current_user, 'public.commercial_product_revisions', 'SELECT,INSERT')
         AND has_table_privilege(current_user, 'public.commercial_plans', 'SELECT,INSERT,UPDATE')
-        AND has_table_privilege(current_user, 'public.commercial_plan_versions', 'SELECT,INSERT') AS "commercialPrivileges"
+        AND has_table_privilege(current_user, 'public.commercial_plan_versions', 'SELECT,INSERT') AS "commercialPrivileges",
+      has_table_privilege(current_user, 'public.commercial_plan_entitlement_sets', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.commercial_plan_entitlement_values', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.workspace_entitlement_assignments', 'SELECT,INSERT,UPDATE')
+        AND has_table_privilege(current_user, 'public.workspace_entitlement_snapshots', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.workspace_entitlement_snapshot_layers', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.workspace_enterprise_entitlement_grants', 'SELECT,INSERT,UPDATE')
+        AND has_table_privilege(current_user, 'public.workspace_enterprise_entitlement_grant_revisions', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.workspace_entitlement_observations', 'SELECT,INSERT') AS "entitlementPrivileges"
     FROM atharvan_migrations.history AS migration
     ORDER BY migration.created_at DESC, migration.id DESC
     LIMIT 1`);
@@ -80,7 +98,9 @@ export async function checkPostgresReadiness(
     !row.retentionTable ||
     !row.retentionGuard ||
     !row.commercialTable ||
-    !row.commercialGuard
+    !row.commercialGuard ||
+    !row.entitlementTable ||
+    !row.entitlementGuard
   )
     throw new Error("database_schema_sentinel_missing");
   if (
@@ -88,7 +108,8 @@ export async function checkPostgresReadiness(
     !row.commandPrivileges ||
     !row.retentionPrivileges ||
     !row.cleanupPrivileges ||
-    !row.commercialPrivileges
+    !row.commercialPrivileges ||
+    !row.entitlementPrivileges
   )
     throw new Error("database_write_authority_unavailable");
   const checkedAt = new Date(row.checkedAt);

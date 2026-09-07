@@ -78,6 +78,28 @@ no billing interval. A provider price reference is opaque, bounded metadata and
 never grants provider authority. The command effect, stable pointer, immutable
 version/revision, audit event, and terminal command receipt commit atomically.
 
+### Workspace entitlement contract
+
+`GET` and `PUT /v1/platform/commercial-plan-versions/{planVersionId}/entitlements`
+read or seal the one immutable entitlement set for a plan version. Values are
+typed boolean capabilities or quantity allowances. Quantity values include a
+normalized unit, optional safe-integer limit, and `denied|metered|contract`
+overage policy. Sealing requires a non-empty set of at most 128 unique keys.
+
+`GET /v1/platform/workspace-entitlements/{workspaceId}` returns the current
+assignment, current effective values, bounded immutable snapshot history, current
+enterprise grants, and bounded Arth reconciliation observations. Scheduled grants
+appear as snapshot layers but affect `effective` values only during their validity
+window. History truncation is explicit.
+
+`PUT /v1/platform/workspace-entitlements/{workspaceId}/assignment` assigns an
+active plan version with a sealed set. `PUT
+/v1/platform/workspace-entitlements/{workspaceId}/grants/{key}` creates the next
+revision of a time-bounded enterprise grant or terminally revokes it. Grants
+require a contract reference and cannot exceed 128 distinct keys per workspace.
+Each effective change atomically creates the next complete snapshot, audit event,
+command receipt, and Arth outbox command.
+
 `POST /v1/platform/email-recipient-suppressions/{suppressionId}/restore`
 requires `platform:security:write`, the active Super Administrator, recent
 passkey step-up, a reason, and an idempotency key. It restores eligibility only
@@ -166,6 +188,7 @@ Command payloads are a discriminated union with `kind` and positive monotonic
 | `model_routing_control`            | `controlId`        | Provider/model enabled, maintenance, or disabled  |
 | `platform_integration_control`     | `integrationId`    | Lifecycle and operational availability            |
 | `platform_adapter_release_control` | `releaseId`        | Version, channel, signature/review, and lifecycle |
+| `workspace_entitlement_snapshot`   | `assignmentId`     | Complete typed plan/grant layers and validity     |
 
 A claim returns `commandId`, `environment`, payload, SHA-256 payload digest,
 opaque lease token, lease expiry, and attempt number. Arth persists the effect and
@@ -174,6 +197,12 @@ lease token, `applied|rejected|retryable_failure`, source revision, observation
 time, and optional safe message. Delivery is at least once; consumers must be
 idempotent. No payload may include credentials, prompts, source code, customer
 content, operator reasons, approval evidence, or session data.
+
+For `workspace_entitlement_snapshot`, Arth resolves each key from the active
+enterprise-grant layer when present and otherwise from the plan layer. It rejects
+stale aggregate revisions. Acknowledgement creates an immutable `applied|failed`
+observation tied to the desired snapshot revision; desired and observed authority
+remain distinct.
 
 Directory snapshots are complete, monotonic projections for one environment and
 source. Their canonical digest covers users, workspaces, memberships, ownership,

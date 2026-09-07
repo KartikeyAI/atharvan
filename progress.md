@@ -154,7 +154,11 @@ An item may be marked complete only when its implementation, tests, operational 
 - [~] Implement products and immutable plan versions: domain, PostgreSQL guards,
   protected API, audit/idempotency, and operator console are implemented;
   database and authenticated browser evidence remain deferred.
-- [ ] Implement entitlement snapshots and custom enterprise grants.
+- [~] Implement entitlement snapshots and custom enterprise grants: sealed typed
+  plan templates, immutable workspace snapshots, revisioned expiring grants,
+  signed Arth delivery, reconciliation evidence, protected API, audit/idempotency,
+  and operator console are implemented; database and authenticated Arth/browser
+  evidence remain deferred.
 - [ ] Implement subscriptions and billing-provider reconciliation.
 - [ ] Implement invoices, payments, refunds, disputes, and credits.
 - [ ] Add signed webhook receivers and replay protection.

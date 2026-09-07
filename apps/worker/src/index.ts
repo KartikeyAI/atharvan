@@ -18,6 +18,10 @@ import {
 import { PlatformAdapterCommandRejectedError } from "@atharvan/adapters";
 import {
   CommercialCatalogueCommandRejectedError,
+  EntitlementCommandRejectedError,
+  type AssignWorkspacePlanCommand,
+  type SealPlanEntitlementSetCommand,
+  type SetEnterpriseGrantCommand,
   type SetCommercialPlanVersionCommand,
   type SetCommercialProductCommand,
 } from "@atharvan/commercial";
@@ -83,6 +87,10 @@ import {
   type CommercialPlanAudience,
   type CommercialPricingModel,
   type CommercialTaxBehavior,
+  type EntitlementOveragePolicy,
+  type EntitlementValue,
+  type PlanEntitlementSet,
+  type WorkspaceEntitlementRegistry,
   type ModelRoutingControlState,
   type ModelRoutingControlTargetKind,
   type ModelRoutingDecision,
@@ -275,6 +283,12 @@ export interface AuthenticationRuntime {
   >;
   listModelCatalogue(): Promise<ModelProviderCatalogue>;
   listCommercialCatalogue(): Promise<CommercialCatalogue>;
+  getPlanEntitlementSet(
+    planVersionId: string,
+  ): Promise<PlanEntitlementSet | null>;
+  getWorkspaceEntitlements(
+    workspaceId: string,
+  ): Promise<WorkspaceEntitlementRegistry | null>;
   listModelRoutingOperations(): Promise<ModelRoutingOperations>;
   listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
   listPlatformAdapters(): Promise<PlatformAdapterRegistry>;
@@ -497,6 +511,31 @@ export interface AuthenticationRuntime {
     readonly outcome: "created" | "updated" | "unchanged";
     readonly id: string;
     readonly revisionNumber: number;
+  }>;
+  sealPlanEntitlementSet(
+    actor: AuthenticatedOperator,
+    input: SealPlanEntitlementSetCommand & { readonly commandId: string },
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  assignWorkspacePlan(
+    actor: AuthenticatedOperator,
+    input: AssignWorkspacePlanCommand & { readonly commandId: string },
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  setEnterpriseEntitlementGrant(
+    actor: AuthenticatedOperator,
+    input: SetEnterpriseGrantCommand & { readonly commandId: string },
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+    readonly snapshotRevisionNumber?: number;
   }>;
   recordModelProviderHealth(
     actor: AuthenticatedOperator,
@@ -2366,6 +2405,159 @@ export function createApp(
             ...input,
             commandId,
             productId,
+            key,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
+
+  app.get(
+    "/v1/platform/commercial-plan-versions/:planVersionId/entitlements",
+    async (context) => {
+      context.header("cache-control", "no-store");
+      if (
+        !operatorHasCapability(context.get("operator"), "platform:plans:read")
+      )
+        return capabilityRequired(context);
+      const planVersionId = context.req
+        .param("planVersionId")
+        .trim()
+        .toLowerCase();
+      if (!uuidPattern.test(planVersionId)) return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const result = await runtime.getPlanEntitlementSet(planVersionId);
+      return result === null
+        ? context.json(
+            {
+              code: "plan_entitlement_set_not_found",
+              message:
+                "No sealed entitlement template exists for this plan version.",
+              requestId: context.get("requestId"),
+            },
+            404,
+          )
+        : context.json(result);
+    },
+  );
+
+  app.put(
+    "/v1/platform/commercial-plan-versions/:planVersionId/entitlements",
+    async (context) => {
+      const input = await readJson(context, parseSealPlanEntitlementSet);
+      const planVersionId = context.req
+        .param("planVersionId")
+        .trim()
+        .toLowerCase();
+      if (input === null || !uuidPattern.test(planVersionId))
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:plans:write",
+          name: "commercial.plan-entitlements.seal",
+          version: 1,
+          targetType: "commercial_plan_version",
+          targetId: planVersionId,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.sealPlanEntitlementSet(context.get("operator"), {
+            ...input,
+            commandId,
+            planVersionId,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
+
+  app.get(
+    "/v1/platform/workspace-entitlements/:workspaceId",
+    async (context) => {
+      context.header("cache-control", "no-store");
+      if (
+        !operatorHasCapability(context.get("operator"), "platform:plans:read")
+      )
+        return capabilityRequired(context);
+      const workspaceId = context.req.param("workspaceId").trim();
+      if (readTrimmedString(workspaceId, 200) === null)
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      const result = await runtime.getWorkspaceEntitlements(workspaceId);
+      return result === null
+        ? context.json(
+            {
+              code: "workspace_not_found",
+              message: "The projected customer workspace was not found.",
+              requestId: context.get("requestId"),
+            },
+            404,
+          )
+        : context.json(result);
+    },
+  );
+
+  app.put(
+    "/v1/platform/workspace-entitlements/:workspaceId/assignment",
+    async (context) => {
+      const input = await readJson(context, parseAssignWorkspacePlan);
+      const workspaceId = context.req.param("workspaceId").trim();
+      if (input === null || readTrimmedString(workspaceId, 200) === null)
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:plans:write",
+          name: "entitlement.assign",
+          version: 1,
+          targetType: "workspace_entitlement",
+          targetId: workspaceId,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.assignWorkspacePlan(context.get("operator"), {
+            ...input,
+            commandId,
+            workspaceId,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
+
+  app.put(
+    "/v1/platform/workspace-entitlements/:workspaceId/grants/:key",
+    async (context) => {
+      const input = await readJson(context, parseSetEnterpriseGrant);
+      const workspaceId = context.req.param("workspaceId").trim();
+      const key = context.req.param("key").trim().toLowerCase();
+      if (input === null || readTrimmedString(workspaceId, 200) === null)
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:plans:write",
+          name: "entitlement.enterprise-grant.set",
+          version: 1,
+          targetType: "workspace_entitlement_grant",
+          targetId: `${workspaceId}/${key}`,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.setEnterpriseEntitlementGrant(context.get("operator"), {
+            ...input,
+            commandId,
+            workspaceId,
             key,
             correlationId: context.get("requestId"),
           }),
@@ -4316,6 +4508,116 @@ function isCommercialTaxBehavior(
   );
 }
 
+function parseSealPlanEntitlementSet(
+  value: unknown,
+): Omit<
+  SealPlanEntitlementSetCommand,
+  "planVersionId" | "correlationId"
+> | null {
+  if (!isRecord(value) || !Array.isArray(value.values)) return null;
+  const reason = readReason(value.reason);
+  if (reason === null || value.values.length < 1 || value.values.length > 128)
+    return null;
+  const values = value.values.map(parseEntitlementValue);
+  return values.some((item) => item === null)
+    ? null
+    : { values: values as ReadonlyArray<EntitlementValue>, reason };
+}
+
+function parseAssignWorkspacePlan(
+  value: unknown,
+): Omit<AssignWorkspacePlanCommand, "workspaceId" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const planVersionId = readTrimmedString(value.planVersionId, 36);
+  const reason = readReason(value.reason);
+  return planVersionId !== null &&
+    uuidPattern.test(planVersionId.toLowerCase()) &&
+    reason !== null
+    ? { planVersionId: planVersionId.toLowerCase(), reason }
+    : null;
+}
+
+function parseSetEnterpriseGrant(
+  value: unknown,
+): Omit<
+  SetEnterpriseGrantCommand,
+  "workspaceId" | "key" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const contractReference = readTrimmedString(value.contractReference, 200);
+  const startsAt = readTrimmedString(value.startsAt, 64);
+  const expiresAt = readTrimmedString(value.expiresAt, 64);
+  const reason = readReason(value.reason);
+  const valueType = value.valueType;
+  const overagePolicy = value.overagePolicy;
+  return contractReference !== null &&
+    startsAt !== null &&
+    expiresAt !== null &&
+    reason !== null &&
+    (valueType === "boolean" || valueType === "quantity") &&
+    (overagePolicy === "denied" ||
+      overagePolicy === "metered" ||
+      overagePolicy === "contract") &&
+    (value.lifecycle === "active" || value.lifecycle === "revoked") &&
+    (value.enabled === null || typeof value.enabled === "boolean") &&
+    (value.limit === null || typeof value.limit === "number") &&
+    (value.unit === null || typeof value.unit === "string")
+    ? {
+        valueType,
+        enabled: value.enabled,
+        limit: value.limit,
+        unit: value.unit,
+        overagePolicy: overagePolicy as EntitlementOveragePolicy,
+        lifecycle: value.lifecycle,
+        contractReference,
+        startsAt,
+        expiresAt,
+        reason,
+      }
+    : null;
+}
+
+function parseEntitlementValue(value: unknown): EntitlementValue | null {
+  if (!isRecord(value)) return null;
+  const key = readTrimmedString(value.key, 64);
+  if (key === null) return null;
+  if (
+    value.valueType === "boolean" &&
+    typeof value.enabled === "boolean" &&
+    value.limit === null &&
+    value.unit === null &&
+    value.overagePolicy === "denied"
+  ) {
+    return {
+      key,
+      valueType: "boolean",
+      enabled: value.enabled,
+      limit: null,
+      unit: null,
+      overagePolicy: "denied",
+    };
+  }
+  if (
+    value.valueType === "quantity" &&
+    value.enabled === null &&
+    (value.limit === null || typeof value.limit === "number") &&
+    typeof value.unit === "string" &&
+    (value.overagePolicy === "denied" ||
+      value.overagePolicy === "metered" ||
+      value.overagePolicy === "contract")
+  ) {
+    return {
+      key,
+      valueType: "quantity",
+      enabled: null,
+      limit: value.limit,
+      unit: value.unit,
+      overagePolicy: value.overagePolicy,
+    };
+  }
+  return null;
+}
+
 function parseModelProviderHealth(
   value: unknown,
 ): Omit<
@@ -5154,6 +5456,15 @@ function mapCommandError(error: unknown, reason: string, requestId: string) {
       "rejected",
       "commercial_catalogue_change_rejected",
       "The requested product or plan change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof EntitlementCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "entitlement_change_rejected",
+      "The requested entitlement change was not accepted.",
       requestId,
       error.reason,
     );
