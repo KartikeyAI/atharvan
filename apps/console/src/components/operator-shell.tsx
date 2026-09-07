@@ -90,7 +90,7 @@ const navigation: ReadonlyArray<{
     label: "Billing",
     href: "/billing",
     icon: WalletCardsIcon,
-    available: false,
+    available: true,
   },
   {
     label: "Security",

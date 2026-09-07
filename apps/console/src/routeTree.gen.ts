@@ -15,6 +15,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedAdaptersRouteImport } from './routes/_authenticated/adapters'
 import { Route as AuthenticatedApprovalsRouteImport } from './routes/_authenticated/approvals'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
+import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticated/billing'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedEmailDeliveriesRouteImport } from './routes/_authenticated/email-deliveries'
 import { Route as AuthenticatedFeatureFlagsRouteImport } from './routes/_authenticated/feature-flags'
@@ -57,6 +58,11 @@ const AuthenticatedApprovalsRoute = AuthenticatedApprovalsRouteImport.update({
 const AuthenticatedAuditRoute = AuthenticatedAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedBillingRoute = AuthenticatedBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedCustomersRoute = AuthenticatedCustomersRouteImport.update({
@@ -141,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/adapters': typeof AuthenticatedAdaptersRoute
   '/approvals': typeof AuthenticatedApprovalsRoute
   '/audit': typeof AuthenticatedAuditRoute
+  '/billing': typeof AuthenticatedBillingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/email-deliveries': typeof AuthenticatedEmailDeliveriesRoute
   '/feature-flags': typeof AuthenticatedFeatureFlagsRoute
@@ -161,6 +168,7 @@ export interface FileRoutesByTo {
   '/adapters': typeof AuthenticatedAdaptersRoute
   '/approvals': typeof AuthenticatedApprovalsRoute
   '/audit': typeof AuthenticatedAuditRoute
+  '/billing': typeof AuthenticatedBillingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/email-deliveries': typeof AuthenticatedEmailDeliveriesRoute
   '/feature-flags': typeof AuthenticatedFeatureFlagsRoute
@@ -184,6 +192,7 @@ export interface FileRoutesById {
   '/_authenticated/adapters': typeof AuthenticatedAdaptersRoute
   '/_authenticated/approvals': typeof AuthenticatedApprovalsRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
+  '/_authenticated/billing': typeof AuthenticatedBillingRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/email-deliveries': typeof AuthenticatedEmailDeliveriesRoute
   '/_authenticated/feature-flags': typeof AuthenticatedFeatureFlagsRoute
@@ -208,6 +217,7 @@ export interface FileRouteTypes {
     | '/adapters'
     | '/approvals'
     | '/audit'
+    | '/billing'
     | '/customers'
     | '/email-deliveries'
     | '/feature-flags'
@@ -228,6 +238,7 @@ export interface FileRouteTypes {
     | '/adapters'
     | '/approvals'
     | '/audit'
+    | '/billing'
     | '/customers'
     | '/email-deliveries'
     | '/feature-flags'
@@ -250,6 +261,7 @@ export interface FileRouteTypes {
     | '/_authenticated/adapters'
     | '/_authenticated/approvals'
     | '/_authenticated/audit'
+    | '/_authenticated/billing'
     | '/_authenticated/customers'
     | '/_authenticated/email-deliveries'
     | '/_authenticated/feature-flags'
@@ -317,6 +329,13 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuthenticatedAuditRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/billing': {
+      id: '/_authenticated/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof AuthenticatedBillingRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/customers': {
@@ -424,6 +443,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdaptersRoute: typeof AuthenticatedAdaptersRoute
   AuthenticatedApprovalsRoute: typeof AuthenticatedApprovalsRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
+  AuthenticatedBillingRoute: typeof AuthenticatedBillingRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedEmailDeliveriesRoute: typeof AuthenticatedEmailDeliveriesRoute
   AuthenticatedFeatureFlagsRoute: typeof AuthenticatedFeatureFlagsRoute
@@ -442,6 +462,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdaptersRoute: AuthenticatedAdaptersRoute,
   AuthenticatedApprovalsRoute: AuthenticatedApprovalsRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
+  AuthenticatedBillingRoute: AuthenticatedBillingRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedEmailDeliveriesRoute: AuthenticatedEmailDeliveriesRoute,
   AuthenticatedFeatureFlagsRoute: AuthenticatedFeatureFlagsRoute,

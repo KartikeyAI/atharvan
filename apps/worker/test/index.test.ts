@@ -180,6 +180,11 @@ function createRuntime(input?: {
       environment: "development" as const,
       items: [],
     })),
+    listCommercialCatalogue: vi.fn(async () => ({
+      environment: "development" as const,
+      items: [],
+      truncated: false,
+    })),
     listModelRoutingOperations: vi.fn(async () => ({
       environment: "development" as const,
       policies: [],
@@ -361,6 +366,16 @@ function createRuntime(input?: {
       id: "00000000-0000-4000-8000-000000000402",
       revisionNumber: 1,
     })),
+    setCommercialProduct: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000451",
+      revisionNumber: 1,
+    })),
+    setCommercialPlanVersion: vi.fn(async () => ({
+      outcome: "created" as const,
+      id: "00000000-0000-4000-8000-000000000452",
+      revisionNumber: 1,
+    })),
     recordModelProviderHealth: vi.fn(async () => ({
       outcome: "created" as const,
       id: "00000000-0000-4000-8000-000000000403",
@@ -419,7 +434,7 @@ function createTestApp(runtime: AuthenticationRuntime) {
   return createApp({
     resolveAuthenticationRuntime: vi.fn(async () => runtime),
     checkReadiness: vi.fn(async () => ({
-      schemaVersion: 28,
+      schemaVersion: 29,
       checkedAt: "2026-09-05T00:00:00.000Z",
     })),
   });
@@ -452,7 +467,7 @@ describe("Atharvan control-plane worker", () => {
       service: "atharvan-control-plane",
       status: "ready",
       environment: "development",
-      schemaVersion: 28,
+      schemaVersion: 29,
     });
   });
 

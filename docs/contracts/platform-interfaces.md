@@ -1,6 +1,6 @@
 # Platform API and event contracts
 
-Status: Phase 1 versioning contract. The TypeScript domain types and migration
+Status: Versioned platform contract. The TypeScript domain types and migration
 constraints are canonical; this document defines compatibility and transport
 rules for clients and workloads.
 
@@ -42,8 +42,9 @@ readiness failures return generic `503 readiness_check_failed` with
 The API exposes authentication assurance and sessions; overview and delivery
 health; approvals and audit; operator/domain/role/break-glass lifecycle;
 configuration and feature flags; secret references; model catalogue/routing;
-integrations and adapter releases; customer directory projections, restrictions,
-notes, risk markers, and ownership transfers. Adding an optional response field
+integrations and adapter releases; commercial products and plan versions;
+customer directory projections, restrictions, notes, risk markers, and ownership
+transfers. Adding an optional response field
 is backward compatible. Removing/renaming a field, changing meaning, loosening an
 authority check, or changing an enum requires a new endpoint/command version and
 a rolling-deployment compatibility plan.
@@ -55,6 +56,27 @@ digest covers the exact UTF-8 response body. The body is limited to 5,000 events
 and 16 MiB. Atharvan records an immutable
 `platform.audit.exported` event before releasing the response; the event belongs
 to the next audit snapshot because selection precedes access recording.
+
+### Commercial catalogue contract
+
+`GET /v1/platform/commercial-catalogue` requires `platform:plans:read` and
+returns bounded, environment-scoped products with their current product revision,
+plans, current immutable plan version, and recent version history. The response
+includes `truncated`; each plan includes `historyTruncated`. Clients must display
+these states and cannot infer that omitted records do not exist.
+
+`PUT /v1/platform/commercial-products/{productKey}` and
+`PUT /v1/platform/commercial-products/{productId}/plans/{planKey}` require
+`platform:plans:write`, recent passkey step-up, a reason, and an idempotency key.
+Product changes advance one immutable revision. Plan changes create the next
+immutable version; callers do not supply a version number. Lifecycle transitions
+are forward-only, and an active plan requires an active parent product.
+
+Fixed prices use a safe integer `unitAmountMinor`, an uppercase three-letter ISO
+currency, and `month` or `year`. Free and contract catalogue entries use zero and
+no billing interval. A provider price reference is opaque, bounded metadata and
+never grants provider authority. The command effect, stable pointer, immutable
+version/revision, audit event, and terminal command receipt commit atomically.
 
 `POST /v1/platform/email-recipient-suppressions/{suppressionId}/restore`
 requires `platform:security:write`, the active Super Administrator, recent

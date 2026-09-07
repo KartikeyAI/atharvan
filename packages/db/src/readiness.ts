@@ -6,10 +6,10 @@ import type * as schema from "./schema";
 
 type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-export const currentAtharvanSchemaVersion = 28;
-export const currentAtharvanMigrationTimestamp = "1788582524868";
+export const currentAtharvanSchemaVersion = 29;
+export const currentAtharvanMigrationTimestamp = "1788763869622";
 export const currentAtharvanMigrationHash =
-  "bba5ea2deba31f1ee23a6e2fae92cd011e9709acfb8e65f0de731887b16a29c7";
+  "83475ae71f4f41b7321760e78ac8419f6c1005ff03710bc85c4ef31a994c63b1";
 
 export interface DatabaseReadinessEvidence {
   readonly schemaVersion: number;
@@ -26,10 +26,13 @@ export async function checkPostgresReadiness(
     checkedAt: string;
     retentionTable: boolean;
     retentionGuard: boolean;
+    commercialTable: boolean;
+    commercialGuard: boolean;
     writable: boolean;
     commandPrivileges: boolean;
     retentionPrivileges: boolean;
     cleanupPrivileges: boolean;
+    commercialPrivileges: boolean;
   }>(sql`SELECT
       migration.hash,
       migration.created_at::text AS "createdAt",
@@ -41,10 +44,21 @@ export async function checkPostgresReadiness(
           AND tgname = 'operational_retention_runs_guard'
           AND NOT tgisinternal
       ) AS "retentionGuard",
+      to_regclass('public.commercial_plan_versions') IS NOT NULL AS "commercialTable",
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = to_regclass('public.commercial_plan_versions')
+          AND tgname = 'commercial_plan_versions_immutable'
+          AND NOT tgisinternal
+      ) AS "commercialGuard",
       current_setting('transaction_read_only') = 'off' AS writable,
       has_table_privilege(current_user, 'public.platform_commands', 'SELECT,INSERT,UPDATE') AS "commandPrivileges",
       has_table_privilege(current_user, 'public.operational_retention_runs', 'SELECT,INSERT,UPDATE') AS "retentionPrivileges",
-      has_table_privilege(current_user, 'public.verification_email_deliveries', 'SELECT,DELETE') AS "cleanupPrivileges"
+      has_table_privilege(current_user, 'public.verification_email_deliveries', 'SELECT,DELETE') AS "cleanupPrivileges",
+      has_table_privilege(current_user, 'public.commercial_products', 'SELECT,INSERT,UPDATE')
+        AND has_table_privilege(current_user, 'public.commercial_product_revisions', 'SELECT,INSERT')
+        AND has_table_privilege(current_user, 'public.commercial_plans', 'SELECT,INSERT,UPDATE')
+        AND has_table_privilege(current_user, 'public.commercial_plan_versions', 'SELECT,INSERT') AS "commercialPrivileges"
     FROM atharvan_migrations.history AS migration
     ORDER BY migration.created_at DESC, migration.id DESC
     LIMIT 1`);
@@ -62,13 +76,19 @@ export async function checkPostgresReadiness(
     row.createdAt !== currentAtharvanMigrationTimestamp
   )
     throw new Error("database_migration_head_mismatch");
-  if (!row.retentionTable || !row.retentionGuard)
+  if (
+    !row.retentionTable ||
+    !row.retentionGuard ||
+    !row.commercialTable ||
+    !row.commercialGuard
+  )
     throw new Error("database_schema_sentinel_missing");
   if (
     !row.writable ||
     !row.commandPrivileges ||
     !row.retentionPrivileges ||
-    !row.cleanupPrivileges
+    !row.cleanupPrivileges ||
+    !row.commercialPrivileges
   )
     throw new Error("database_write_authority_unavailable");
   const checkedAt = new Date(row.checkedAt);

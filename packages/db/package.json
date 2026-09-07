@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@atharvan/commercial": "workspace:*",
     "@atharvan/email": "workspace:*",
     "@atharvan/adapters": "workspace:*",
     "@atharvan/auth": "workspace:*",

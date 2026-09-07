@@ -17,6 +17,7 @@ import type {
   CustomerRestrictionRegistry,
   PlatformFeatureFlagRegistry,
   PlatformSecretReferenceRegistry,
+  CommercialCatalogue,
 } from "@atharvan/domain";
 
 export class ApiError extends Error {
@@ -157,6 +158,7 @@ export type PlatformConfigurationResponse = PlatformConfigurationRegistry;
 export type PlatformSecretReferencesResponse = PlatformSecretReferenceRegistry;
 
 export type ModelProviderCatalogueResponse = ModelProviderCatalogue;
+export type CommercialCatalogueResponse = CommercialCatalogue;
 
 export type ModelRoutingOperationsResponse = ModelRoutingOperations;
 

@@ -1,6 +1,10 @@
 import { Pool } from "pg";
 
 const expectedTables = [
+  "commercial_plan_versions",
+  "commercial_plans",
+  "commercial_product_revisions",
+  "commercial_products",
   "operational_alert_deliveries",
   "operational_alert_occurrences",
   "transactional_email_provider_events",
@@ -55,6 +59,15 @@ const expectedTables = [
 ] as const;
 
 const expectedIndexes = [
+  "commercial_plan_versions_number_unique",
+  "commercial_plan_versions_correlation_unique",
+  "commercial_plan_versions_history_idx",
+  "commercial_plan_versions_provider_reference_idx",
+  "commercial_plans_product_key_unique",
+  "commercial_product_revisions_number_unique",
+  "commercial_product_revisions_correlation_unique",
+  "commercial_product_revisions_history_idx",
+  "commercial_products_environment_key_unique",
   "operational_alert_deliveries_transition_unique",
   "operational_alert_deliveries_due_idx",
   "operational_alert_deliveries_history_idx",
@@ -168,6 +181,20 @@ const expectedAuthTriggers = [
 ] as const;
 
 const expectedConstraints = [
+  "commercial_plan_versions_number_positive",
+  "commercial_plan_versions_content_valid",
+  "commercial_plan_versions_pricing_valid",
+  "commercial_plan_versions_currency_valid",
+  "commercial_plan_versions_trial_valid",
+  "commercial_plan_versions_provider_reference_valid",
+  "commercial_plans_key_valid",
+  "commercial_plans_current_version_fk",
+  "commercial_plans_version_positive",
+  "commercial_product_revisions_number_positive",
+  "commercial_product_revisions_content_valid",
+  "commercial_products_key_valid",
+  "commercial_products_current_revision_fk",
+  "commercial_products_revision_positive",
   "operational_alert_deliveries_kind",
   "operational_alert_deliveries_state",
   "operational_alert_deliveries_attempts",
@@ -270,6 +297,10 @@ const forbiddenSecretMaterialColumns = new Set([
 ]);
 
 const expectedTriggers = [
+  "commercial_product_revisions_immutable",
+  "commercial_plan_versions_immutable",
+  "commercial_products_guard",
+  "commercial_plans_guard",
   "operational_alert_deliveries_guard",
   "operational_alert_occurrences_guard",
   "transactional_email_provider_events_immutable",
@@ -309,6 +340,11 @@ const expectedTriggers = [
 ] as const;
 
 const expectedEnumLabels = [
+  "commercial_lifecycle.retired",
+  "commercial_plan_audience.grandfathered",
+  "commercial_pricing_model.contract",
+  "commercial_billing_interval.year",
+  "commercial_tax_behavior.unspecified",
   "model_provider_health_source.scheduled_probe",
   "platform_integration_health_source.scheduled_probe",
 ] as const;
@@ -355,7 +391,7 @@ export async function verifyMigratedContracts(
       "select trigger_name from information_schema.triggers where trigger_schema = 'public'",
     );
     const enumResult = await pool.query<{ typname: string; enumlabel: string }>(
-      "select type.typname, value.enumlabel from pg_type type join pg_enum value on value.enumtypid = type.oid join pg_namespace namespace on namespace.oid = type.typnamespace where namespace.nspname = 'public' and type.typname in ('model_provider_health_source', 'platform_integration_health_source')",
+      "select type.typname, value.enumlabel from pg_type type join pg_enum value on value.enumtypid = type.oid join pg_namespace namespace on namespace.oid = type.typnamespace where namespace.nspname = 'public' and type.typname in ('model_provider_health_source', 'platform_integration_health_source', 'commercial_lifecycle', 'commercial_plan_audience', 'commercial_pricing_model', 'commercial_billing_interval', 'commercial_tax_behavior')",
     );
     const functionResult = await pool.query<{ routine_name: string }>(
       "select routine_name from information_schema.routines where routine_schema = 'public' and routine_name = 'platform_http_health_probe_valid'",

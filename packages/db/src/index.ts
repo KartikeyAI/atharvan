@@ -43,6 +43,7 @@ export { createPostgresPlatformIntegrationRegistryStore } from "./platform-integ
 export { createPostgresPlatformFeatureFlagStore } from "./platform-feature-flag-store";
 export { createPostgresPlatformSecretStore } from "./platform-secret-store";
 export { createPostgresModelCatalogueStore } from "./model-catalogue-store";
+export { createPostgresCommercialCatalogueStore } from "./commercial-catalogue-store";
 export { createPostgresModelRoutingStore } from "./model-routing-store";
 export { createPostgresOperatorSessionPolicyStore } from "./operator-session-policy-store";
 export * as authDatabaseSchema from "./schema";

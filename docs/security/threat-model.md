@@ -1,6 +1,6 @@
-# Atharvan foundation threat model
+# Atharvan platform threat model
 
-Status: Phase 1 implementation baseline. Review after every trust-boundary,
+Status: Platform implementation baseline. Review after every trust-boundary,
 identity, provider, or data-classification change and before a production release.
 
 ## Scope and assets
@@ -24,6 +24,8 @@ approval/recovery processes.
 | Session theft or weak reauthentication       | Browser/API               | Secure Better Auth session, mandatory passkey enrollment, recent passkey step-up for sensitive commands, server-side capability checks            | Reject with `401`/`403`; never trust UI state                       |
 | Privilege escalation                         | Operator policy           | Base-role capabilities, customer-private capability exclusion, single active owner, independent scoped approvals, emergency-grant expiry/review   | Transaction aborts and immutable rejection evidence remains         |
 | Replay or duplicate administrative effects   | Public API/database       | Idempotency key fingerprint, immutable command envelope, atomic effect/result receipt                                                             | Exact retry replays result; changed input conflicts                 |
+| Silent repricing or history rewrite          | Commercial catalogue      | Stable identities, immutable versions, exact next-version pointers, forward-only lifecycle, database update/delete guards                         | Stale or destructive mutation aborts; historical terms remain fixed |
+| Ambiguous price or provider substitution     | Commercial/provider       | Safe integer minor units, pricing-model invariants, bounded opaque provider references, environment isolation                                     | Invalid terms are rejected before persistence                       |
 | Approval substitution or self-approval       | Approval workflow         | Typed scope identity, requester/beneficiary checks, reviewer base-role proof, expiry and atomic consumption                                       | Protected effect does not commit                                    |
 | Lost response after local commit             | Worker/database           | Transactional command receipt committed with the effect                                                                                           | Retry reads the stored terminal response                            |
 | Lost response after external secret mutation | Secrets Store             | Exact provider-name reconciliation and explicit failed lifecycle states                                                                           | Recovery reconciles before creating material again                  |
@@ -64,6 +66,8 @@ approval/recovery processes.
   or restored by a normal operator.
 - Retention cannot remove open work, canonical command/audit/approval evidence,
   or any provider event and delivery chain supporting a recipient suppression.
+- A plan version cannot be edited, deleted, reactivated after retirement, or
+  activated beneath a non-active product.
 
 ## Residual risks and required evidence
 

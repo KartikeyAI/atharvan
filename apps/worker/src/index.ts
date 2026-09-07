@@ -17,6 +17,11 @@ import {
 } from "@atharvan/commands";
 import { PlatformAdapterCommandRejectedError } from "@atharvan/adapters";
 import {
+  CommercialCatalogueCommandRejectedError,
+  type SetCommercialPlanVersionCommand,
+  type SetCommercialProductCommand,
+} from "@atharvan/commercial";
+import {
   parseAuthenticationRuntimeConfig,
   parseRuntimeConfig,
   PlatformConfigurationRejectedError,
@@ -72,6 +77,12 @@ import {
   type ModelProviderAdapterKind,
   type ModelProviderCatalogue,
   type ModelProviderReportedHealth,
+  type CommercialCatalogue,
+  type CommercialBillingInterval,
+  type CommercialLifecycle,
+  type CommercialPlanAudience,
+  type CommercialPricingModel,
+  type CommercialTaxBehavior,
   type ModelRoutingControlState,
   type ModelRoutingControlTargetKind,
   type ModelRoutingDecision,
@@ -263,6 +274,7 @@ export interface AuthenticationRuntime {
     ReadonlyArray<PlatformSecretReferenceEntry>
   >;
   listModelCatalogue(): Promise<ModelProviderCatalogue>;
+  listCommercialCatalogue(): Promise<CommercialCatalogue>;
   listModelRoutingOperations(): Promise<ModelRoutingOperations>;
   listPlatformIntegrations(): Promise<PlatformIntegrationRegistry>;
   listPlatformAdapters(): Promise<PlatformAdapterRegistry>;
@@ -465,6 +477,22 @@ export interface AuthenticationRuntime {
   setModel(
     actor: AuthenticatedOperator,
     input: SetModelCommand & { readonly commandId: string },
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  setCommercialProduct(
+    actor: AuthenticatedOperator,
+    input: SetCommercialProductCommand & { readonly commandId: string },
+  ): Promise<{
+    readonly outcome: "created" | "updated" | "unchanged";
+    readonly id: string;
+    readonly revisionNumber: number;
+  }>;
+  setCommercialPlanVersion(
+    actor: AuthenticatedOperator,
+    input: SetCommercialPlanVersionCommand & { readonly commandId: string },
   ): Promise<{
     readonly outcome: "created" | "updated" | "unchanged";
     readonly id: string;
@@ -2273,6 +2301,77 @@ export function createApp(
     const runtime = await dependencies.resolveAuthenticationRuntime(context);
     return context.json(await runtime.listModelCatalogue());
   });
+
+  app.get("/v1/platform/commercial-catalogue", async (context) => {
+    context.header("cache-control", "no-store");
+    if (
+      !operatorHasCapability(context.get("operator"), "platform:plans:read")
+    ) {
+      return capabilityRequired(context);
+    }
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return context.json(await runtime.listCommercialCatalogue());
+  });
+
+  app.put("/v1/platform/commercial-products/:key", async (context) => {
+    const input = await readJson(context, parseSetCommercialProduct);
+    if (input === null) return invalidRequest(context);
+    const key = context.req.param("key").trim().toLowerCase();
+    const runtime = await dependencies.resolveAuthenticationRuntime(context);
+    return executeCommand(
+      context,
+      runtime,
+      {
+        requiredCapability: "platform:plans:write",
+        name: "commercial.product.set",
+        version: 1,
+        targetType: "commercial_product",
+        targetId: key,
+        payload: input,
+        reason: input.reason,
+      },
+      (commandId) =>
+        runtime.setCommercialProduct(context.get("operator"), {
+          ...input,
+          commandId,
+          key,
+          correlationId: context.get("requestId"),
+        }),
+    );
+  });
+
+  app.put(
+    "/v1/platform/commercial-products/:productId/plans/:key",
+    async (context) => {
+      const input = await readJson(context, parseSetCommercialPlanVersion);
+      const productId = context.req.param("productId").trim().toLowerCase();
+      const key = context.req.param("key").trim().toLowerCase();
+      if (input === null || !uuidPattern.test(productId))
+        return invalidRequest(context);
+      const runtime = await dependencies.resolveAuthenticationRuntime(context);
+      return executeCommand(
+        context,
+        runtime,
+        {
+          requiredCapability: "platform:plans:write",
+          name: "commercial.plan-version.set",
+          version: 1,
+          targetType: "commercial_plan",
+          targetId: `${productId}/${key}`,
+          payload: input,
+          reason: input.reason,
+        },
+        (commandId) =>
+          runtime.setCommercialPlanVersion(context.get("operator"), {
+            ...input,
+            commandId,
+            productId,
+            key,
+            correlationId: context.get("requestId"),
+          }),
+      );
+    },
+  );
 
   app.get("/v1/platform/integrations", async (context) => {
     if (
@@ -4122,6 +4221,101 @@ function parseSetModel(
     : null;
 }
 
+function parseSetCommercialProduct(
+  value: unknown,
+): Omit<SetCommercialProductCommand, "key" | "correlationId"> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const description = readTrimmedString(value.description, 1_000);
+  const reason = readReason(value.reason);
+  return displayName !== null &&
+    description !== null &&
+    reason !== null &&
+    isCommercialLifecycle(value.lifecycle)
+    ? { displayName, description, lifecycle: value.lifecycle, reason }
+    : null;
+}
+
+function parseSetCommercialPlanVersion(
+  value: unknown,
+): Omit<
+  SetCommercialPlanVersionCommand,
+  "productId" | "key" | "correlationId"
+> | null {
+  if (!isRecord(value)) return null;
+  const displayName = readTrimmedString(value.displayName, 120);
+  const description = readTrimmedString(value.description, 1_000);
+  const currency = readTrimmedString(value.currency, 3);
+  const effectiveFrom = readTrimmedString(value.effectiveFrom, 64);
+  const providerPriceReference =
+    value.providerPriceReference === null ||
+    value.providerPriceReference === undefined
+      ? null
+      : readTrimmedString(value.providerPriceReference, 200);
+  const reason = readReason(value.reason);
+  const pricingModel = value.pricingModel;
+  const billingInterval = value.billingInterval;
+  return displayName !== null &&
+    description !== null &&
+    currency !== null &&
+    effectiveFrom !== null &&
+    reason !== null &&
+    (providerPriceReference !== null || value.providerPriceReference == null) &&
+    isCommercialLifecycle(value.lifecycle) &&
+    isCommercialPlanAudience(value.audience) &&
+    isCommercialPricingModel(pricingModel) &&
+    isCommercialBillingInterval(billingInterval) &&
+    isCommercialTaxBehavior(value.taxBehavior) &&
+    typeof value.amountMinor === "number" &&
+    typeof value.trialDays === "number"
+    ? {
+        displayName,
+        description,
+        audience: value.audience,
+        pricingModel,
+        billingInterval,
+        currency,
+        amountMinor: value.amountMinor,
+        taxBehavior: value.taxBehavior,
+        trialDays: value.trialDays,
+        providerPriceReference,
+        lifecycle: value.lifecycle,
+        effectiveFrom,
+        reason,
+      }
+    : null;
+}
+
+function isCommercialLifecycle(value: unknown): value is CommercialLifecycle {
+  return value === "draft" || value === "active" || value === "retired";
+}
+
+function isCommercialPlanAudience(
+  value: unknown,
+): value is CommercialPlanAudience {
+  return value === "public" || value === "private" || value === "grandfathered";
+}
+
+function isCommercialPricingModel(
+  value: unknown,
+): value is CommercialPricingModel {
+  return value === "free" || value === "fixed" || value === "contract";
+}
+
+function isCommercialBillingInterval(
+  value: unknown,
+): value is CommercialBillingInterval {
+  return value === null || value === "month" || value === "year";
+}
+
+function isCommercialTaxBehavior(
+  value: unknown,
+): value is CommercialTaxBehavior {
+  return (
+    value === "exclusive" || value === "inclusive" || value === "unspecified"
+  );
+}
+
 function parseModelProviderHealth(
   value: unknown,
 ): Omit<
@@ -4951,6 +5145,15 @@ function mapCommandError(error: unknown, reason: string, requestId: string) {
       "rejected",
       "model_catalogue_change_rejected",
       "The requested model catalogue change was not accepted.",
+      requestId,
+      error.reason,
+    );
+  if (error instanceof CommercialCatalogueCommandRejectedError)
+    return commandError(
+      409,
+      "rejected",
+      "commercial_catalogue_change_rejected",
+      "The requested product or plan change was not accepted.",
       requestId,
       error.reason,
     );

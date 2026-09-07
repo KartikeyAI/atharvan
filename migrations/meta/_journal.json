@@ -204,6 +204,13 @@
       "when": 1788582524868,
       "tag": "0028_operational_evidence_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788763869622,
+      "tag": "0029_commercial_catalogue",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,8 @@
 # Atharvan Progress
 
-Last updated: 2026-09-05
-Current phase: Safe administrative foundation  
-Overall status: Phase 1 in progress
+Last updated: 2026-09-07
+Current phase: Commercial and execution operations
+Overall status: Phase 2 implementation in progress; Phase 1 certification deferred
 
 Delivery plan: [three-phase production delivery](docs/production-delivery-plan.md).
 Each subsequent execution targets one complete phase with mandatory end-to-end
@@ -18,14 +18,16 @@ adds completion gates and does not mark unfinished work complete.
 - [ ] Phase 3: complete support, security, enterprise/data governance, incident
       operations and production release certification with restore/rollback drills.
 
-Current execution implements Phase 1. A blocked mandatory dependency keeps that phase
-open; fixtures, skipped checks or missing provider credentials cannot certify it.
+Implementation has moved to Phase 2 at the user's direction. Phase 1 remains open
+until its deferred runtime, provider, authenticated browser, and recovery evidence
+is complete; fixtures, skipped checks or missing provider credentials cannot
+certify it.
 
 On 2026-09-04 the user deferred testing and requested implementation first.
 New work is compiled but remains unverified by automated, database, browser and
-provider tests. Migrations `0017_scoped_approvals`,
-`0018_verification_email_outbox`, `0019_arth_command_exchange`, and Arth
-`0060_atharvan_control_exchange` are generated and not applied.
+provider tests. Database migrations through `0029_commercial_catalogue` and Arth
+`0060_atharvan_control_exchange` are generated; later migrations have not been
+applied to the deferred test/development environments.
 The [implementation record](docs/runbooks/phase-one-implementation.md) distinguishes
 implemented controls from remaining Phase 1 delivery work.
 
@@ -149,7 +151,9 @@ An item may be marked complete only when its implementation, tests, operational 
 
 ### Plans, entitlements, and billing
 
-- [ ] Implement products and immutable plan versions.
+- [~] Implement products and immutable plan versions: domain, PostgreSQL guards,
+  protected API, audit/idempotency, and operator console are implemented;
+  database and authenticated browser evidence remain deferred.
 - [ ] Implement entitlement snapshots and custom enterprise grants.
 - [ ] Implement subscriptions and billing-provider reconciliation.
 - [ ] Implement invoices, payments, refunds, disputes, and credits.
@@ -243,6 +247,19 @@ An item may be marked complete only when its implementation, tests, operational 
 - [ ] Operational dashboards and alerts are backed by real telemetry.
 
 ## Decision log
+
+### Immutable commercial catalogue slice — 2026-09-07
+
+- Added environment-scoped products, immutable product revisions, stable plans,
+  and immutable plan versions with exact minor-unit pricing and forward-only
+  lifecycle rules.
+- Added protected catalogue APIs, atomic idempotent command/audit persistence,
+  and an operator workflow for product and plan revision history.
+- Added migration `0029_commercial_catalogue`, readiness sentinels, immutable
+  database triggers, runtime privilege checks, and operating/security contracts.
+- Static type checks and the console production build passed. Stateful database,
+  automated, provider, and authenticated browser verification remain deferred at
+  the user's request.
 
 ### Local development slice — 2026-09-04
 

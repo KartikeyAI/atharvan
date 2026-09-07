@@ -287,6 +287,35 @@ export const modelDataClassification = pgEnum("model_data_classification", [
 
 export const modelKind = pgEnum("model_kind", ["generation", "embedding"]);
 
+export const commercialLifecycle = pgEnum("commercial_lifecycle", [
+  "draft",
+  "active",
+  "retired",
+]);
+
+export const commercialPlanAudience = pgEnum("commercial_plan_audience", [
+  "public",
+  "private",
+  "grandfathered",
+]);
+
+export const commercialPricingModel = pgEnum("commercial_pricing_model", [
+  "free",
+  "fixed",
+  "contract",
+]);
+
+export const commercialBillingInterval = pgEnum("commercial_billing_interval", [
+  "month",
+  "year",
+]);
+
+export const commercialTaxBehavior = pgEnum("commercial_tax_behavior", [
+  "exclusive",
+  "inclusive",
+  "unspecified",
+]);
+
 export const modelProviderHealthStatus = pgEnum(
   "model_provider_health_status",
   ["healthy", "degraded", "unavailable"],
@@ -3533,6 +3562,184 @@ export const transactionalEmailRecipientSuppressions = pgTable(
     check(
       "transactional_email_recipient_suppressions_lifecycle_valid",
       sql`(${table.liftedAt} IS NULL AND ${table.liftedByOperatorId} IS NULL AND ${table.liftReason} IS NULL AND ${table.liftCorrelationId} IS NULL) OR (${table.liftedAt} IS NOT NULL AND ${table.liftedByOperatorId} IS NOT NULL AND length(${table.liftReason}) BETWEEN 8 AND 500 AND ${table.liftCorrelationId} IS NOT NULL AND ${table.liftedAt} >= ${table.createdAt})`,
+    ),
+  ],
+);
+
+export const commercialProducts = pgTable(
+  "commercial_products",
+  {
+    id: uuid("id").primaryKey(),
+    environment: platformConfigurationEnvironment("environment").notNull(),
+    key: text("key").notNull(),
+    currentRevisionNumber: integer("current_revision_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("commercial_products_environment_key_unique").on(
+      table.environment,
+      table.key,
+    ),
+    check(
+      "commercial_products_key_valid",
+      sql`${table.key} ~ '^[a-z][a-z0-9_-]{1,63}$'`,
+    ),
+    check(
+      "commercial_products_revision_positive",
+      sql`${table.currentRevisionNumber} > 0`,
+    ),
+  ],
+);
+
+export const commercialProductRevisions = pgTable(
+  "commercial_product_revisions",
+  {
+    id: uuid("id").primaryKey(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => commercialProducts.id, { onDelete: "restrict" }),
+    revisionNumber: integer("revision_number").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description").notNull(),
+    lifecycle: commercialLifecycle("lifecycle").notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("commercial_product_revisions_number_unique").on(
+      table.productId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("commercial_product_revisions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("commercial_product_revisions_history_idx").on(
+      table.productId,
+      table.createdAt,
+    ),
+    check(
+      "commercial_product_revisions_number_positive",
+      sql`${table.revisionNumber} > 0`,
+    ),
+    check(
+      "commercial_product_revisions_content_valid",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120 AND length(btrim(${table.description})) BETWEEN 8 AND 1000 AND length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+  ],
+);
+
+export const commercialPlans = pgTable(
+  "commercial_plans",
+  {
+    id: uuid("id").primaryKey(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => commercialProducts.id, { onDelete: "restrict" }),
+    key: text("key").notNull(),
+    currentVersionNumber: integer("current_version_number").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("commercial_plans_product_key_unique").on(
+      table.productId,
+      table.key,
+    ),
+    check(
+      "commercial_plans_key_valid",
+      sql`${table.key} ~ '^[a-z][a-z0-9_-]{1,63}$'`,
+    ),
+    check(
+      "commercial_plans_version_positive",
+      sql`${table.currentVersionNumber} > 0`,
+    ),
+  ],
+);
+
+export const commercialPlanVersions = pgTable(
+  "commercial_plan_versions",
+  {
+    id: uuid("id").primaryKey(),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => commercialPlans.id, { onDelete: "restrict" }),
+    versionNumber: integer("version_number").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description").notNull(),
+    audience: commercialPlanAudience("audience").notNull(),
+    pricingModel: commercialPricingModel("pricing_model").notNull(),
+    billingInterval: commercialBillingInterval("billing_interval"),
+    currency: text("currency").notNull(),
+    amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+    taxBehavior: commercialTaxBehavior("tax_behavior").notNull(),
+    trialDays: integer("trial_days").notNull().default(0),
+    providerPriceReference: text("provider_price_reference"),
+    lifecycle: commercialLifecycle("lifecycle").notNull(),
+    effectiveFrom: timestamp("effective_from", {
+      withTimezone: true,
+    }).notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    correlationId: uuid("correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("commercial_plan_versions_number_unique").on(
+      table.planId,
+      table.versionNumber,
+    ),
+    uniqueIndex("commercial_plan_versions_correlation_unique").on(
+      table.correlationId,
+    ),
+    index("commercial_plan_versions_history_idx").on(
+      table.planId,
+      table.versionNumber,
+    ),
+    index("commercial_plan_versions_provider_reference_idx")
+      .on(table.providerPriceReference)
+      .where(sql`${table.providerPriceReference} IS NOT NULL`),
+    check(
+      "commercial_plan_versions_number_positive",
+      sql`${table.versionNumber} > 0`,
+    ),
+    check(
+      "commercial_plan_versions_content_valid",
+      sql`length(btrim(${table.displayName})) BETWEEN 2 AND 120 AND length(btrim(${table.description})) BETWEEN 8 AND 1000 AND length(btrim(${table.reason})) BETWEEN 8 AND 500`,
+    ),
+    check(
+      "commercial_plan_versions_pricing_valid",
+      sql`${table.amountMinor} BETWEEN 0 AND 9000000000000 AND ((${table.pricingModel} = 'free' AND ${table.amountMinor} = 0 AND ${table.billingInterval} IS NULL) OR (${table.pricingModel} = 'fixed' AND ${table.amountMinor} > 0 AND ${table.billingInterval} IS NOT NULL) OR (${table.pricingModel} = 'contract' AND ${table.amountMinor} = 0 AND ${table.billingInterval} IS NULL))`,
+    ),
+    check(
+      "commercial_plan_versions_currency_valid",
+      sql`${table.currency} ~ '^[A-Z]{3}$'`,
+    ),
+    check(
+      "commercial_plan_versions_trial_valid",
+      sql`${table.trialDays} BETWEEN 0 AND 365`,
+    ),
+    check(
+      "commercial_plan_versions_provider_reference_valid",
+      sql`${table.providerPriceReference} IS NULL OR length(btrim(${table.providerPriceReference})) BETWEEN 2 AND 200`,
     ),
   ],
 );

@@ -15,6 +15,7 @@ import {
   createPlatformCommandService,
   createPlatformApprovalService,
 } from "@atharvan/commands";
+import { createCommercialCatalogueService } from "@atharvan/commercial";
 import {
   createPlatformConfigurationAdministrationService,
   parseAuthenticationRuntimeConfig,
@@ -42,6 +43,7 @@ import {
   createPostgresPlatformSecretStore,
   createPostgresModelCatalogueStore,
   createPostgresModelRoutingStore,
+  createPostgresCommercialCatalogueStore,
   createPostgresArthCommandExchange,
   createPostgresOperationalAlertDeliveryStore,
   createPostgresPlatformHealthProbeStore,
@@ -136,6 +138,10 @@ async function createProductionAuthenticationRuntime(input: {
     });
     const modelCatalogueService = createModelCatalogueService({
       store: createPostgresModelCatalogueStore(databaseHandle.database),
+      environment: config.ATHARVAN_ENVIRONMENT,
+    });
+    const commercialCatalogueService = createCommercialCatalogueService({
+      store: createPostgresCommercialCatalogueStore(databaseHandle.database),
       environment: config.ATHARVAN_ENVIRONMENT,
     });
     const modelRoutingService = createModelRoutingService({
@@ -346,6 +352,7 @@ async function createProductionAuthenticationRuntime(input: {
       listPlatformSecretReferences: () =>
         secretLifecycleService.listReferences(),
       listModelCatalogue: () => modelCatalogueService.listCatalogue(),
+      listCommercialCatalogue: () => commercialCatalogueService.listCatalogue(),
       listModelRoutingOperations: () => modelRoutingService.listOperations(),
       listPlatformIntegrations: () => integrationRegistryService.listRegistry(),
       listPlatformAdapters: () => adapterRegistryService.listRegistry(),
@@ -506,6 +513,10 @@ async function createProductionAuthenticationRuntime(input: {
         modelCatalogueService.setProvider({ actor, ...command }),
       setModel: (actor, command) =>
         modelCatalogueService.setModel({ actor, ...command }),
+      setCommercialProduct: (actor, command) =>
+        commercialCatalogueService.setProduct(actor, command),
+      setCommercialPlanVersion: (actor, command) =>
+        commercialCatalogueService.setPlanVersion(actor, command),
       recordModelProviderHealth: (actor, command) =>
         modelCatalogueService.recordHealthObservation({ actor, ...command }),
       setModelRoutingPolicy: (actor, command) =>
